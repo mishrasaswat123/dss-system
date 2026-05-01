@@ -3,8 +3,10 @@ VERSION: MVP-7-D21-STABLE (ADVISORY + NARRATIVE COMPLETE — ZERO REGRESSION)
 */
 
 const express = require("express");
+const fetch = require("node-fetch");
 const app = express();
 app.use(express.json());
+// const { getLiveSignals } = require("../data-engine/liveDataEngine");
 
 const VERSION = "MVP-7-D21-STABLE";
 const DEFAULT_SIGNALS = {
@@ -105,7 +107,10 @@ async function autoFillInputs(body) {
   trend: body.autoTrend
     ? "bullish"
     : body.trend || DEFAULT_SIGNALS.trend,
-  liveData: { crudePrice, vixValue }
+liveData: {
+  crudePrice,
+  vixValue
+}
 };
 }
 
@@ -723,6 +728,10 @@ app.post("/brain-auto", async (req, res) => {
 const body = req.body || {};
 
   const inputs = await autoFillInputs(body);
+  // const liveData = await getLiveSignals();
+
+// inputs.crude = liveData.signals.crude;
+// inputs.vix = liveData.signals.vix;
 
   let { signals, compositeScore } = buildSignals(inputs, "NEUTRAL");
   const regime = getRegime(compositeScore);

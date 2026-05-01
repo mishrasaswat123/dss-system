@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>DSS Brain</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 20px;
+    }
+    h1 { color: #38bdf8; }
+    button {
+      padding: 10px 20px;
+      background: #38bdf8;
+      border: none;
+      color: black;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .card {
+      background: #1e293b;
+      padding: 15px;
+      margin-top: 15px;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>📊 DSS Market Brain</h1>
+
+<button onclick="run()">Run Analysis</button>
+
+<div id="output"></div>
+
+<script>
+const API = "http://51.21.94.67:3000/brain-auto";
+
+async function run() {
+  const res = await fetch(API, { method: "POST" });
+  const data = await res.json();
+
+  document.getElementById("output").innerHTML = `
+    <div class="card">
+      <h2>📈 Regime: ${data.regime}</h2>
+      <p><b>Confidence:</b> ${data.confidence}%</p>
+      <p><b>Market Quality:</b> ${data.marketQuality}</p>
+    </div>
+
+    <div class="card">
+      <h3>🧠 Strategy</h3>
+      <p>${data.strategy.stance}</p>
+    </div>
+
+    <div class="card">
+      <h3>📢 Advisory</h3>
+      <p>${data.advisory.action}</p>
+      <p>${data.advisory.riskNote}</p>
+    </div>
+
+    <div class="card">
+      <h3>📝 Narrative</h3>
+      <p>${data.narrative.marketSummary}</p>
+    </div>
+  `;
+}
+</script>
+
+</body>
+</html>
