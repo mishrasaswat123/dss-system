@@ -2,4 +2,8 @@ node_modules/
 .env
 *.log
 pm2.log
+breeze/
 venv/
+__pycache__/
+*.pyc
+.DS_Store
