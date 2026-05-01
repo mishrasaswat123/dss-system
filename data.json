@@ -1,0 +1,168 @@
+{
+  "evaluations": [
+    {
+      "id": 1777120553337,
+      "time": "2026-04-25T12:35:53.338Z",
+      "inputs": {
+        "portfolio": {
+          "NBFC": 25,
+          "PSU_BANK": 25,
+          "IT": 25,
+          "FMCG": 25
+        }
+      },
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "supportive",
+        "crude": "falling",
+        "fii": "selling"
+      },
+      "output": {
+        "currentPortfolio": {
+          "NBFC": 25,
+          "PSU_BANK": 25,
+          "IT": 25,
+          "FMCG": 25
+        },
+        "targetPortfolio": {
+          "NBFC": 29,
+          "PSU_BANK": 33,
+          "IT": 21,
+          "FMCG": 29
+        },
+        "confidence": "Medium",
+        "horizon": "1–3 Months",
+        "scores": {
+          "NBFC": 1,
+          "PSU_BANK": 2,
+          "IT": -1,
+          "FMCG": 1
+        },
+        "inputsUsed": {
+          "rates": "falling",
+          "liquidity": "supportive",
+          "crude": "falling",
+          "fii": "selling"
+        }
+      },
+      "outcome": {
+        "NBFC_return": -0.5564353206964441,
+        "PSU_BANK_return": -0.4668266610440628,
+        "IT_return": -0.3149244382182679,
+        "FMCG_return": -0.25330441062315545,
+        "evaluated": true
+      },
+      "signalPerformance": {
+        "rates": "wrong",
+        "liquidity": "wrong",
+        "fii": "correct",
+        "crude": "wrong"
+      },
+      "weightsUpdated": true
+    },
+    {
+      "id": 1777121330920,
+      "time": "2026-04-25T12:48:50.920Z",
+      "output": {
+        "currentPortfolio": {
+          "NBFC": 25,
+          "PSU_BANK": 25,
+          "IT": 25,
+          "FMCG": 25
+        },
+        "targetPortfolio": {
+          "NBFC": 20,
+          "PSU_BANK": 35,
+          "IT": 20,
+          "FMCG": 25
+        },
+        "confidence": "Medium",
+        "horizon": "1–3 Months",
+        "scores": {
+          "NBFC": -0.8,
+          "PSU_BANK": 2.4000000000000004,
+          "IT": -1.2,
+          "FMCG": 0.8
+        },
+        "inputsUsed": {
+          "rates": "rising",
+          "liquidity": "supportive",
+          "crude": "neutral",
+          "fii": "selling"
+        }
+      },
+      "outcome": {
+        "NBFC_return": 1.0107705074454696,
+        "PSU_BANK_return": 1.709791348922745,
+        "IT_return": 1.6027730913960232,
+        "FMCG_return": -0.29458312903158923,
+        "evaluated": true
+      },
+      "signalPerformance": {
+        "liquidity": "correct",
+        "rates": "neutral",
+        "fii": "neutral",
+        "crude": "neutral"
+      },
+      "weightsUpdated": true
+    },
+    {
+      "id": 1777121780415,
+      "time": "2026-04-25T12:56:20.415Z",
+      "output": {
+        "targetPortfolio": {
+          "NBFC": 20,
+          "PSU_BANK": 35,
+          "IT": 20,
+          "FMCG": 25
+        },
+        "confidence": "Medium",
+        "horizon": "1–3 Months",
+        "scores": {
+          "NBFC": -0.8,
+          "PSU_BANK": 3,
+          "IT": -1.2,
+          "FMCG": 0.8
+        },
+        "inputsUsed": {
+          "rates": "rising",
+          "liquidity": "supportive",
+          "crude": "neutral",
+          "fii": "selling"
+        }
+      },
+      "outcome": {
+        "NBFC_return": 1.6901633285287492,
+        "PSU_BANK_return": -1.6151926039110114,
+        "IT_return": 1.1596952652545767,
+        "FMCG_return": 1.366695891944068,
+        "evaluated": true
+      },
+      "signalPerformance": {
+        "liquidity": "wrong",
+        "rates": "neutral",
+        "fii": "neutral",
+        "crude": "neutral"
+      },
+      "weightsUpdated": true
+    }
+  ],
+  "signalWeights": {
+    "rates": 0.8,
+    "liquidity": 0.8,
+    "fii": 1.2,
+    "crude": 0.8
+  },
+  "regressionHistory": [
+    {
+      "time": "2026-04-25T12:35:53.368Z",
+      "status": "PASS",
+      "issues": []
+    },
+    {
+      "time": "2026-04-25T12:41:35.612Z",
+      "status": "PASS",
+      "issues": []
+    }
+  ]
+}

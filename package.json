@@ -1,0 +1,21 @@
+{
+  "name": "dss-system",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.15.2",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ioredis": "^5.10.1",
+    "node-fetch": "^2.7.0",
+    "redis": "^5.12.1",
+    "yahoo-finance2": "^3.14.0"
+  }
+}

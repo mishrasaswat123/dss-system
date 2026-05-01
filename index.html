@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Advisor Brain Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0b1b2b;
+      color: #fff;
+    }
+
+    .container {
+      padding: 16px;
+      max-width: 600px;
+      margin: auto;
+    }
+
+    .card {
+      background: #16283c;
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      margin-top: 0;
+      font-size: 18px;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 8px;
+      margin: 5px 5px 0 0;
+      font-size: 14px;
+    }
+
+    .green { background: #1e7e34; }
+    .red { background: #a71d2a; }
+
+    .high { color: #ff4d4d; font-weight: bold; }
+
+    button {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: white;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    .small {
+      font-size: 13px;
+      color: #ccc;
+    }
+
+    .chain {
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .conviction {
+      margin-top: 10px;
+      padding: 10px;
+      background: #0f2233;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+
+<body>
+<div class="container">
+
+  <!-- MARKET THEMES -->
+  <div class="card">
+    <h2>Market Themes</h2>
+    <div class="tag green">Liquidity ↑ Strong</div>
+    <div class="tag red">Interest Rates ↑ Rising</div>
+  </div>
+
+  <!-- WHY PANEL -->
+  <div class="card">
+    <h2>Why this view?</h2>
+    <ul>
+      <li>RBI liquidity remains supportive</li>
+      <li>Crude prices rising → inflation risk</li>
+      <li>FIIs turning net sellers</li>
+    </ul>
+  </div>
+
+  <!-- IMPACT CHAIN -->
+  <div class="card">
+    <h2>Impact Chain</h2>
+    <div class="chain">
+      Interest Rates ↑ → NBFC Margins ↓ → Reduce NBFC exposure<br><br>
+      Interest Rates ↑ → PSU Bank NIM ↑ → Increase PSU Bank allocation
+    </div>
+  </div>
+
+  <!-- CLIENT RISK -->
+  <div class="card">
+    <h2>Client Risk Radar</h2>
+    <div class="high">Risk: HIGH</div>
+    <ul>
+      <li>NBFC exposure high (20%)</li>
+      <li>Rates rising environment</li>
+      <li>Crude pressure building</li>
+    </ul>
+  </div>
+
+  <!-- ADVISOR ACTION -->
+  <div class="card">
+    <h2>Advisor Actions</h2>
+    <ul>
+      <li>✔ Reduce NBFC exposure by 5%</li>
+      <li>✔ Increase PSU Bank allocation</li>
+      <li>✔ Hold IT (INR benefit)</li>
+    </ul>
+
+    <div class="conviction">
+      <strong>Conviction:</strong> HIGH<br>
+      <strong>Horizon:</strong> 3–6 Months<br>
+      <strong>Suitable for:</strong> Moderate Risk Clients
+    </div>
+  </div>
+
+  <!-- CLIENT MESSAGE -->
+  <div class="card">
+    <h2>Client Communication</h2>
+    <p id="message">
+      Given rising interest rates and crude pressure, we recommend reducing NBFC exposure and increasing allocation to PSU banks over the next 3–6 months.
+    </p>
+    <button onclick="copyMessage()">Copy Message</button>
+  </div>
+
+  <!-- WHAT CHANGED -->
+  <div class="card">
+    <h2>What Changed Today</h2>
+    <ul>
+      <li>Crude moved up → Inflation risk</li>
+      <li>FII turned seller</li>
+    </ul>
+  </div>
+
+  <!-- PORTFOLIO -->
+  <div class="card">
+    <h2>Portfolio Snapshot</h2>
+    <p>Banking: 30%</p>
+    <p>NBFC: 20%</p>
+    <p>IT: 15%</p>
+  </div>
+
+</div>
+
+<script>
+function copyMessage() {
+  const text = document.getElementById("message").innerText;
+  navigator.clipboard.writeText(text);
+  alert("Copied to clipboard");
+}
+</script>
+
+</body>
+</html>

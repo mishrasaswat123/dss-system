@@ -1,0 +1,278 @@
+{
+  "signalWeights": {
+    "rates": 1.1300000000000001,
+    "liquidity": 1.1300000000000001,
+    "fii": 1.1300000000000001,
+    "crude": 1.1300000000000001
+  },
+  "lastGoodWeights": {
+    "rates": 1.09,
+    "liquidity": 1.09,
+    "fii": 1.09,
+    "crude": 1.09
+  },
+  "evaluations": [
+    {
+      "id": 1777137431948,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "tight",
+        "crude": "falling",
+        "fii": "buying"
+      },
+      "source": "synthetic",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 30,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.19865353450737921,
+      "signalPerformance": null
+    },
+    {
+      "id": 1777137431984,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "supportive",
+        "crude": "falling",
+        "fii": "selling"
+      },
+      "source": "synthetic",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "outcome": 0.06572889223908107,
+      "signalPerformance": null
+    },
+    {
+      "id": 1777137432020,
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "tight",
+        "crude": "falling",
+        "fii": "selling"
+      },
+      "source": "synthetic",
+      "output": {
+        "NBFC": 30,
+        "PSU_BANK": 30,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "outcome": 0.5384509052867732,
+      "signalPerformance": null
+    },
+    {
+      "id": 1777137432055,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "tight",
+        "crude": "falling",
+        "fii": "buying"
+      },
+      "source": "synthetic",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 30,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.5384544349478972,
+      "signalPerformance": null
+    },
+    {
+      "id": 1777137432088,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "supportive",
+        "crude": "falling",
+        "fii": "selling"
+      },
+      "source": "synthetic",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "outcome": 0.4512534521948459,
+      "signalPerformance": null
+    },
+    {
+      "id": 1777138685711,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "supportive",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.3240988065247643
+    },
+    {
+      "id": 1777138685746,
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "tight",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 30,
+        "PSU_BANK": 30,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.7114220360923025
+    },
+    {
+      "id": 1777138685780,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "supportive",
+        "crude": "neutral",
+        "fii": "selling"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "outcome": 0.9189577301305714
+    },
+    {
+      "id": 1777138685810,
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "tight",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 30,
+        "PSU_BANK": 30,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.018395262230715304
+    },
+    {
+      "id": 1777138685843,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "supportive",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.9469502483557926
+    },
+    {
+      "id": 1777138685875,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "tight",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 30,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.6161881521322166
+    },
+    {
+      "id": 1777138685907,
+      "inputsUsed": {
+        "rates": "rising",
+        "liquidity": "supportive",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.06372053956102008
+    },
+    {
+      "id": 1777138685939,
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "tight",
+        "crude": "neutral",
+        "fii": "selling"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 30,
+        "PSU_BANK": 30,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "outcome": 0.0004932012761638127
+    },
+    {
+      "id": 1777138685970,
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "supportive",
+        "crude": "neutral",
+        "fii": "selling"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 30,
+        "PSU_BANK": 25,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "outcome": 0.4061580078849858
+    },
+    {
+      "id": 1777138686002,
+      "inputsUsed": {
+        "rates": "falling",
+        "liquidity": "tight",
+        "crude": "neutral",
+        "fii": "buying"
+      },
+      "source": "real",
+      "output": {
+        "NBFC": 30,
+        "PSU_BANK": 30,
+        "IT": 30,
+        "FMCG": 25
+      },
+      "outcome": 0.8800808701842233
+    }
+  ],
+  "breezeSession": "XXXX",
+  "lastAccuracy": 0.25902166207650623
+}

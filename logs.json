@@ -1,0 +1,70 @@
+[
+  {
+    "id": 1777088323581,
+    "time": "2026-04-25T03:38:43.581Z",
+    "evaluationTime": "2026-04-25T03:40:43.581Z",
+    "evaluationSnapshotId": 1777088812428,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "neutral",
+      "fii": "selling",
+      "portfolio": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 25,
+        "FMCG": 25
+      }
+    },
+    "output": {
+      "currentPortfolio": {
+        "NBFC": 25,
+        "PSU_BANK": 25,
+        "IT": 25,
+        "FMCG": 25
+      },
+      "targetPortfolio": {
+        "NBFC": 18,
+        "PSU_BANK": 36,
+        "IT": 18,
+        "FMCG": 27
+      },
+      "confidence": "Medium",
+      "horizon": "1–3 Months",
+      "reasons": [
+        "Rising rates hurt NBFC margins, benefit banks",
+        "Liquidity support boosts credit growth",
+        "Falling crude supports consumption",
+        "FII selling creates market pressure"
+      ],
+      "scores": {
+        "NBFC": -1,
+        "PSU_BANK": 3,
+        "IT": -1,
+        "FMCG": 1
+      },
+      "rebalance": [
+        "Increase PSU Banks exposure",
+        "Reduce NBFC exposure"
+      ],
+      "bias": {
+        "NBFC": "Neutral",
+        "PSU_BANK": "Overweight",
+        "IT": "Neutral",
+        "FMCG": "Neutral"
+      },
+      "conviction": "Building",
+      "insight": "Banking bias supported by macro tailwinds",
+      "risk_to_view": [
+        "Rate cycle reversal could weaken banking thesis"
+      ]
+    },
+    "outcome": {
+      "NBFC_return": null,
+      "PSU_BANK_return": null,
+      "IT_return": null,
+      "FMCG_return": null,
+      "evaluated": false
+    }
+  }
+]

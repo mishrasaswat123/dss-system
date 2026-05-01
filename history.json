@@ -1,0 +1,920 @@
+[
+  {
+    "timestamp": 1777227041792,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20442.690650544388,
+    "niftyEnd": 20025.901292523882,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777227243510,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20442.690650544388,
+    "niftyEnd": 20025.901292523882,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777227266431,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20025.901292523882,
+    "niftyEnd": 20284.820811707144,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777227478941,
+    "evaluationTime": 1777227778941,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20284.820811707144,
+    "niftyEnd": 20072.144272771813,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777231021434,
+    "evaluationTime": 1777231321434,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20072.144272771813,
+    "niftyEnd": 20045.498531244448,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777231040274,
+    "evaluationTime": 1777231340274,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20054.16838164453,
+    "niftyEnd": 20045.498531244448,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777232369184,
+    "evaluationTime": 1777232669184,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "signals": {
+      "rates": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "supportive",
+        "score": 1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "buying",
+        "score": 1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "low",
+        "score": 1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "bullish",
+        "score": 1,
+        "weight": 0.05
+      }
+    },
+    "regime": "STRONG RISK ON",
+    "theme": "LIQUIDITY DRIVEN RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20045.498531244448,
+    "niftyEnd": 20497.900845241944,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777233074491,
+    "evaluationTime": 1777233374491,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "signals": {
+      "rates": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "supportive",
+        "score": 1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "buying",
+        "score": 1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "low",
+        "score": 1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "bullish",
+        "score": 1,
+        "weight": 0.05
+      }
+    },
+    "regime": "STRONG RISK ON",
+    "theme": "LIQUIDITY DRIVEN RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20497.900845241944,
+    "niftyEnd": 20352.088901603573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233085123,
+    "evaluationTime": 1777233385123,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "tight",
+      "crude": "rising",
+      "fii": "selling",
+      "vix": "high"
+    },
+    "signals": {
+      "rates": {
+        "value": "rising",
+        "score": -1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "tight",
+        "score": -1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "rising",
+        "score": -1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "selling",
+        "score": -1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "high",
+        "score": -1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "neutral",
+        "score": 0,
+        "weight": 0.05
+      }
+    },
+    "regime": "STRONG RISK OFF",
+    "theme": "DEFENSIVE RISK OFF",
+    "score": 8,
+    "confidence": 83,
+    "output": {
+      "NBFC": 15,
+      "PSU_BANK": 5,
+      "IT": 20,
+      "FMCG": 60
+    },
+    "niftyStart": 20043.58255227163,
+    "niftyEnd": 20352.088901603573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233095198,
+    "evaluationTime": 1777233395198,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "high"
+    },
+    "signals": {
+      "rates": {
+        "value": "rising",
+        "score": -1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "supportive",
+        "score": 1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "buying",
+        "score": 1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "high",
+        "score": -1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "neutral",
+        "score": 0,
+        "weight": 0.05
+      }
+    },
+    "regime": "NEUTRAL",
+    "theme": "TRANSITIONAL MARKET",
+    "score": 63,
+    "confidence": 50,
+    "output": {
+      "NBFC": 25,
+      "PSU_BANK": 25,
+      "IT": 25,
+      "FMCG": 25
+    },
+    "niftyStart": 20448.221445711602,
+    "niftyEnd": 20352.088901603573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233198905,
+    "evaluationTime": 1777233498905,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "signals": {
+      "rates": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "supportive",
+        "score": 1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "buying",
+        "score": 1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "low",
+        "score": 1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "bullish",
+        "score": 1,
+        "weight": 0.05
+      }
+    },
+    "regime": "STRONG RISK ON",
+    "theme": "LIQUIDITY DRIVEN RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20439.971773924648,
+    "niftyEnd": 20352.088901603573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233210613,
+    "evaluationTime": 1777233510613,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "tight",
+      "crude": "rising",
+      "fii": "selling",
+      "vix": "high"
+    },
+    "signals": {
+      "rates": {
+        "value": "rising",
+        "score": -1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "tight",
+        "score": -1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "rising",
+        "score": -1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "selling",
+        "score": -1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "high",
+        "score": -1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "neutral",
+        "score": 0,
+        "weight": 0.05
+      }
+    },
+    "regime": "STRONG RISK OFF",
+    "theme": "DEFENSIVE RISK OFF",
+    "score": 8,
+    "confidence": 83,
+    "output": {
+      "NBFC": 15,
+      "PSU_BANK": 5,
+      "IT": 20,
+      "FMCG": 60
+    },
+    "niftyStart": 20420.70958668246,
+    "niftyEnd": 20352.088901603573,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777233221945,
+    "evaluationTime": 1777233521945,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "high"
+    },
+    "signals": {
+      "rates": {
+        "value": "rising",
+        "score": -1,
+        "weight": 0.15
+      },
+      "liquidity": {
+        "value": "supportive",
+        "score": 1,
+        "weight": 0.2
+      },
+      "crude": {
+        "value": "falling",
+        "score": 1,
+        "weight": 0.15
+      },
+      "fii": {
+        "value": "buying",
+        "score": 1,
+        "weight": 0.2
+      },
+      "vix": {
+        "value": "high",
+        "score": -1,
+        "weight": 0.15
+      },
+      "trend": {
+        "value": "neutral",
+        "score": 0,
+        "weight": 0.05
+      }
+    },
+    "regime": "NEUTRAL",
+    "theme": "TRANSITIONAL MARKET",
+    "score": 63,
+    "confidence": 50,
+    "output": {
+      "NBFC": 25,
+      "PSU_BANK": 25,
+      "IT": 25,
+      "FMCG": 25
+    },
+    "niftyStart": 20430.94591159344,
+    "niftyEnd": 20352.088901603573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233552564,
+    "evaluationTime": 1777233852564,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20352.088901603573,
+    "niftyEnd": 20198.398544193573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233561646,
+    "evaluationTime": 1777233861646,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "tight",
+      "crude": "rising",
+      "fii": "selling",
+      "vix": "high"
+    },
+    "regime": "STRONG RISK OFF",
+    "score": 8,
+    "confidence": 83,
+    "output": {
+      "NBFC": 15,
+      "PSU_BANK": 5,
+      "IT": 20,
+      "FMCG": 60
+    },
+    "niftyStart": 20220.50822816988,
+    "niftyEnd": 20198.398544193573,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777233569400,
+    "evaluationTime": 1777233869400,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "high"
+    },
+    "regime": "NEUTRAL",
+    "score": 63,
+    "confidence": 50,
+    "output": {
+      "NBFC": 25,
+      "PSU_BANK": 25,
+      "IT": 25,
+      "FMCG": 25
+    },
+    "niftyStart": 20205.43859709625,
+    "niftyEnd": 20198.398544193573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777233669294,
+    "evaluationTime": 1777233969294,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20371.037315369045,
+    "niftyEnd": 20198.398544193573,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777234053641,
+    "evaluationTime": 1777234353641,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 80,
+    "confidence": 83,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20198.398544193573,
+    "niftyEnd": 20127.177528895296,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777234318553,
+    "evaluationTime": 1777234618553,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20353.195395306608,
+    "niftyEnd": 20002.336370073746,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777234321080,
+    "evaluationTime": 1777234621080,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20092.121703760327,
+    "niftyEnd": 20002.336370073746,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777234323990,
+    "evaluationTime": 1777234623990,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20357.52933236116,
+    "niftyEnd": 20002.336370073746,
+    "result": "wrong"
+  },
+  {
+    "timestamp": 1777234419065,
+    "evaluationTime": 1777234719065,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20127.177528895296,
+    "niftyEnd": 20409.462385538078,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777234443260,
+    "evaluationTime": 1777234743260,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20402.680612199045,
+    "niftyEnd": 20409.462385538078,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777234680834,
+    "evaluationTime": 1777234980834,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "rising",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "RISK ON",
+    "score": 65,
+    "confidence": 67,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20002.336370073746,
+    "niftyEnd": 20409.462385538078,
+    "result": "correct"
+  },
+  {
+    "timestamp": 1777235247648,
+    "evaluationTime": 1777235547648,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "RISK ON",
+    "score": 80,
+    "confidence": 83,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20409.462385538078,
+    "niftyEnd": null,
+    "result": null
+  },
+  {
+    "timestamp": 1777235253440,
+    "evaluationTime": 1777235553440,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 80,
+    "confidence": 83,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20047.494775169518,
+    "niftyEnd": null,
+    "result": null
+  },
+  {
+    "timestamp": 1777235269930,
+    "evaluationTime": 1777235569930,
+    "inputs": {
+      "rates": "falling",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "STRONG RISK ON",
+    "score": 95,
+    "confidence": 100,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20455.425541578345,
+    "niftyEnd": null,
+    "result": null
+  },
+  {
+    "timestamp": 1777235294363,
+    "evaluationTime": 1777235594363,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "trend": "bullish"
+    },
+    "regime": "RISK ON",
+    "score": 80,
+    "confidence": 83,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20325.56967142196,
+    "niftyEnd": null,
+    "result": null
+  },
+  {
+    "timestamp": 1777235317994,
+    "evaluationTime": 1777235617994,
+    "inputs": {
+      "rates": "rising",
+      "liquidity": "supportive",
+      "crude": "falling",
+      "fii": "buying",
+      "vix": "low",
+      "autoTrend": true
+    },
+    "regime": "RISK ON",
+    "score": 80,
+    "confidence": 83,
+    "output": {
+      "NBFC": 28,
+      "PSU_BANK": 38,
+      "IT": 24,
+      "FMCG": 10
+    },
+    "niftyStart": 20044.79716705923,
+    "niftyEnd": null,
+    "result": null
+  }
+]
