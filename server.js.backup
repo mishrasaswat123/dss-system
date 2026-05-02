@@ -4,7 +4,6 @@ VERSION: MVP-7-D21-STABLE (ADVISORY + NARRATIVE COMPLETE — ZERO REGRESSION)
 
 const express = require("express");
 const fetch = require("node-fetch");
-const fs = require("fs");
 const app = express();
 app.use(express.json());
 // const { getLiveSignals } = require("../data-engine/liveDataEngine");
@@ -19,45 +18,6 @@ const DEFAULT_SIGNALS = {
   trend: "neutral"
 };
 const RELEASE_TAG = "D21-STABLE-BASELINE";
-
-/* ==============================
-   V7 — MEMORY ENGINE (PERSISTENT)
-============================== */
-
-const path = require("path");
-const MEMORY_FILE = path.join(__dirname, "memory.json");
-
-function loadMemory() {
-  try {
-    const data = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf-8"));
-
-    return {
-      decisions: data.decisions || [],
-      regimeHistory: data.regimeHistory || [],
-      accuracy: data.accuracy || {
-        total: 0,
-        correct: 0,
-        pnlSeries: []
-      }
-    };
-  } catch {
-    return {
-      decisions: [],
-      regimeHistory: [],
-      accuracy: {
-        total: 0,
-        correct: 0,
-        pnlSeries: []
-      }
-    };
-  }
-}
-
-function saveMemory(mem) {
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2), "utf-8");
-}
-
-let MEMORY = loadMemory();
 
 /* =========================
    EXISTING STATE (UNCHANGED)
@@ -107,12 +67,12 @@ async function safeFetch(url, timeout = 2000) {
 }
 
 async function fetchCrude() {
-  const data = await safeFetch("https://api.api-ninjas.com/v1/commodities?name=crude_oil") || [];
+  const data = await safeFetch("https://api.api-ninjas.com/v1/commodities?name=crude_oil");
   return data?.[0]?.price || null;
 }
 
 async function fetchVix() {
-  const data = await safeFetch("https://query1.finance.yahoo.com/v7/finance/quote?symbols=%5EVIX") || {};
+  const data = await safeFetch("https://query1.finance.yahoo.com/v7/finance/quote?symbols=%5EVIX");
   return data?.quoteResponse?.result?.[0]?.regularMarketPrice || null;
 }
 
@@ -747,81 +707,6 @@ return {
   summary
 };
 }
-/* ==============================
-   V7 — ANALYTICS ENGINE
-============================== */
-
-function logDecision(snapshot) {
-  MEMORY.decisions.push(snapshot);
-  if (MEMORY.decisions.length > 100) MEMORY.decisions.shift();
-}
-
-function detectRegimeTransition(currentRegime) {
-const history = MEMORY.regimeHistory || [];
-const prev = history.slice(-1)[0];
-  let transition = null;
-
-  if (prev && prev.regime !== currentRegime) {
-    transition = {
-      from: prev.regime,
-      to: currentRegime,
-      ts: Date.now()
-    };
-  }
-
-  MEMORY.regimeHistory.push({
-    regime: currentRegime,
-    ts: Date.now()
-  });
-
-  if (MEMORY.regimeHistory.length > 200) MEMORY.regimeHistory.shift();
-
-  return transition;
-}
-
-function computeDiff(currentSignals) {
-  const prev = (MEMORY.decisions || []).slice(-1)[0];
-  if (!prev) return null;
-
-  const diff = [];
-
-  for (let key in currentSignals) {
-    const prevVal = prev.signals?.[key]?.value;
-    const currVal = currentSignals[key].value;
-
-    if (prevVal !== currVal) {
-      diff.push({
-        signal: key,
-        from: prevVal,
-        to: currVal
-      });
-    }
-  }
-
-  return diff;
-}
-
-function updateAccuracy(tradeDecision, compositeScore) {
-  const last = (MEMORY.decisions || []).slice(-1)[0];
-  if (!last) return;
-
-  MEMORY.accuracy.total++;
-
-  let correct = false;
-
-  if (last.action === "BUY" && compositeScore > last.score) correct = true;
-  if (last.action === "SELL" && compositeScore < last.score) correct = true;
-
-  if (correct) MEMORY.accuracy.correct++;
-
-  MEMORY.accuracy.pnlSeries.push({
-    ts: Date.now(),
-    pnl: compositeScore - last.score
-  });
-
-  if (MEMORY.accuracy.pnlSeries.length > 200)
-    MEMORY.accuracy.pnlSeries.shift();
-}
 /* =========================
    CALLBACK (BREEZE SESSION — FIXED ABSOLUTE PATH)
 ========================= */
@@ -929,25 +814,6 @@ const narrative = buildNarrative({
   interpretation,
   advisory
 });
-/* ==============================
-   V7 EXECUTION (CORRECT PLACE)
-============================== */
-
-const v7_transition = detectRegimeTransition(regime);
-const v7_diff = computeDiff(signals);
-
-updateAccuracy(tradeDecision, compositeScore);
-
-logDecision({
-  ts: Date.now(),
-  regime,
-  score: compositeScore,
-  action: tradeDecision.action,
-  allocation: tradeDecision.allocation,
-  signals
-});
-
-saveMemory(MEMORY);
 
   res.json({
     version: VERSION,
@@ -967,22 +833,8 @@ saveMemory(MEMORY);
     risk,
     interpretation,
     advisory,
-    narrative,
-
-  v7: {
-    transition: v7_transition,
-    diff: v7_diff,
-    accuracy: {
-      hitRate: MEMORY.accuracy.total
-        ? Math.round((MEMORY.accuracy.correct / MEMORY.accuracy.total) * 100)
-        : 0,
-      total: MEMORY.accuracy.total
-    },
-    history: (MEMORY.regimeHistory || []).slice(-20),
-lastDecisions: (MEMORY.decisions || []).slice(-10)
-}
-
-});
+    narrative
+  });
 
 });
 
