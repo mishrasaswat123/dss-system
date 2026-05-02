@@ -113,63 +113,6 @@
           "strength": "strong"
         }
       }
-    },
-    {
-      "ts": 1777722540227,
-      "regime": "RISK OFF",
-      "score": 45,
-      "action": "SELL",
-      "allocation": "60%",
-      "signals": {
-        "rates": {
-          "value": "neutral",
-          "score": -1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "liquidity": {
-          "value": "supportive",
-          "score": 1,
-          "weight": 0.22000000000000003,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "crude": {
-          "value": "falling",
-          "score": 1,
-          "weight": 0.15,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "fii": {
-          "value": "buying",
-          "score": 1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "vix": {
-          "value": "low",
-          "score": 1,
-          "weight": 0.165,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "trend": {
-          "value": "neutral",
-          "score": -1,
-          "weight": 0.09000000000000001,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        }
-      }
     }
   ],
   "regimeHistory": [
@@ -182,63 +125,16 @@
       "regime": "RISK OFF",
       "score": 45,
       "ts": 1777720760109
-    },
-    {
-      "regime": "RISK OFF",
-      "score": 45,
-      "ts": 1777722540227
     }
   ],
   "accuracy": {
-    "total": 2,
+    "total": 1,
     "correct": 0,
     "pnlSeries": [
       {
         "ts": 1777720760109,
         "pnl": 0
-      },
-      {
-        "ts": 1777722540227,
-        "pnl": 0
       }
     ]
-  },
-  "signalsHistory": [
-    {
-      "ts": 1777722540227,
-      "signals": {
-        "rates": -1,
-        "liquidity": 1,
-        "crude": 1,
-        "fii": 1,
-        "vix": 1,
-        "trend": -1
-      },
-      "compositeScore": 45,
-      "regime": "RISK OFF",
-      "confidence": 67
-    }
-  ],
-  "alerts": [],
-  "lastSnapshot": {
-    "ts": 1777722540227,
-    "signals": {
-      "rates": -1,
-      "liquidity": 1,
-      "crude": 1,
-      "fii": 1,
-      "vix": 1,
-      "trend": -1
-    },
-    "compositeScore": 45,
-    "regime": "RISK OFF",
-    "confidence": 67
-  },
-  "v8_regimeHistory": [
-    {
-      "regime": "RISK OFF",
-      "score": 45,
-      "ts": 1777722540227
-    }
-  ]
+  }
 }

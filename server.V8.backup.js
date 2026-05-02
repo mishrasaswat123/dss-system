@@ -9,7 +9,7 @@ const app = express();
 app.use(express.json());
 // const { getLiveSignals } = require("../data-engine/liveDataEngine");
 
-const VERSION = "MVP-8-D22-SIGNAL-PERSISTENCE";
+const VERSION = "MVP-7-D21-STABLE";
 const DEFAULT_SIGNALS = {
   rates: "neutral",
   crude: "falling",
@@ -58,11 +58,6 @@ function saveMemory(mem) {
 }
 
 let MEMORY = loadMemory();
-// ===== V8 MEMORY INIT =====
-if (!MEMORY.signalsHistory) MEMORY.signalsHistory = [];
-if (!MEMORY.regimeHistory) MEMORY.regimeHistory = [];
-if (!MEMORY.alerts) MEMORY.alerts = [];
-if (!MEMORY.lastSnapshot) MEMORY.lastSnapshot = null;
 
 /* =========================
    EXISTING STATE (UNCHANGED)
@@ -873,93 +868,6 @@ const body = req.body || {};
   const risk = computeRisk(portfolioStateData);
 
   const now = Date.now();
-// ===== V8 SNAPSHOT =====
-const currentSnapshot = {
-  ts: now,
-  signals: Object.fromEntries(
-    Object.entries(signals).map(([k, v]) => [k, v.score])
-  ),
-  compositeScore,
-  regime,
-  confidence
-};
-// ===== V8 SIGNAL CHANGES =====
-let signalChanges = [];
-
-if (MEMORY.lastSnapshot && MEMORY.lastSnapshot.signals) {
-  for (const key of Object.keys(currentSnapshot.signals)) {
-    const prev = MEMORY.lastSnapshot.signals[key];
-    const curr = currentSnapshot.signals[key];
-
-    if (prev !== curr) {
-      signalChanges.push({
-        signal: key,
-        from: prev,
-        to: curr
-      });
-    }
-  }
-}
-// ===== V8 REGIME TRANSITION =====
-let regimeTransition = null;
-
-if (MEMORY.lastSnapshot && MEMORY.lastSnapshot.regime !== regime) {
-  regimeTransition = {
-    from: MEMORY.lastSnapshot.regime,
-    to: regime,
-    ts: now
-  };
-
-  MEMORY.alerts.push({
-    type: "REGIME_CHANGE",
-    message: `Market shifted from ${MEMORY.lastSnapshot.regime} → ${regime}`,
-    severity: "HIGH",
-    ts: now
-  });
-if (MEMORY.alerts.length > 200) {
-  MEMORY.alerts.shift();
-}
-}
-// ===== V8 SIGNAL ALERTS =====
-signalChanges.forEach(change => {
-  MEMORY.alerts.push({
-    type: "SIGNAL_CHANGE",
-    message: `${change.signal} changed from ${change.from} → ${change.to}`,
-    severity: "MEDIUM",
-    ts: now
-  });
-
-  if (MEMORY.alerts.length > 200) {
-    MEMORY.alerts.shift();
-  }
-});
-// ===== V8 HISTORY =====
-MEMORY.signalsHistory.push(currentSnapshot);
-MEMORY.v8_regimeHistory = MEMORY.v8_regimeHistory || [];
-
-MEMORY.v8_regimeHistory.push({
-  regime,
-  score: compositeScore,
-  ts: now
-});
-
-if (MEMORY.v8_regimeHistory.length > 100)
-  MEMORY.v8_regimeHistory.shift();
-
-// limit size
-if (MEMORY.signalsHistory.length > 100) MEMORY.signalsHistory.shift();
-
-// update snapshot
-MEMORY.lastSnapshot = currentSnapshot;
-// ===== V8 TREND =====
-const last10 = MEMORY.signalsHistory.slice(-10);
-
-const trend = {
-  score: last10.map(x => x.compositeScore),
-  confidence: last10.map(x => x.confidence),
-  timestamps: last10.map(x => x.ts)
-};
-
   regimeHistory.push({ ts: now, regime, score: compositeScore });
   if (regimeHistory.length > 20) regimeHistory.shift();
 
@@ -1061,12 +969,7 @@ saveMemory(MEMORY);
     interpretation,
     advisory,
     narrative,
-v8: {
-  signalChanges,
-  regimeTransition,
-  alerts: MEMORY.alerts.slice(-10),
-  trend
-},
+
   v7: {
     transition: v7_transition,
     diff: v7_diff,
