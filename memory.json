@@ -1,64 +1,7 @@
 {
   "decisions": [
     {
-      "ts": 1777706336938,
-      "regime": "RISK OFF",
-      "score": 45,
-      "action": "SELL",
-      "allocation": "60%",
-      "signals": {
-        "rates": {
-          "value": "neutral",
-          "score": -1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "liquidity": {
-          "value": "supportive",
-          "score": 1,
-          "weight": 0.22000000000000003,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "crude": {
-          "value": "falling",
-          "score": 1,
-          "weight": 0.15,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "fii": {
-          "value": "buying",
-          "score": 1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "vix": {
-          "value": "low",
-          "score": 1,
-          "weight": 0.165,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "trend": {
-          "value": "neutral",
-          "score": -1,
-          "weight": 0.09000000000000001,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        }
-      }
-    },
-    {
-      "ts": 1777707979057,
+      "ts": 1777719794685,
       "regime": "RISK OFF",
       "score": 45,
       "action": "SELL",
@@ -118,21 +61,13 @@
   "regimeHistory": [
     {
       "regime": "RISK OFF",
-      "ts": 1777706336938
-    },
-    {
-      "regime": "RISK OFF",
-      "ts": 1777707979057
+      "score": 45,
+      "ts": 1777719794685
     }
   ],
   "accuracy": {
-    "total": 1,
+    "total": 0,
     "correct": 0,
-    "pnlSeries": [
-      {
-        "ts": 1777707979057,
-        "pnl": 0
-      }
-    ]
+    "pnlSeries": []
   }
 }

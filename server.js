@@ -756,7 +756,7 @@ function logDecision(snapshot) {
   if (MEMORY.decisions.length > 100) MEMORY.decisions.shift();
 }
 
-function detectRegimeTransition(currentRegime) {
+function detectRegimeTransition(currentRegime, compositeScore) {
 const history = MEMORY.regimeHistory || [];
 const prev = history.slice(-1)[0];
   let transition = null;
@@ -769,10 +769,11 @@ const prev = history.slice(-1)[0];
     };
   }
 
-  MEMORY.regimeHistory.push({
-    regime: currentRegime,
-    ts: Date.now()
-  });
+MEMORY.regimeHistory.push({
+  regime: currentRegime,
+  score: compositeScore,   // ✅ CRITICAL FIX
+  ts: Date.now()
+});
 
   if (MEMORY.regimeHistory.length > 200) MEMORY.regimeHistory.shift();
 
@@ -933,7 +934,7 @@ const narrative = buildNarrative({
    V7 EXECUTION (CORRECT PLACE)
 ============================== */
 
-const v7_transition = detectRegimeTransition(regime);
+const v7_transition = detectRegimeTransition(regime, compositeScore);
 const v7_diff = computeDiff(signals);
 
 updateAccuracy(tradeDecision, compositeScore);
