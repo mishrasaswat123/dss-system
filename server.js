@@ -210,6 +210,16 @@ let portfolioState = {
   lastUpdate: null
 };
 
+// ==============================
+// D27 RISK ENGINE STATE
+// ==============================
+let riskState = {
+  peakPnL: 0,
+  currentDrawdown: 0,
+  killSwitch: false,
+  lastTrigger: null
+};
+
 let signalReliability = {
   rates: 1,
   liquidity: 1,
@@ -827,6 +837,71 @@ function updatePortfolioState(tradeDecision, compositeScore) {
   return portfolioState;
 }
 
+// ==============================
+// D27 RISK ENGINE
+// ==============================
+
+function updateDrawdown(portfolioState) {
+  const pnl = portfolioState.totalPnL;
+
+  if (pnl > riskState.peakPnL) {
+    riskState.peakPnL = pnl;
+  }
+
+  const drawdown = riskState.peakPnL !== 0
+  ? ((riskState.peakPnL - pnl) / Math.abs(riskState.peakPnL)) * 100
+  : 0;
+  riskState.currentDrawdown = drawdown;
+
+  return drawdown;
+}
+
+// Reset logic (IMPORTANT)
+riskState.killSwitch = false;
+
+function evaluateKillSwitch(drawdown, signals, regime) {
+  if (drawdown >= 20) {
+    riskState.killSwitch = true;
+  }
+
+  if (signals.vix?.score === -1 && regime.includes("RISK OFF")) {
+    riskState.killSwitch = true;
+  }
+
+  const negativeSignals = Object.values(signals).filter(s => s.score === -1).length;
+  if (negativeSignals >= 4) {
+    riskState.killSwitch = true;
+  }
+
+  if (riskState.killSwitch) {
+    riskState.lastTrigger = Date.now();
+  }
+
+  return riskState.killSwitch;
+}
+
+function applyRiskCaps(allocation, confidence, marketQuality, drawdown) {
+  let cap = 90;
+
+  if (confidence < 65) cap = Math.min(cap, 70);
+  if (confidence < 55) cap = Math.min(cap, 60);
+
+  if (marketQuality === "WEAK") cap = Math.min(cap, 30);
+
+  if (drawdown >= 10) cap = Math.min(cap, 50);
+  if (drawdown >= 15) cap = Math.min(cap, 30);
+  if (drawdown >= 20) cap = Math.min(cap, 10);
+
+  return Math.min(allocation, cap);
+}
+
+function applyVolatilityAdjustment(allocation, signals) {
+  if (signals.vix?.score === -1) {
+    return Math.round(allocation * 0.7);
+  }
+  return allocation;
+}
+
 function computeRisk(portfolio) {
   let exposure = portfolio.activePositions.reduce((sum, p) => sum + p.allocation, 0);
 
@@ -1372,12 +1447,53 @@ if (regime === "STRONG RISK ON") {
   const strategy = buildStrategy(regime, confidence, marketQuality, sectorAllocation);
   const explanation = buildExplanation(signals);
   const tradeDecision = buildTradeDecision(regime, confidence, marketQuality, intelligence, signals);
-  const portfolio = buildPortfolio(regime, strategy, sectorAllocation, tradeDecision);
-
+ 
   updateSignalReliability(signals);
 
   const portfolioStateData = updatePortfolioState(tradeDecision, compositeScore);
-  const risk = computeRisk(portfolioStateData);
+  // ==============================
+// D27 RISK PIPELINE
+// ==============================
+
+const drawdown = updateDrawdown(portfolioStateData);
+
+const killSwitch = evaluateKillSwitch(drawdown, signals, regime);
+
+// Start with computed allocation
+let finalAllocation = parseInt(tradeDecision.allocation);
+
+// Apply volatility adjustment
+finalAllocation = applyVolatilityAdjustment(finalAllocation, signals);
+
+// Apply caps
+finalAllocation = applyRiskCaps(finalAllocation, confidence, marketQuality, drawdown);
+
+// Kill switch override
+if (killSwitch) {
+  finalAllocation = 0;
+  tradeDecision.action = "SELL";
+}
+
+// Update trade decision
+tradeDecision.allocation = finalAllocation + "%";
+
+// Final risk output
+const risk = {
+  exposure: finalAllocation + "%",
+  riskLevel:
+    finalAllocation > 70 ? "HIGH" :
+    finalAllocation > 40 ? "MEDIUM" : "LOW",
+  drawdown,
+  killSwitch
+};
+
+// ✅ MOVE PORTFOLIO BUILD HERE
+const portfolio = buildPortfolio(
+  regime,
+  strategy,
+  sectorAllocation,
+  tradeDecision
+);
 
   const now = Date.now();
 const timestamp = now;
