@@ -3,7 +3,41 @@ VERSION: MVP-7-D21-STABLE (ADVISORY + NARRATIVE COMPLETE — ZERO REGRESSION)
 */
 
 const express = require("express");
-const fetch = require("node-fetch");
+const sqlite3 = require("sqlite3").verbose();
+const { AbortController } = require("node-abort-controller");
+
+const db = new sqlite3.Database("./dss.db", (err) => {
+  if (err) {
+    console.error("DB connection error:", err.message);
+  } else {
+    console.log("✅ Connected to SQLite DB");
+  }
+});
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS signals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      value TEXT,
+      score INTEGER,
+      weight REAL,
+      timestamp INTEGER
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS decisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      regime TEXT,
+      score INTEGER,
+      confidence INTEGER,
+      timestamp INTEGER
+    )
+  `);
+db.run('CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(timestamp)');
+db.run('CREATE INDEX IF NOT EXISTS idx_decisions_time ON decisions(timestamp)');
+});
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const fs = require("fs");
 const app = express();
 app.use(express.json());
@@ -54,14 +88,21 @@ function loadMemory() {
 }
 
 function saveMemory(mem) {
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(mem, null, 2), "utf-8");
+  const tempFile = MEMORY_FILE + ".tmp";
+  fs.writeFileSync(tempFile, JSON.stringify(mem, null, 2), "utf-8");
+  fs.renameSync(tempFile, MEMORY_FILE);
 }
-
 let MEMORY = loadMemory();
-// ===== V8 MEMORY INIT =====
-if (!MEMORY.signalsHistory) MEMORY.signalsHistory = [];
-if (!MEMORY.regimeHistory) MEMORY.regimeHistory = [];
-if (!MEMORY.alerts) MEMORY.alerts = [];
+if (!Array.isArray(MEMORY.decisions)) MEMORY.decisions = [];
+if (!Array.isArray(MEMORY.regimeHistory)) MEMORY.regimeHistory = [];
+if (!MEMORY.accuracy) {
+  MEMORY.accuracy = { total: 0, correct: 0, pnlSeries: [] };
+}
+if (!Array.isArray(MEMORY.accuracy.pnlSeries)) {
+  MEMORY.accuracy.pnlSeries = [];
+}// ===== V8 MEMORY INIT =====
+if (!Array.isArray(MEMORY.signalsHistory)) MEMORY.signalsHistory = [];
+if (!Array.isArray(MEMORY.alerts)) MEMORY.alerts = [];
 if (!MEMORY.lastSnapshot) MEMORY.lastSnapshot = null;
 
 /* =========================
@@ -112,15 +153,45 @@ async function safeFetch(url, timeout = 2000) {
 }
 
 async function fetchCrude() {
-  const data = await safeFetch("https://api.api-ninjas.com/v1/commodities?name=crude_oil") || [];
-  return data?.[0]?.price || null;
+  try {
+    const url = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F";
+    const data = await safeFetch(url);
+
+    const result = data?.chart?.result?.[0];
+    const price = result?.meta?.regularMarketPrice;
+
+    return price || null;
+  } catch {
+    return null;
+  }
 }
 
 async function fetchVix() {
-  const data = await safeFetch("https://query1.finance.yahoo.com/v7/finance/quote?symbols=%5EVIX") || {};
-  return data?.quoteResponse?.result?.[0]?.regularMarketPrice || null;
-}
+  try {
+    const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX";
+    const data = await safeFetch(url);
 
+    const result = data?.chart?.result?.[0];
+    const price = result?.meta?.regularMarketPrice;
+
+    return price || null;
+  } catch (e) {
+    return null;
+  }
+}
+async function fetchNifty() {
+  try {
+    const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI";
+    const data = await safeFetch(url);
+
+    const result = data?.chart?.result?.[0];
+    const price = result?.meta?.regularMarketPrice;
+
+    return price || null;
+  } catch (e) {
+    return null;
+  }
+}
 function interpretCrude(price, last) {
   if (!price) return last;
   return price > 80 ? "rising" : "falling";
@@ -762,8 +833,19 @@ function logDecision(snapshot) {
 }
 
 function detectRegimeTransition(currentRegime, compositeScore) {
-const history = MEMORY.regimeHistory || [];
-const prev = history.slice(-1)[0];
+  // 🔒 HARD GUARD (non-negotiable)
+  if (!MEMORY || typeof MEMORY !== "object") {
+    MEMORY = {};
+  }
+
+  if (!Array.isArray(MEMORY.regimeHistory)) {
+    MEMORY.regimeHistory = [];
+  }
+
+  const history = MEMORY.regimeHistory;
+
+  const prev = history.length > 0 ? history[history.length - 1] : null;
+
   let transition = null;
 
   if (prev && prev.regime !== currentRegime) {
@@ -774,13 +856,13 @@ const prev = history.slice(-1)[0];
     };
   }
 
-MEMORY.regimeHistory.push({
-  regime: currentRegime,
-  score: compositeScore,   // ✅ CRITICAL FIX
-  ts: Date.now()
-});
+  history.push({
+    regime: currentRegime,
+    score: compositeScore,
+    ts: Date.now()
+  });
 
-  if (MEMORY.regimeHistory.length > 200) MEMORY.regimeHistory.shift();
+  if (history.length > 200) history.shift();
 
   return transition;
 }
@@ -850,6 +932,18 @@ const body = req.body || {};
 
   const inputs = await autoFillInputs(body);
   // const liveData = await getLiveSignals();
+// 📊 Compute Trend from NIFTY
+let trendSignal = "neutral";
+
+const nifty = await fetchNifty();
+
+if (nifty) {
+trendSignal = nifty > 20000 ? "bullish" : "bearish";}
+
+// OVERRIDE INPUT
+inputs.trend = trendSignal;
+
+// EXISTING
 
 // inputs.crude = liveData.signals.crude;
 // inputs.vix = liveData.signals.vix;
@@ -873,6 +967,8 @@ const body = req.body || {};
   const risk = computeRisk(portfolioStateData);
 
   const now = Date.now();
+const timestamp = now;
+
 // ===== V8 SNAPSHOT =====
 const currentSnapshot = {
   ts: now,
@@ -940,12 +1036,13 @@ if (MEMORY.v8_regimeHistory.length > 100)
   MEMORY.v8_regimeHistory.shift();
 
 // limit size
-if (MEMORY.signalsHistory.length > 100) MEMORY.signalsHistory.shift();
 
 // update snapshot
 MEMORY.lastSnapshot = currentSnapshot;
 // ===== V8 TREND =====
-const last10 = MEMORY.signalsHistory.slice(-10);
+const last10 = Array.isArray(MEMORY.signalsHistory)
+  ? MEMORY.signalsHistory.slice(-10)
+  : [];
 
 const trend = {
   score: last10.map(x => x.compositeScore),
@@ -1061,7 +1158,29 @@ if (MEMORY.alerts.length > 200) {
 }
 
 saveMemory(MEMORY);
+// Save signals
+Object.entries(signals).forEach(([name, s]) => {
+ db.run(
+  `INSERT INTO signals (name, value, score, weight, timestamp)
+   VALUES (?, ?, ?, ?, ?)`,
+  [name, s.value, s.score, s.weight, timestamp],
+  (err) => {
+    if (err) console.error("DB insert error (signals):", err.message);
+  }
+);
+});
 
+// Save decision
+db.run(
+  `INSERT INTO decisions (regime, score, confidence, timestamp)
+   VALUES (?, ?, ?, ?)`,
+  [regime, compositeScore, confidence, timestamp],
+  (err) => {
+    if (err) console.error("DB insert error (decision):", err.message);
+  }
+);
+
+// THEN response
   res.json({
     version: VERSION,
     inputsUsed: inputs,
