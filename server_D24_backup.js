@@ -1,29 +1,16 @@
 /*
-VERSION: MVP-9-D26-BASELINE
-FEATURES:
-- Signal Persistence
-- V8 Memory Engine
-- Regime Intelligence
-- Adaptive Position Sizing (V9)
-- Stability Engine
-STATUS: PRODUCTION BASELINE
+VERSION: MVP-7-D21-STABLE (ADVISORY + NARRATIVE COMPLETE — ZERO REGRESSION)
 */
 
 const express = require("express");
 const sqlite3 = require("sqlite3").verbose();
 const { AbortController } = require("node-abort-controller");
-const pino = require("pino");
-const logger = pino({
-  level: "info",
-  transport: {
-    target: "pino-pretty"
-  }
-});
+
 const db = new sqlite3.Database("./dss.db", (err) => {
   if (err) {
-    logger.error({ err }, "DB connection error");
+    console.error("DB connection error:", err.message);
   } else {
-    logger.info("Connected to SQLite DB");
+    console.log("✅ Connected to SQLite DB");
   }
 });
 db.serialize(() => {
@@ -52,67 +39,20 @@ db.run('CREATE INDEX IF NOT EXISTS idx_decisions_time ON decisions(timestamp)');
 });
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const fs = require("fs");
-// ==============================
-// STABILITY LAYER — SAFE EXECUTION
-// ==============================
-
-function safeExecute(fn, fallback = null) {
-  try {
-    return fn();
-  } catch (err) {
-    logger.error({ err }, "SafeExecute failure");
-    return fallback;
-  }
-}
-
-async function safeExecuteAsync(fn, fallback = null) {
-  try {
-    return await fn();
-  } catch (err) {
-    logger.error({ err }, "SafeExecuteAsync failure");
-    return fallback;
-  }
-}
 const app = express();
-
-const rateLimit = require("express-rate-limit");
-
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-app.use("/brain-auto", limiter);
-
 app.use(express.json());
-
-app.use((req, res, next) => {
-  logger.info({
-    method: req.method,
-    url: req.url,
-    body: req.body
-  }, "Incoming request");
-  next();
-});
 // const { getLiveSignals } = require("../data-engine/liveDataEngine");
 
-const VERSION = "MVP-9-D26-BASELINE";
+const VERSION = "MVP-8-D22-SIGNAL-PERSISTENCE";
 const DEFAULT_SIGNALS = {
   rates: "neutral",
   crude: "falling",
   fii: "buying",
   liquidity: "supportive",
   vix: "low",
-  trend: "neutral",
-
-  // ✅ NEW (D25)
-  momentum: "neutral",
-  strength: "neutral",
-  breadth: 0.5
+  trend: "neutral"
 };
-const RELEASE_TAG = "BASELINE-D26";
+const RELEASE_TAG = "D21-STABLE-BASELINE";
 
 /* ==============================
    V7 — MEMORY ENGINE (PERSISTENT)
@@ -149,15 +89,8 @@ function loadMemory() {
 
 function saveMemory(mem) {
   const tempFile = MEMORY_FILE + ".tmp";
-
-  // Write to temp file first
   fs.writeFileSync(tempFile, JSON.stringify(mem, null, 2), "utf-8");
-
-  // Copy temp → actual file (safer across devices/filesystems)
-  fs.copyFileSync(tempFile, MEMORY_FILE);
-
-  // Remove temp file
-  fs.unlinkSync(tempFile);
+  fs.renameSync(tempFile, MEMORY_FILE);
 }
 let MEMORY = loadMemory();
 if (!Array.isArray(MEMORY.decisions)) MEMORY.decisions = [];
@@ -178,28 +111,8 @@ if (!MEMORY.lastSnapshot) MEMORY.lastSnapshot = null;
 
 let lastCrudeSignal = "falling";
 let lastVixSignal = "low";
-// ===============================
-// CIRCUIT BREAKER + CACHE
-// ===============================
+let regimeHistory = [];
 
-let marketCache = {
-  crudePrice: null,
-  vixValue: null,
-  lastUpdated: null
-};
-
-let circuitBreaker = {
-  crude: { failures: 0, blockedUntil: 0 },
-  vix: { failures: 0, blockedUntil: 0 }
-};
-
-const FAILURE_THRESHOLD = 3;
-const COOLDOWN_MS = 60 * 1000; // 1 min
-let regimeHistory = MEMORY.regimeHistory || [];
-let fallbackState = {
-  crude: false,
-  vix: false
-};
 /* =========================
    NEW STATE (ADDITIVE ONLY)
 ========================= */
@@ -216,70 +129,30 @@ let signalReliability = {
   crude: 1,
   fii: 1,
   vix: 1,
-  trend: 1,
-
-  // ✅ NEW
-  momentum: 1,
-  strength: 1,
-  breadth: 1
+  trend: 1
 };
 const SIGNAL_REGISTRY = {
-  rates: { weight: 0.2, scorer: v => (v === "falling" ? 1 : v === "rising" ? -1 : 0), intensity: () => 1 },
-  liquidity: { weight: 0.2, scorer: v => (v === "supportive" ? 1 : v === "tightening" ? -1 : 0), intensity: () => 1.2 },
-  crude: { weight: 0.15, scorer: v => (v === "falling" ? 1 : v === "rising" ? -1 : 0), intensity: () => 1.1 },
-  fii: { weight: 0.2, scorer: v => (v === "buying" ? 1 : v === "selling" ? -1 : 0), intensity: () => 1.3 },
-  vix: { weight: 0.15, scorer: v => (v === "low" ? 1 : v === "high" ? -1 : 0), intensity: () => 1.2 },
-  trend: { weight: 0.1, scorer: v => (v === "bullish" ? 1 : v === "bearish" ? -1 : 0), intensity: () => 1.5 },
-
-  // ✅ NEW SIGNALS (D25)
-  momentum: {
-  weight: 0.1,
-  scorer: v => (v === "bullish" ? 1 : v === "bearish" ? -1 : 0),
-  intensity: () => 1.2
-},
-  strength: {
-    weight: 0.1,
-    scorer: v => (v === "strong" ? 1 : v === "weak" ? -1 : 0),
-    intensity: () => 1.1
-  },
-  breadth: {
-    weight: 0.1,
-    scorer: v => (v > 0.55 ? 1 : v < 0.45 ? -1 : 0),
-    intensity: () => 1.1
-  }
+  rates: { weight: 0.2, scorer: v => (v === "falling" ? 1 : -1), intensity: () => 1 },
+  liquidity: { weight: 0.2, scorer: v => (v === "supportive" ? 1 : -1), intensity: () => 1.2 },
+  crude: { weight: 0.15, scorer: v => (v === "falling" ? 1 : -1), intensity: () => 1.1 },
+  fii: { weight: 0.2, scorer: v => (v === "buying" ? 1 : -1), intensity: () => 1.3 },
+  vix: { weight: 0.15, scorer: v => (v === "low" ? 1 : -1), intensity: () => 1.2 },
+  trend: { weight: 0.1, scorer: v => (v === "bullish" ? 1 : -1), intensity: () => 1.5 }
 };
 
-async function safeFetch(url, timeout = 2000, retries = 2) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeout);
-
-      const res = await fetch(url, { signal: controller.signal });
-      clearTimeout(id);
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      return await res.json();
-    } catch (err) {
-      logger.warn({ url, attempt: i + 1, err: err.message }, "Fetch failed");
-
-      if (i === retries) {
-        logger.error({ url }, "All retries failed");
-        return null;
-      }
-    }
+async function safeFetch(url, timeout = 2000) {
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    return await res.json();
+  } catch {
+    return null;
   }
 }
+
 async function fetchCrude() {
-  const now = Date.now();
-
-  if (circuitBreaker.crude.blockedUntil > now) {
-    logger.warn("Crude API blocked — using cache");
-fallbackState.crude = true;
-return marketCache.crudePrice ?? 80;   // crude default
-  }
-
   try {
     const url = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F";
     const data = await safeFetch(url);
@@ -287,41 +160,13 @@ return marketCache.crudePrice ?? 80;   // crude default
     const result = data?.chart?.result?.[0];
     const price = result?.meta?.regularMarketPrice;
 
-    if (!price) throw new Error("Invalid crude price");
-
-    circuitBreaker.crude.failures = 0;
-    marketCache.crudePrice = price;
-    marketCache.lastUpdated = now;
-    fallbackState.crude = false;
-
-    return price;
-
-  } catch (err) {
-    circuitBreaker.crude.failures++;
-
-    logger.warn({
-      failures: circuitBreaker.crude.failures,
-      err: err.message
-    }, "Crude fetch failed");
-
-    if (circuitBreaker.crude.failures >= FAILURE_THRESHOLD) {
-      circuitBreaker.crude.blockedUntil = now + COOLDOWN_MS;
-      logger.error("Crude circuit breaker ACTIVATED");
-    }
-fallbackState.crude = true;
-return marketCache.crudePrice ?? 80;   // crude default
+    return price || null;
+  } catch {
+    return null;
   }
 }
 
 async function fetchVix() {
-  const now = Date.now();
-
-  if (circuitBreaker.vix.blockedUntil > now) {
-    logger.warn("VIX API blocked — using cache");
-    fallbackState.vix = true;
-    return marketCache.vixValue ?? 18;     // vix default
-  }
-
   try {
     const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX";
     const data = await safeFetch(url);
@@ -329,61 +174,24 @@ async function fetchVix() {
     const result = data?.chart?.result?.[0];
     const price = result?.meta?.regularMarketPrice;
 
-    if (!price) throw new Error("Invalid VIX value");
-
-    circuitBreaker.vix.failures = 0;
-    marketCache.vixValue = price;
-    marketCache.lastUpdated = now;
-    fallbackState.vix = false;
-
-    return price;
-
-  } catch (err) {
-    circuitBreaker.vix.failures++;
-
-    logger.warn({
-      failures: circuitBreaker.vix.failures,
-      err: err.message
-    }, "VIX fetch failed");
-
-    if (circuitBreaker.vix.failures >= FAILURE_THRESHOLD) {
-      circuitBreaker.vix.blockedUntil = now + COOLDOWN_MS;
-      logger.error("VIX circuit breaker ACTIVATED");
-    }
-    fallbackState.vix = true;
-    return marketCache.vixValue ?? 18;     // vix default
-  }
-}
-// ===============================
-// EMA HELPER (D25)
-// ===============================
-function EMA(prices, period) {
-  const k = 2 / (period + 1);
-  let ema = prices[0];
-
-  for (let i = 1; i < prices.length; i++) {
-    ema = prices[i] * k + ema * (1 - k);
-  }
-
-  return ema;
-}
-async function fetchNiftyData() {
-  try {
-    const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=5d&interval=5m";
-    const data = await safeFetch(url);
-
-    const result = data?.chart?.result?.[0];
-
-    return {
-      prices: result?.indicators?.quote?.[0]?.close?.filter(Boolean),
-      open: result?.indicators?.quote?.[0]?.open?.[0],
-      current: result?.meta?.regularMarketPrice
-    };
-  } catch {
+    return price || null;
+  } catch (e) {
     return null;
   }
 }
+async function fetchNifty() {
+  try {
+    const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI";
+    const data = await safeFetch(url);
 
+    const result = data?.chart?.result?.[0];
+    const price = result?.meta?.regularMarketPrice;
+
+    return price || null;
+  } catch (e) {
+    return null;
+  }
+}
 function interpretCrude(price, last) {
   if (!price) return last;
   return price > 80 ? "rising" : "falling";
@@ -406,7 +214,7 @@ async function autoFillInputs(body) {
   if (crudeSignal) lastCrudeSignal = crudeSignal;
   if (vixSignal) lastVixSignal = vixSignal;
 
- return {
+  return {
   rates: body.rates || DEFAULT_SIGNALS.rates,
   crude: crudeSignal || DEFAULT_SIGNALS.crude,
   fii: body.fii || DEFAULT_SIGNALS.fii,
@@ -415,16 +223,10 @@ async function autoFillInputs(body) {
   trend: body.autoTrend
     ? "bullish"
     : body.trend || DEFAULT_SIGNALS.trend,
-
-  // ✅ ADD THESE 3 LINES (D25 SAFETY)
-  momentum: body.momentum ?? DEFAULT_SIGNALS.momentum,
-strength: body.strength ?? DEFAULT_SIGNALS.strength,
-breadth: body.breadth ?? DEFAULT_SIGNALS.breadth,
-
-  liveData: {
-    crudePrice,
-    vixValue
-  }
+liveData: {
+  crudePrice,
+  vixValue
+}
 };
 }
 
@@ -451,11 +253,8 @@ function buildSignals(inputs, regime = "NEUTRAL") {
   for (const key in SIGNAL_REGISTRY) {
     const config = SIGNAL_REGISTRY[key];
     const baseWeight = config.weight;
-    const adaptiveWeight = getAdaptiveWeight(key, baseWeight);
-    const weight = adaptiveWeight * getAdaptiveMultiplier(key, regime);
-    const rawScore = config.scorer(inputs[key]);
-const reliability = signalReliability[key] || 1;
-const score = rawScore * reliability;
+    const weight = baseWeight * getAdaptiveMultiplier(key, regime);
+    const score = config.scorer(inputs[key]);
 
     signals[key] = {
       value: inputs[key],
@@ -466,11 +265,10 @@ const score = rawScore * reliability;
       strength: Math.abs(score) === 1 ? "strong" : "neutral"
     };
 
-    composite += score * weight;
+    composite += score * weight * 100;
   }
 
-  const normalizedScore = Math.round((composite + 1) * 50); 
-return { signals, compositeScore: normalizedScore };
+  return { signals, compositeScore: Math.round(composite) };
 }
 function getRegime(score) {
   if (score >= 70) return "STRONG RISK ON";
@@ -631,87 +429,17 @@ function buildStrategy(regime, confidence, marketQuality, sectorAllocation) {
   return { stance, positionSizing, preferredSectors, avoid, riskManagement };
 }
 
-function buildTradeDecision(regime, confidence, marketQuality, intelligence, signals) {
+function buildTradeDecision(regime, confidence, marketQuality, intelligence) {
   let action = "HOLD";
 
   if (regime.includes("RISK ON")) action = "BUY";
   if (regime.includes("RISK OFF")) action = "SELL";
 
-  // ==============================
-// ADAPTIVE POSITION SIZING ENGINE (V9)
-// ==============================
+  let allocation = confidence * 0.7 + intelligence.conviction * 0.3;
+  allocation = Math.min(90, Math.max(20, Math.round(allocation)));
 
-// 1. Base allocation
-let normalizedConviction = Math.min(100, intelligence.conviction);
-
-let allocation = (confidence * 0.6 + normalizedConviction * 0.4);
-
-// 2. Regime multiplier
-let regimeFactor = 1;
-
-if (regime === "STRONG RISK ON") regimeFactor = 1.2;
-else if (regime === "RISK ON") regimeFactor = 1.05;
-else if (regime === "RISK OFF") regimeFactor = 0.75;
-else if (regime === "STRONG RISK OFF") regimeFactor = 0.5;
-
-// 3. Market quality adjustment
-let qualityFactor = 1;
-
-if (marketQuality === "STRONG") qualityFactor = 1.1;
-if (marketQuality === "WEAK") qualityFactor = 0.7;
-
-// 4. Conflict penalty
-let conflictFactor = intelligence.conflict ? 0.7 : 1;
-
-// 5. VIX-based volatility adjustment
-let vixFactor = 1;
-const vixSignal = signals?.vix || null;
-
-if (vixSignal && vixSignal.score === -1) {
-  vixFactor = 0.7;
-} else {
-  vixFactor = 1.05;
-}
-
-// 6. Regime stability boost
-let stabilityFactor = 1;
-const recentHistory = regimeHistory || [];
-
-if (recentHistory.length >= 3) {
-  const last3 = recentHistory.slice(-3);
-  const stable = last3.every(r => r.regime === regime);
-
-  if (stable) stabilityFactor = 1.1;
-}
-
-// 7. Final allocation
-allocation =
-  allocation *
-  regimeFactor *
-  qualityFactor *
-  conflictFactor *
-  vixFactor *
-  stabilityFactor;
-
-// 8. Clamp
-// Clamp base
-allocation = Math.round(Math.max(10, Math.min(90, allocation)));
-
-// 🔥 Unified risk ceiling (ORDERED)
-let cap = 90;
-
-// Confidence caps
-if (confidence < 65) cap = Math.min(cap, 70);
-if (confidence < 55) cap = Math.min(cap, 60);
-
-// Market quality cap
-if (marketQuality === "WEAK") cap = Math.min(cap, 30);
-
-// Conflict cap
-if (intelligence.conflict) cap = Math.min(cap, 60);
-
-// Apply final cap
-allocation = Math.min(allocation, cap);
+  if (marketQuality === "WEAK") allocation = Math.min(allocation, 30);
+  if (intelligence.conflict) allocation = Math.min(allocation, 60);
   if (confidence < 50) action = "HOLD";
 
   return { action, allocation: allocation + "%", confidence, conviction: intelligence.conviction };
@@ -769,32 +497,9 @@ function buildExplanation(signals) {
 }
 function updateSignalReliability(signals) {
   for (const key in signals) {
-    const accuracy = MEMORY.accuracy?.total
-  ? MEMORY.accuracy.correct / MEMORY.accuracy.total
-  : 0.5;
-
-// Reward good signals when system is performing well
-if (accuracy > 0.6 && signals[key].score === 1) {
-  signalReliability[key] = Math.min(1.2, signalReliability[key] + 0.02);
-}
-
-// Penalize when system is underperforming
-else if (accuracy < 0.5 && signals[key].score === -1) {
-  signalReliability[key] = Math.max(0.8, signalReliability[key] - 0.02);
-}
+    if (signals[key].score === 1) signalReliability[key] = Math.min(1.05, signalReliability[key] + 0.01);
+    else signalReliability[key] = Math.max(0.95, signalReliability[key] - 0.01);
   }
-}
-// ==============================
-// ADAPTIVE WEIGHT ENGINE
-// ==============================
-
-function getAdaptiveWeight(signalKey, baseWeight) {
-  const reliability = signalReliability[signalKey] || 1;
-
-  // Bound between 0.8x and 1.2x
-  const adaptiveFactor = Math.max(0.8, Math.min(1.2, reliability));
-
-  return baseWeight * adaptiveFactor;
 }
 
 /* 🔥 PnL FIX (SCORE-BASED DRIFT — NO REGRESSION) */
@@ -1192,8 +897,8 @@ function updateAccuracy(tradeDecision, compositeScore) {
 
   let correct = false;
 
-  if (last.action === "BUY" && compositeScore > last.score - 5) correct = true;
-  if (last.action === "SELL" && compositeScore < last.score + 5) correct = true;
+  if (last.action === "BUY" && compositeScore > last.score) correct = true;
+  if (last.action === "SELL" && compositeScore < last.score) correct = true;
 
   if (correct) MEMORY.accuracy.correct++;
 
@@ -1217,161 +922,43 @@ app.get("/health", (req, res) => {
   res.json({
     status: "OK",
     version: VERSION,
-    release: RELEASE_TAG,
     uptime: process.uptime(),
     environment: process.env.NODE_ENV || "local",
     timestamp: Date.now()
   });
 });
 app.post("/brain-auto", async (req, res) => {
-  try {
-// RESET FALLBACK STATE (per request)
-fallbackState = { crude: false, vix: false };
 const body = req.body || {};
 
-  const inputs = await safeExecuteAsync(
-  () => autoFillInputs(body),
-  DEFAULT_SIGNALS
-);
-if (!inputs.crude) inputs.crude = lastCrudeSignal;
-if (!inputs.vix) inputs.vix = lastVixSignal;
+  const inputs = await autoFillInputs(body);
   // const liveData = await getLiveSignals();
 // 📊 Compute Trend from NIFTY
-const niftyData = await safeExecuteAsync(
-  fetchNiftyData,
-  null
-);
-
 let trendSignal = "neutral";
-let momentumSignal = "neutral";
-let strengthSignal = "neutral";
-let breadthSignal = 0.5;
 
-if (niftyData && Array.isArray(niftyData.prices) && niftyData.prices.length >= 50) {
+const nifty = await fetchNifty();
 
-  const ema20 = EMA(niftyData.prices.slice(-20), 20);
-  const ema50 = EMA(niftyData.prices.slice(-50), 50);
-
-  // ✅ TREND
-  trendSignal = ema20 > ema50 ? "bullish" : "bearish";
-
-  // ✅ MOMENTUM
-  const momentumDiff = (niftyData.current - ema20) / ema20;
-
-if (momentumDiff > 0.002) momentumSignal = "bullish";
-else if (momentumDiff < -0.002) momentumSignal = "bearish";
-else momentumSignal = "neutral";
-
-  // ✅ STRENGTH
-  const strength = (niftyData.current - niftyData.open) / niftyData.open;
-
- if (strength > 0.002) {
-  strengthSignal = "strong";
-} else if (strength < -0.002) {
-  strengthSignal = "weak";
-} else {
-  strengthSignal = "neutral";
-}
-
-  // ✅ BREADTH
-  breadthSignal = (niftyData.current - niftyData.open) > 0 ? 0.6 : 0.4;
-}
-
-
+if (nifty) {
+trendSignal = nifty > 20000 ? "bullish" : "bearish";}
 
 // OVERRIDE INPUT
 inputs.trend = trendSignal;
-inputs.momentum = momentumSignal;
-inputs.strength = strengthSignal;
-inputs.breadth = breadthSignal;
 
 // EXISTING
 
 // inputs.crude = liveData.signals.crude;
 // inputs.vix = liveData.signals.vix;
 
-  let { signals, compositeScore } = safeExecute(
-  () => buildSignals(inputs, "NEUTRAL"),
-  { signals: {}, compositeScore: 50 }
-);
-
-let regime = getRegime(compositeScore);
-
-// ==============================
-// REGIME STABILITY ENGINE
-// ==============================
-
-const prevRegime = MEMORY.regimeHistory?.slice(-1)[0]?.regime;
-
-if (prevRegime && prevRegime !== regime) {
-  const scoreDiff = Math.abs(compositeScore - 50);
-
-  // Prevent weak flips
-  if (scoreDiff < 10) {
-    regime = prevRegime;
-    logger.warn("Regime flip prevented (stability filter)");
-  }
-}
-
-({ signals, compositeScore } = safeExecute(
-  () => buildSignals(inputs, regime),
-  { signals, compositeScore }
-));
-
-
-// 🔻 FALLBACK INTELLIGENCE LAYER (ADD EXACTLY HERE)
-
-if (fallbackState.crude) {
-  if (signals.crude) {
-    signalReliability.crude = Math.max(0.8, signalReliability.crude * 0.9);
-signals.crude.reliability = signalReliability.crude;
-  }
-  logger.warn("Crude using fallback — reliability reduced");
-}
-
-if (fallbackState.vix) {
-  if (signals.vix) {
-    signalReliability.vix = Math.max(0.8, signalReliability.vix * 0.9);
-signals.vix.reliability = signalReliability.vix;
-  }
-  logger.warn("VIX using fallback — reliability reduced");
-}
+  let { signals, compositeScore } = buildSignals(inputs, "NEUTRAL");
+  const regime = getRegime(compositeScore);
+  ({ signals, compositeScore } = buildSignals(inputs, regime));
 
   const intelligence = computeSignalIntelligence(signals);
-  let confidence = getConfidence(signals);
-// ==============================
-// ADAPTIVE CONFIDENCE CALIBRATION
-// ==============================
-
-const accuracy = MEMORY.accuracy?.total
-  ? MEMORY.accuracy.correct / MEMORY.accuracy.total
-  : 0.5;
-
-// Reduce confidence if system is underperforming
-if (accuracy < 0.5) {
-  confidence = Math.max(20, Math.round(confidence * 0.8));
-}
-
-// Boost confidence if system is performing well
-if (accuracy > 0.65) {
-  confidence = Math.min(95, Math.round(confidence * 1.1));
-}
-
-// 🔻 degrade confidence if fallback used
-if (fallbackState.crude || fallbackState.vix) {
-  confidence = Math.max(20, Math.round(confidence * 0.8));
-}
-// ✅ FIX 2 — Prevent under-confidence in strong regimes
-if (regime === "STRONG RISK ON") {
-  confidence = Math.max(confidence, 60);
-} else if (regime === "RISK ON") {
-  confidence = Math.max(confidence, 50);
-}
+  const confidence = getConfidence(signals);
   const marketQuality = getMarketQuality(confidence);
   const sectorAllocation = getDynamicSectorAllocation(regime, signals, intelligence);
   const strategy = buildStrategy(regime, confidence, marketQuality, sectorAllocation);
   const explanation = buildExplanation(signals);
-  const tradeDecision = buildTradeDecision(regime, confidence, marketQuality, intelligence, signals);
+  const tradeDecision = buildTradeDecision(regime, confidence, marketQuality, intelligence);
   const portfolio = buildPortfolio(regime, strategy, sectorAllocation, tradeDecision);
 
   updateSignalReliability(signals);
@@ -1466,21 +1053,13 @@ const trend = {
 const alerts = [];
 // Signal change alerts
 signalChanges.forEach(change => {
-let severity = "LOW";
-
-if (["trend", "vix", "liquidity"].includes(change.signal)) {
-  severity = "HIGH";
-} else if (["fii", "crude"].includes(change.signal)) {
-  severity = "MEDIUM";
-}
-
-alerts.push({
-  type: "SIGNAL_CHANGE",
-  signal: change.signal,
-  message: `${change.signal} changed from ${change.from} → ${change.to}`,
-  severity,
-  ts: now
-});
+  alerts.push({
+    type: "SIGNAL_CHANGE",
+    signal: change.signal,
+    message: `${change.signal} changed from ${change.from} → ${change.to}`,
+    severity: "MEDIUM",
+    ts: now
+  });
 });
 
 // Regime change alert
@@ -1578,50 +1157,33 @@ if (MEMORY.alerts.length > 200) {
   MEMORY.alerts = MEMORY.alerts.slice(-200);
 }
 
-try {
-  saveMemory(MEMORY);
-} catch (err) {
-  logger.error({ err }, "Memory save failed");
-}
+saveMemory(MEMORY);
 // Save signals
-safeExecute(() => {
-  Object.entries(signals).forEach(([name, s]) => {
-    db.run(
-      `INSERT INTO signals (name, value, score, weight, timestamp)
-       VALUES (?, ?, ?, ?, ?)`,
-      [name, s.value, s.score, s.weight, timestamp],
-      (err) => {
-        if (err) {
-          logger.error({ err, signal: name }, "DB insert error (signals)");
-        }
-      }
-    );
-  });
+Object.entries(signals).forEach(([name, s]) => {
+ db.run(
+  `INSERT INTO signals (name, value, score, weight, timestamp)
+   VALUES (?, ?, ?, ?, ?)`,
+  [name, s.value, s.score, s.weight, timestamp],
+  (err) => {
+    if (err) console.error("DB insert error (signals):", err.message);
+  }
+);
 });
 
 // Save decision
-safeExecute(() => {
-  db.run(
-    `INSERT INTO decisions (regime, score, confidence, timestamp)
-     VALUES (?, ?, ?, ?)`,
-    [regime, compositeScore, confidence, timestamp],
-    (err) => {
-      if (err) {
-        logger.error({ err }, "DB insert error (decision)");
-      }
-    }
-  );
-});
+db.run(
+  `INSERT INTO decisions (regime, score, confidence, timestamp)
+   VALUES (?, ?, ?, ?)`,
+  [regime, compositeScore, confidence, timestamp],
+  (err) => {
+    if (err) console.error("DB insert error (decision):", err.message);
+  }
+);
+
 // THEN response
   res.json({
     version: VERSION,
     inputsUsed: inputs,
-meta: {
-  fallbackUsed: {
-    crude: fallbackState.crude,
-    vix: fallbackState.vix
-  }
-},
     signals,
     regime,
     compositeScore,
@@ -1659,19 +1221,10 @@ lastDecisions: (MEMORY.decisions || []).slice(-10)
 
 });
 
-  } catch (err) {
-    logger.error({ err }, "CRITICAL ROUTE FAILURE");
-
-    return res.status(500).json({
-      error: "SYSTEM_FAILURE",
-      message: "Fallback response triggered",
-      timestamp: Date.now()
-    });
-  }
 });
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  logger.info(`DSS running on port ${PORT} (${VERSION})`);
+  console.log("DSS running on port " + PORT + " (" + VERSION + ")");
 });
