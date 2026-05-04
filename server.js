@@ -52,6 +52,8 @@ db.run('CREATE INDEX IF NOT EXISTS idx_decisions_time ON decisions(timestamp)');
 });
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const fs = require("fs");
+const technicalRoutes = require("./routes/technicalRoutes");
+const equityRoutes = require("./routes/equity.routes");
 // ==============================
 // STABILITY LAYER — SAFE EXECUTION
 // ==============================
@@ -87,6 +89,8 @@ const limiter = rateLimit({
 app.use("/brain-auto", limiter);
 
 app.use(express.json());
+app.use("/api/technical", technicalRoutes);
+app.use("/api/equity", equityRoutes);
 
 app.use((req, res, next) => {
   logger.info({
@@ -127,24 +131,14 @@ function loadMemory() {
 
     return {
       decisions: data.decisions || [],
-      regimeHistory: data.regimeHistory || [],
-      accuracy: data.accuracy || {
-        total: 0,
-        correct: 0,
-        pnlSeries: []
-      }
+      regimeHistory: data.regimeHistory || [],      
     };
   } catch {
-    return {
-      decisions: [],
-      regimeHistory: [],
-      accuracy: {
-        total: 0,
-        correct: 0,
-        pnlSeries: []
-      }
-    };
-  }
+  return {
+    decisions: [],
+    regimeHistory: []
+  };
+}
 }
 
 function saveMemory(mem) {
@@ -162,15 +156,13 @@ function saveMemory(mem) {
 let MEMORY = loadMemory();
 if (!Array.isArray(MEMORY.decisions)) MEMORY.decisions = [];
 if (!Array.isArray(MEMORY.regimeHistory)) MEMORY.regimeHistory = [];
-if (!MEMORY.accuracy) {
-  MEMORY.accuracy = { total: 0, correct: 0, pnlSeries: [] };
-}
-if (!Array.isArray(MEMORY.accuracy.pnlSeries)) {
-  MEMORY.accuracy.pnlSeries = [];
-}// ===== V8 MEMORY INIT =====
+
+// ===== V8 MEMORY INIT =====
 if (!Array.isArray(MEMORY.signalsHistory)) MEMORY.signalsHistory = [];
 if (!Array.isArray(MEMORY.alerts)) MEMORY.alerts = [];
 if (!MEMORY.lastSnapshot) MEMORY.lastSnapshot = null;
+if (MEMORY.cyclesSinceChange === undefined) MEMORY.cyclesSinceChange = 0;
+if (!MEMORY.lastRegimeChangeTs) MEMORY.lastRegimeChangeTs = null;
 
 /* =========================
    EXISTING STATE (UNCHANGED)
@@ -417,14 +409,14 @@ async function autoFillInputs(body) {
   if (vixSignal) lastVixSignal = vixSignal;
 
  return {
-  rates: body.rates || DEFAULT_SIGNALS.rates,
-  crude: crudeSignal || DEFAULT_SIGNALS.crude,
-  fii: body.fii || DEFAULT_SIGNALS.fii,
-  liquidity: body.liquidity || DEFAULT_SIGNALS.liquidity,
-  vix: vixSignal || DEFAULT_SIGNALS.vix,
-  trend: body.autoTrend
-    ? "bullish"
-    : body.trend || DEFAULT_SIGNALS.trend,
+  rates: body.rates ?? DEFAULT_SIGNALS.rates,
+crude: crudeSignal ?? DEFAULT_SIGNALS.crude,
+fii: body.fii ?? DEFAULT_SIGNALS.fii,
+liquidity: body.liquidity ?? DEFAULT_SIGNALS.liquidity,
+  vix: body.vix ?? vixSignal ?? DEFAULT_SIGNALS.vix,  
+trend: body.autoTrend
+  ? "bullish"
+  : body.trend ?? DEFAULT_SIGNALS.trend,
 
   // ✅ ADD THESE 3 LINES (D25 SAFETY)
   momentum: body.momentum ?? DEFAULT_SIGNALS.momentum,
@@ -641,162 +633,123 @@ function buildStrategy(regime, confidence, marketQuality, sectorAllocation) {
   return { stance, positionSizing, preferredSectors, avoid, riskManagement };
 }
 
-function buildTradeDecision(regime, confidence, marketQuality, intelligence, signals) {
-  let action = "HOLD";
 
-  if (regime.includes("RISK ON")) action = "BUY";
-  if (regime.includes("RISK OFF")) action = "SELL";
-
-  // ==============================
-// ADAPTIVE POSITION SIZING ENGINE (V9)
 // ==============================
-
-// 1. Base allocation
-let normalizedConviction = Math.min(100, intelligence.conviction);
-
-let allocation = (confidence * 0.6 + normalizedConviction * 0.4);
-
-// 2. Regime multiplier
-let regimeFactor = 1;
-
-if (regime === "STRONG RISK ON") regimeFactor = 1.2;
-else if (regime === "RISK ON") regimeFactor = 1.05;
-else if (regime === "RISK OFF") regimeFactor = 0.75;
-else if (regime === "STRONG RISK OFF") regimeFactor = 0.5;
-
-// 3. Market quality adjustment
-let qualityFactor = 1;
-
-if (marketQuality === "STRONG") qualityFactor = 1.1;
-if (marketQuality === "WEAK") qualityFactor = 0.7;
-
-// 4. Conflict penalty
-let conflictFactor = intelligence.conflict ? 0.7 : 1;
-
-// 5. VIX-based volatility adjustment
-let vixFactor = 1;
-const vixSignal = signals?.vix || null;
-
-if (vixSignal && vixSignal.score === -1) {
-  vixFactor = 0.7;
-} else {
-  vixFactor = 1.05;
-}
-
-// 6. Regime stability boost
-let stabilityFactor = 1;
-const recentHistory = regimeHistory || [];
-
-if (recentHistory.length >= 3) {
-  const last3 = recentHistory.slice(-3);
-  const stable = last3.every(r => r.regime === regime);
-
-  if (stable) stabilityFactor = 1.1;
-}
-
-// 7. Final allocation
-allocation =
-  allocation *
-  regimeFactor *
-  qualityFactor *
-  conflictFactor *
-  vixFactor *
-  stabilityFactor;
-
-// 8. Clamp
-// Clamp base
-allocation = Math.round(Math.max(10, Math.min(90, allocation)));
-
-// 🔥 Unified risk ceiling (ORDERED)
-let cap = 90;
-
-// Confidence caps
-if (confidence < 65) cap = Math.min(cap, 70);
-if (confidence < 55) cap = Math.min(cap, 60);
-
-// Market quality cap
-if (marketQuality === "WEAK") cap = Math.min(cap, 30);
-
-// Conflict cap
-if (intelligence.conflict) cap = Math.min(cap, 60);
-
-// Apply final cap
-allocation = Math.min(allocation, cap);
-  if (confidence < 50) action = "HOLD";
-
-  return { action, allocation: allocation + "%", confidence, conviction: intelligence.conviction };
-}
-
-function buildPortfolio(regime, strategy, sectorAllocation, tradeDecision) {
-  const totalAllocation = parseInt(tradeDecision.allocation);
-
-  const buckets = [
-    { bucket: "CORE", allocation: Math.round(totalAllocation * 0.6) },
-    { bucket: "TACTICAL", allocation: Math.round(totalAllocation * 0.3) },
-    { bucket: "DEFENSIVE", allocation: Math.round(totalAllocation * 0.1) }
-  ];
-
-  const sectorToStocks = {
-    NBFC: ["BAJFINANCE", "CHOLAFIN"],
-    PSU_BANK: ["SBIN", "BANKBARODA"],
-    IT: ["TCS", "INFY"],
-    FMCG: ["HUL", "ITC"]
-  };
-
-  const instruments = [];
-
-  for (const sector in sectorAllocation) {
-    const weight = Math.round((sectorAllocation[sector] / 100) * totalAllocation);
-    const stocks = sectorToStocks[sector] || [];
-
-    stocks.forEach(stock => {
-      instruments.push({
-        sector,
-        instrument: stock,
-        weight: Math.round(weight / stocks.length),
-        rationale: sector + " exposure aligned with " + regime
-      });
-    });
-  }
-
-  return { stance: strategy.stance, totalAllocation: totalAllocation + "%", buckets, instruments };
-}
-
-function buildExplanation(signals) {
-  const positive = [], negative = [];
+// DSS vNext — MARKET VIEW
+// ==============================
+function buildMarketView({ regime, compositeScore, confidence, marketQuality, signals, intelligence }) {
+  const positive = [];
+  const negative = [];
 
   for (const key in signals) {
     if (signals[key].score === 1) positive.push(key);
-    else negative.push(key);
+    else if (signals[key].score === -1) negative.push(key);
   }
 
   return {
-    summary: "Market driven by macro signals",
-    keyDrivers: positive,
-    riskFlags: negative,
-    reasoning: "Positive: " + positive.join(", ") + " | Negative: " + negative.join(", ")
+    regime,
+    marketTone: interpretMarketTone(compositeScore),
+    compositeScore,
+    confidence,
+    marketQuality,
+    drivers: {
+      positive,
+      negative
+    },
+    signalAlignment: intelligence.conflict ? "LOW" : "HIGH",
+    stability: "STABLE"
+  };
+  }
+
+// ==============================
+// PORTFOLIO GUIDANCE (NO TRADING)
+// ==============================
+function buildPortfolioGuidance({ regime, confidence }) {
+  let stance = "NEUTRAL";
+  let equityExposure = "NEUTRAL";
+  let allocation = "40–60%";
+  let actionBias = "Hold";
+
+  if (regime === "STRONG RISK ON") {
+    stance = "PRO-RISK";
+    equityExposure = "OVERWEIGHT";
+    allocation = "60–75%";
+    actionBias = "Increase exposure gradually";
+  }
+
+  if (regime === "RISK OFF") {
+    stance = "DEFENSIVE";
+    equityExposure = "UNDERWEIGHT";
+    allocation = "20–40%";
+    actionBias = "Reduce exposure";
+  }
+
+  return {
+    stance,
+    equityExposure,
+    suggestedAllocationRange: allocation,
+    actionBias,
+    convictionLevel: confidence >= 60 ? "MODERATE" : "LOW"
   };
 }
+
+// ==============================
+// RISK DASHBOARD
+// ==============================
+function buildRiskDashboard({ risk, signals, intelligence }) {
+  return {
+    riskLevel: risk.riskLevel,
+    killSwitch: risk.killSwitch,
+    macroRisks: Object.keys(signals).filter(k => signals[k].score === -1),
+    signalConflict: intelligence.conflict,
+    drawdownRisk: risk.drawdown > 10 ? "ELEVATED" : "LOW",
+    volatilityRegime: signals.vix?.value || "unknown",
+    liquidityCondition: signals.liquidity?.value || "unknown"
+  };
+}
+  
 function updateSignalReliability(signals) {
-  for (const key in signals) {
-    const accuracy = MEMORY.accuracy?.total
-  ? MEMORY.accuracy.correct / MEMORY.accuracy.total
-  : 0.5;
-
-// Reward good signals when system is performing well
-if (accuracy > 0.6 && signals[key].score === 1) {
-  signalReliability[key] = Math.min(1.2, signalReliability[key] + 0.02);
+  return; // Disabled — no trading feedback loop
 }
+// Confidence smoothing
+const CONFIDENCE_SMOOTHING = 0.7;
 
-// Penalize when system is underperforming
-else if (accuracy < 0.5 && signals[key].score === -1) {
-  signalReliability[key] = Math.max(0.8, signalReliability[key] - 0.02);
-}
+function smoothAllocation(prev, next) {
+  const MAX_CHANGE = 15; // % per cycle
+  const diff = next - prev;
+
+  if (Math.abs(diff) > MAX_CHANGE) {
+    return prev + Math.sign(diff) * MAX_CHANGE;
   }
+
+  return next;
 }
-// ==============================
-// ADAPTIVE WEIGHT ENGINE
-// ==============================
+
+function smoothConfidence(prev, current) {
+  return Math.round(prev * CONFIDENCE_SMOOTHING + current * (1 - CONFIDENCE_SMOOTHING));
+}
+
+// Market quality cap (soft guardrail, not replacing risk engine)
+function applyMarketQualityCap(allocation, quality) {
+  if (quality === "WEAK") return Math.min(allocation, 40);
+  if (quality === "MODERATE") return Math.min(allocation, 75);
+  return allocation;
+}
+
+// Regime floor
+function applyAllocationFloor(allocation, regime) {
+  if (regime.includes("RISK ON")) return Math.max(allocation, 40);
+  if (regime.includes("RISK OFF")) return Math.min(allocation, 30);
+  return allocation;
+}
+
+// Cooldown logic
+const COOLDOWN_PERIOD = 2;
+
+function isCooldownActive(memory) {
+  if (!memory.lastRegimeChangeTs) return false;
+  return (memory.cyclesSinceChange || 0) < COOLDOWN_PERIOD;
+}
 
 function getAdaptiveWeight(signalKey, baseWeight) {
   const reliability = signalReliability[signalKey] || 1;
@@ -807,35 +760,6 @@ function getAdaptiveWeight(signalKey, baseWeight) {
   return baseWeight * adaptiveFactor;
 }
 
-/* 🔥 PnL FIX (SCORE-BASED DRIFT — NO REGRESSION) */
-function updatePortfolioState(tradeDecision, compositeScore) {
-  const now = Date.now();
-
-  if (tradeDecision.action === "BUY") {
-    portfolioState.activePositions = [{
-      ts: now,
-      allocation: parseInt(tradeDecision.allocation),
-      entryScore: compositeScore,
-      currentScore: compositeScore
-    }];
-  }
-
-  if (tradeDecision.action === "SELL") {
-    portfolioState.activePositions = [];
-  }
-
-  let pnl = 0;
-
-  portfolioState.activePositions.forEach(pos => {
-    pos.currentScore = compositeScore;
-    pnl += (pos.currentScore - pos.entryScore) * (pos.allocation / 100);
-  });
-
-  portfolioState.totalPnL = Math.round(pnl);
-  portfolioState.lastUpdate = now;
-
-  return portfolioState;
-}
 
 // ==============================
 // D27 RISK ENGINE
@@ -857,19 +781,24 @@ function updateDrawdown(portfolioState) {
 }
 
 // Reset logic (IMPORTANT)
-riskState.killSwitch = false;
 
-function evaluateKillSwitch(drawdown, signals, regime) {
-  if (drawdown >= 20) {
-    riskState.killSwitch = true;
-  }
 
-  if (signals.vix?.score === -1 && regime.includes("RISK OFF")) {
-    riskState.killSwitch = true;
-  }
+function evaluateKillSwitch(drawdown, signals, regime, compositeScore) {
+  riskState.killSwitch = false;
 
   const negativeSignals = Object.values(signals).filter(s => s.score === -1).length;
-  if (negativeSignals >= 4) {
+
+  // 🚨 TRUE CRASH CONDITION ONLY
+  if (
+    compositeScore < 25 &&
+    negativeSignals >= 6 &&
+    signals.vix?.score === -1
+  ) {
+    riskState.killSwitch = true;
+  }
+
+  // Extreme drawdown protection (secondary)
+  if (drawdown >= 20) {
     riskState.killSwitch = true;
   }
 
@@ -879,6 +808,7 @@ function evaluateKillSwitch(drawdown, signals, regime) {
 
   return riskState.killSwitch;
 }
+
 
 function applyRiskCaps(allocation, confidence, marketQuality, drawdown) {
   let cap = 90;
@@ -1259,27 +1189,6 @@ function computeDiff(currentSignals) {
   return diff;
 }
 
-function updateAccuracy(tradeDecision, compositeScore) {
-  const last = (MEMORY.decisions || []).slice(-1)[0];
-  if (!last) return;
-
-  MEMORY.accuracy.total++;
-
-  let correct = false;
-
-  if (last.action === "BUY" && compositeScore > last.score - 5) correct = true;
-  if (last.action === "SELL" && compositeScore < last.score + 5) correct = true;
-
-  if (correct) MEMORY.accuracy.correct++;
-
-  MEMORY.accuracy.pnlSeries.push({
-    ts: Date.now(),
-    pnl: compositeScore - last.score
-  });
-
-  if (MEMORY.accuracy.pnlSeries.length > 200)
-    MEMORY.accuracy.pnlSeries.shift();
-}
 /* =========================
    CALLBACK (BREEZE SESSION — FIXED ABSOLUTE PATH)
 ========================= */
@@ -1308,8 +1217,9 @@ const body = req.body || {};
   () => autoFillInputs(body),
   DEFAULT_SIGNALS
 );
-if (!inputs.crude) inputs.crude = lastCrudeSignal;
-if (!inputs.vix) inputs.vix = lastVixSignal;
+// REMOVE THESE 2 LINES
+// if (!inputs.crude) inputs.crude = lastCrudeSignal;
+// if (!inputs.vix) inputs.vix = lastVixSignal;
   // const liveData = await getLiveSignals();
 // 📊 Compute Trend from NIFTY
 const niftyData = await safeExecuteAsync(
@@ -1355,10 +1265,11 @@ else momentumSignal = "neutral";
 
 
 // OVERRIDE INPUT
-inputs.trend = trendSignal;
-inputs.momentum = momentumSignal;
-inputs.strength = strengthSignal;
-inputs.breadth = breadthSignal;
+// ✅ Respect manual input priority (CRITICAL FIX)
+inputs.trend = body.trend ?? trendSignal;
+inputs.momentum = body.momentum ?? momentumSignal;
+inputs.strength = body.strength ?? strengthSignal;
+inputs.breadth = body.breadth ?? breadthSignal;
 
 // EXISTING
 
@@ -1371,6 +1282,14 @@ inputs.breadth = breadthSignal;
 );
 
 let regime = getRegime(compositeScore);
+
+// ===== D27.1 REGIME TRACKING =====
+if (regime !== MEMORY.lastSnapshot?.regime) {
+  MEMORY.lastRegimeChangeTs = Date.now();
+  MEMORY.cyclesSinceChange = 0;
+} else {
+  MEMORY.cyclesSinceChange += 1;
+}
 
 // ==============================
 // REGIME STABILITY ENGINE
@@ -1418,19 +1337,7 @@ signals.vix.reliability = signalReliability.vix;
 // ADAPTIVE CONFIDENCE CALIBRATION
 // ==============================
 
-const accuracy = MEMORY.accuracy?.total
-  ? MEMORY.accuracy.correct / MEMORY.accuracy.total
-  : 0.5;
 
-// Reduce confidence if system is underperforming
-if (accuracy < 0.5) {
-  confidence = Math.max(20, Math.round(confidence * 0.8));
-}
-
-// Boost confidence if system is performing well
-if (accuracy > 0.65) {
-  confidence = Math.min(95, Math.round(confidence * 1.1));
-}
 
 // 🔻 degrade confidence if fallback used
 if (fallbackState.crude || fallbackState.vix) {
@@ -1442,58 +1349,82 @@ if (regime === "STRONG RISK ON") {
 } else if (regime === "RISK ON") {
   confidence = Math.max(confidence, 50);
 }
+// ===== D27.1 CONFIDENCE SMOOTHING =====
+const prevConfidence = MEMORY.lastSnapshot?.confidence || confidence;
+confidence = smoothConfidence(prevConfidence, confidence);
+
   const marketQuality = getMarketQuality(confidence);
   const sectorAllocation = getDynamicSectorAllocation(regime, signals, intelligence);
-  const strategy = buildStrategy(regime, confidence, marketQuality, sectorAllocation);
-  const explanation = buildExplanation(signals);
-  const tradeDecision = buildTradeDecision(regime, confidence, marketQuality, intelligence, signals);
+  // const strategy = buildStrategy(regime, confidence, marketQuality, sectorAllocation);
+    // const tradeDecision = buildTradeDecision(regime, confidence, marketQuality, intelligence, signals);
  
   updateSignalReliability(signals);
 
-  const portfolioStateData = updatePortfolioState(tradeDecision, compositeScore);
-  // ==============================
+  const portfolioStateData = portfolioState;
+  
+// ==============================
 // D27 RISK PIPELINE
 // ==============================
 
 const drawdown = updateDrawdown(portfolioStateData);
 
-const killSwitch = evaluateKillSwitch(drawdown, signals, regime);
+const killSwitch = evaluateKillSwitch(drawdown, signals, regime, compositeScore);
 
 // Start with computed allocation
-let finalAllocation = parseInt(tradeDecision.allocation);
+let suggestedExposure = 50; // neutral placeholder (no execution layer)
+
+// ===== D27.1 GUARDRAILS START =====
+
+// Previous allocation reference
+const prevAllocation =
+  MEMORY.portfolioState?.activePositions?.slice(-1)[0]?.allocation ||
+  suggestedExposure;
+
+// 1. Market quality soft cap
+suggestedExposure = applyMarketQualityCap(suggestedExposure, marketQuality);
+
+// 2. Regime floor
+suggestedExposure = applyAllocationFloor(suggestedExposure, regime);
+
+// 3. Smooth allocation movement
+suggestedExposure = smoothAllocation(prevAllocation, suggestedExposure);
+
+// 4. Cooldown freeze
+if (isCooldownActive(MEMORY)) {
+  suggestedExposure = prevAllocation;
+}
+
+// ===== EXISTING RISK ENGINE (UNCHANGED ORDER AFTER THIS) =====
 
 // Apply volatility adjustment
-finalAllocation = applyVolatilityAdjustment(finalAllocation, signals);
+suggestedExposure = applyVolatilityAdjustment(suggestedExposure, signals);
 
 // Apply caps
-finalAllocation = applyRiskCaps(finalAllocation, confidence, marketQuality, drawdown);
+suggestedExposure = applyRiskCaps(suggestedExposure, confidence, marketQuality, drawdown);
 
 // Kill switch override
 if (killSwitch) {
-  finalAllocation = 0;
-  tradeDecision.action = "SELL";
+  suggestedExposure = 0;
 }
-
 // Update trade decision
-tradeDecision.allocation = finalAllocation + "%";
 
 // Final risk output
 const risk = {
-  exposure: finalAllocation + "%",
+  exposure: suggestedExposure + "%",
   riskLevel:
-    finalAllocation > 70 ? "HIGH" :
-    finalAllocation > 40 ? "MEDIUM" : "LOW",
+    suggestedExposure > 70 ? "HIGH" :
+    suggestedExposure > 40 ? "MEDIUM" : "LOW",
   drawdown,
   killSwitch
 };
 
 // ✅ MOVE PORTFOLIO BUILD HERE
-const portfolio = buildPortfolio(
-  regime,
-  strategy,
-  sectorAllocation,
-  tradeDecision
-);
+// const portfolio = buildPortfolio(
+//   regime,
+//   strategy,
+//   sectorAllocation,
+//   tradeDecision
+// );
 
   const now = Date.now();
 const timestamp = now;
@@ -1567,7 +1498,10 @@ if (MEMORY.v8_regimeHistory.length > 100)
 // limit size
 
 // update snapshot
-MEMORY.lastSnapshot = currentSnapshot;
+MEMORY.lastSnapshot = {
+  ...currentSnapshot,
+  allocation: suggestedExposure
+};
 // ===== V8 TREND =====
 const last10 = Array.isArray(MEMORY.signalsHistory)
   ? MEMORY.signalsHistory.slice(-10)
@@ -1667,26 +1601,48 @@ const advisory = buildAdvisory({
 // NARRATIVE ENGINE EXECUTION
 // ==============================
 
-const narrative = buildNarrative({
-  regime,
-  interpretation,
-  advisory
-});
-/* ==============================
+const marketView = safeExecute(() =>
+  buildMarketView({
+    regime,
+    compositeScore,
+    confidence,
+    marketQuality,
+    signals,
+    intelligence
+  }),
+  {}
+);
+
+const portfolioGuidance = safeExecute(() =>
+  buildPortfolioGuidance({
+    regime,
+    confidence
+  }),
+  {}
+);
+
+const riskDashboard = safeExecute(() =>
+  buildRiskDashboard({
+    risk,
+    signals,
+    intelligence
+  }),
+  {}
+);/* ==============================
    V7 EXECUTION (CORRECT PLACE)
 ============================== */
 
 const v7_transition = detectRegimeTransition(regime, compositeScore);
 const v7_diff = computeDiff(signals);
 
-updateAccuracy(tradeDecision, compositeScore);
+// Disabled accuracy tracking — not a trading system
 
 logDecision({
   ts: Date.now(),
   regime,
   score: compositeScore,
-  action: tradeDecision.action,
-  allocation: tradeDecision.allocation,
+  action: "HOLD",
+  allocation: suggestedExposure + "%",
   signals
 });
 
@@ -1729,54 +1685,40 @@ safeExecute(() => {
   );
 });
 // THEN response
-  res.json({
-    version: VERSION,
-    inputsUsed: inputs,
-meta: {
-  fallbackUsed: {
-    crude: fallbackState.crude,
-    vix: fallbackState.vix
-  }
-},
-    signals,
+  const narrative = safeExecute(() =>
+  buildNarrative({
     regime,
-    compositeScore,
-    confidence,
-    marketQuality,
-    sectorAllocation,
-    strategy,
-    explanation,
-    tradeDecision,
-    portfolio,
-    regimeIntel,
-    portfolioState: portfolioStateData,
-    risk,
     interpretation,
-    advisory,
-    narrative,
-v8: {
-  signalChanges,
-  regimeTransition,
-  alerts: (MEMORY.alerts || []).slice(-10),
-  trend
-},
-  v7: {
-    transition: v7_transition,
-    diff: v7_diff,
-    accuracy: {
-      hitRate: MEMORY.accuracy.total
-        ? Math.round((MEMORY.accuracy.correct / MEMORY.accuracy.total) * 100)
-        : 0,
-      total: MEMORY.accuracy.total
-    },
-    history: (MEMORY.regimeHistory || []).slice(-20),
-lastDecisions: (MEMORY.decisions || []).slice(-10)
-}
+    advisory
+  }),
+  {}
+);
+  
+  res.json({
+  version: VERSION,
+  timestamp,
 
+  marketView,
+  portfolioGuidance,
+
+  sectorView: {
+    allocations: sectorAllocation
+  },
+
+  riskDashboard,
+  regimeIntel,
+  narrative,
+
+  meta: {
+    fallbackUsed: fallbackState
+  }
 });
 
   } catch (err) {
-    logger.error({ err }, "CRITICAL ROUTE FAILURE");
+    logger.error({
+  error: err.message,
+  stack: err.stack
+}, "CRITICAL ROUTE FAILURE");
 
     return res.status(500).json({
       error: "SYSTEM_FAILURE",
