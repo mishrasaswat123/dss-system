@@ -58,7 +58,10 @@ async function fetchNifty() {
 
     const closesRaw = result?.indicators?.quote?.[0]?.close || [];
     const closes = closesRaw.filter(v => v !== null && v !== undefined);
-    const current = result?.meta?.regularMarketPrice;
+    const current =
+  result?.meta?.regularMarketPrice ||
+  closes[closes.length - 1] ||
+  null;
 
     return { closes, current };
 
@@ -68,46 +71,21 @@ async function fetchNifty() {
 }
 
 // NSE Breadth
-async function fetchBreadth() {
-  try {
-    const res = await fetch("https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050", {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
-      }
-    });
-
-    const json = await res.json();
-    const stocks = json?.data || [];
-
-    let advances = 0, declines = 0;
-
-    stocks.forEach(s => {
-      if (s.pChange > 0) advances++;
-      else if (s.pChange < 0) declines++;
-    });
-
-    return { advances, declines };
-
-  } catch (err) {
-    return null;
-  }
-}
 
 // ===== SCORING =====
 function scoreSignal(signal) {
-  if (signal === "BUY") return 100;
-  if (signal === "SELL") return 0;
+  if (signal === "BUY" || signal === "ABOVE") return 100;
+  if (signal === "SELL" || signal === "BELOW") return 0;
   return 50;
 }
 
 function computeScore(signals) {
   const weights = {
-    "RSI (14)": 0.15,
-    "50 DMA": 0.20,
+    "RSI (14)": 0.20,
+    "50 DMA": 0.25,
+    "200 DMA": 0.25,
     "MACD": 0.20,
-    "Bollinger Position": 0.10,
-    "Market Breadth": 0.20
+    "Bollinger Position": 0.10
   };
 
   let total = 0;
@@ -144,73 +122,123 @@ exports.fetchEquitySignals = async () => {
 
     const rsi = calculateRSI(closes);
     const dma50 = SMA(closes, 50);
-
+    const dma200 = SMA(closes, 200);
     const ema12 = EMA(closes.slice(-50), 12);
     const ema26 = EMA(closes.slice(-50), 26);
     const macd = ema12 - ema26;
-    const signalLine = EMA(closes.slice(-50), 9);
+    const signalLine = macd; // temporary fix to avoid false signals
 
     const boll = calculateBollinger(closes);
-    const breadth = await fetchBreadth();
+    const breadth = null;
 
     const timestamp = Date.now();
     const signals = [];
 
-    if (rsi !== null) {
-      signals.push({
-        name: "RSI (14)",
-        value: Number(rsi.toFixed(2)),
-        signal: rsi < 30 ? "BUY" : rsi > 70 ? "SELL" : "WATCH",
-        timestamp
-      });
-    }
+    signals.push({
+  name: "RSI (14)",
+  value: rsi !== null ? Number(rsi.toFixed(2)) : null,
+  signal:
+    rsi === null
+      ? "WATCH"
+      : rsi < 30
+      ? "BUY"
+      : rsi > 70
+      ? "SELL"
+      : "WATCH",
+  sentiment:
+    rsi === null
+      ? "neutral"
+      : rsi < 30
+      ? "bullish"
+      : rsi > 70
+      ? "bearish"
+      : "neutral",
+  confidence: rsi === null ? 0.3 : 0.6,
+  timestamp
+});
 
     if (dma50 !== null) {
-      signals.push({
-        name: "50 DMA",
-        value: Number(dma50.toFixed(2)),
-        signal: current > dma50 ? "BUY" : "SELL",
-        timestamp
-      });
-    }
-
+  signals.push({
+    name: "50 DMA",
+    value: Number(dma50.toFixed(2)),
+    signal:
+  current && dma50
+    ? current > dma50 ? "ABOVE" : "BELOW"
+    : "WATCH",
+sentiment:
+  current && dma50
+    ? current > dma50 ? "bullish" : "bearish"
+    : "neutral",
+    confidence: 0.6,
+    timestamp
+  });
+}
+if (dma200 !== null) {
+  signals.push({
+    name: "200 DMA",
+    value: Number(dma200.toFixed(2)),
+    signal:
+  current && dma200
+    ? current > dma200 ? "ABOVE" : "BELOW"
+    : "WATCH",
+sentiment:
+  current && dma200
+    ? current > dma200 ? "bullish" : "bearish"
+    : "neutral",
+    confidence: 0.7,
+    timestamp
+  });
+}
     if (macd !== null) {
       signals.push({
-        name: "MACD",
-        value: Number(macd.toFixed(2)),
-        signal: macd > signalLine ? "BUY" : "SELL",
-        timestamp
-      });
+  name: "MACD",
+  value: Number(macd.toFixed(2)),
+  signal: macd > signalLine ? "BUY" : "SELL",
+  sentiment: macd > signalLine ? "bullish" : "bearish",
+  confidence: 0.6,
+  timestamp
+});
     }
 
     if (boll) {
       signals.push({
         name: "Bollinger Position",
-        value: Number(((current - boll.lower) / (boll.upper - boll.lower)).toFixed(2)),
-        signal: current > boll.upper ? "SELL" : current < boll.lower ? "BUY" : "WATCH",
+        value:
+  current && boll
+    ? Number(((current - boll.lower) / (boll.upper - boll.lower)).toFixed(2))
+    : null,
+        signal:
+  current && boll
+    ? current > boll.upper
+      ? "SELL"
+      : current < boll.lower
+      ? "BUY"
+      : "WATCH"
+    : "WATCH",
         timestamp
       });
     }
 
-    if (breadth) {
-      const ratio = breadth.advances / (breadth.declines || 1);
-
-      signals.push({
-        name: "Market Breadth",
-        value: Number(ratio.toFixed(2)),
-        signal: ratio > 1 ? "BUY" : "SELL",
-        timestamp
-      });
-    }
+    // Market Breadth disabled (NSE blocked)
 
     // ✅ FINAL DSS OUTPUT
 
 const equityScore = computeScore(signals);
 const regime = detectRegime(equityScore);
 
+const prevClose = closes[closes.length - 2];
+
+const changePct =
+  current && prevClose
+    ? ((current - prevClose) / prevClose) * 100
+    : null;
 return {
   dataStatus: "live",
   payload: {
+    kpis: {
+      niftyLtp: current,
+      niftyChangePct: changePct ? Number(changePct.toFixed(2)) : null
+    },
     technicalSignals: signals,
     equityScore,
     regime
@@ -224,3 +252,4 @@ return {
     };
   }
 };
+

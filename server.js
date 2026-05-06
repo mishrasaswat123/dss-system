@@ -51,9 +51,28 @@ db.run('CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(timestamp)');
 db.run('CREATE INDEX IF NOT EXISTS idx_decisions_time ON decisions(timestamp)');
 });
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+// ===============================
+// DSS v6 — CACHE LAYER
+// ===============================
+const DSSCache = {
+  store: {},
+  meta: {},
+
+  set(key, data) {
+    this.store[key] = data;
+    this.meta[key] = { ts: Date.now() };
+  },
+
+  get(key) {
+    return this.store[key];
+  },
+
+  isFresh(key, ttl) {
+    return this.meta[key] && Date.now() - this.meta[key].ts < ttl;
+  }
+};
 const fs = require("fs");
 const technicalRoutes = require("./routes/technicalRoutes");
-const equityRoutes = require("./routes/equity.routes");
 // ==============================
 // STABILITY LAYER — SAFE EXECUTION
 // ==============================
@@ -90,13 +109,151 @@ app.use("/brain-auto", limiter);
 
 app.use(express.json());
 app.use("/api/technical", technicalRoutes);
-app.use("/api/equity", equityRoutes);
+
+
+// ===============================
+// DSS v6 — EQUITY API (VERSIONED)
+// ===============================
+const CACHE_TTL_EQUITY = 30000;
+app.get("/api/v1/equity", async (req, res) =>
+  safeExecuteAsync(async () => {
+
+    let cached = DSSCache.get("nse:index");
+
+    if (!cached) {
+
+  // 🔻 TRY FORCE FETCH (ONE-TIME RECOVERY)
+  await safeExecuteAsync(runNSEIndexJob, null);
+
+  const retryCache = DSSCache.get("nse:index");
+
+  if (!retryCache) {
+    return res.status(503).json({
+      status: "ERROR",
+      timestamp: Date.now(),
+      dataStatus: "unavailable",
+      error: {
+        code: "CACHE_MISS",
+        message: "No market data available"
+      }
+    });
+  }
+
+  cached = retryCache;
+}
+
+    const meta = DSSCache.meta["nse:index"];
+	const technicalSignals = buildEquitySignals(cached);
+
+let dataStatus = "live";
+
+if (!meta) {
+  dataStatus = "unavailable";
+} else {
+  const age = Date.now() - meta.ts;
+
+  if (age > CACHE_TTL_EQUITY * 4) {
+    dataStatus = "unavailable";
+  } else if (age > CACHE_TTL_EQUITY) {
+    dataStatus = "stale";
+  }
+}
+
+    // 🔴 FIRST: handle unavailable BEFORE building response
+if (dataStatus === "unavailable") {
+  return res.status(503).json({
+    status: "ERROR",
+    timestamp: Date.now(),
+    dataStatus: "unavailable",
+    error: {
+      code: "STALE_DATA",
+      message: "Market data unavailable"
+    }
+  });
+}
+
+// ✅ THEN build response
+const response = {
+  status: "OK",
+  timestamp: Date.now(),
+  dataStatus,
+
+  data: {
+
+    kpis: {
+
+      nifty: {
+        value:
+          cached.niftyLtp !== null
+            ? Number(cached.niftyLtp.toFixed(2))
+            : null,
+
+        changePct:
+          cached.niftyChangePct !== null
+            ? cached.niftyChangePct
+            : null,
+
+        signal:
+          cached.niftyChangePct > 0
+            ? "BUY"
+            : cached.niftyChangePct < 0
+            ? "SELL"
+            : "WATCH",
+
+        sentiment:
+          cached.niftyChangePct > 0
+            ? "bullish"
+            : cached.niftyChangePct < 0
+            ? "bearish"
+            : "neutral"
+      },
+
+      volatility: {
+        value: cached.vixValue,
+
+        posture:
+  cached.vixValue == null
+    ? "UNKNOWN"
+    : cached.vixValue >= 20
+    ? "HIGH_VOL"
+    : cached.vixValue <= 14
+    ? "LOW_VOL"
+    : "NORMAL_VOL"
+      },
+
+      trend: {
+        posture:
+          technicalSignals.dma50.signal === "BUY" &&
+          technicalSignals.dma200.signal === "BUY"
+            ? "BULLISH"
+
+            : technicalSignals.dma50.signal === "SELL" &&
+              technicalSignals.dma200.signal === "SELL"
+            ? "BEARISH"
+
+            : "NEUTRAL"
+      }
+    },
+
+    technical: technicalSignals
+  }
+};
+
+logger.info({
+  source: "equity-api",
+  dataStatus,
+  ts: Date.now()
+}, "Equity API response served");
+
+res.json(response);
+
+  }, null)
+);
 
 app.use((req, res, next) => {
   logger.info({
     method: req.method,
-    url: req.url,
-    body: req.body
+    url: req.url,    
   }, "Incoming request");
   next();
 });
@@ -279,7 +436,7 @@ async function fetchCrude() {
   if (circuitBreaker.crude.blockedUntil > now) {
     logger.warn("Crude API blocked — using cache");
 fallbackState.crude = true;
-return marketCache.crudePrice ?? 80;   // crude default
+return marketCache.crudePrice || null;   // crude default
   }
 
   try {
@@ -311,7 +468,7 @@ return marketCache.crudePrice ?? 80;   // crude default
       logger.error("Crude circuit breaker ACTIVATED");
     }
 fallbackState.crude = true;
-return marketCache.crudePrice ?? 80;   // crude default
+return marketCache.crudePrice || null;   // crude default
   }
 }
 
@@ -321,7 +478,7 @@ async function fetchVix() {
   if (circuitBreaker.vix.blockedUntil > now) {
     logger.warn("VIX API blocked — using cache");
     fallbackState.vix = true;
-    return marketCache.vixValue ?? 18;     // vix default
+    return marketCache.vixValue || null;     // vix default
   }
 
   try {
@@ -353,13 +510,15 @@ async function fetchVix() {
       logger.error("VIX circuit breaker ACTIVATED");
     }
     fallbackState.vix = true;
-    return marketCache.vixValue ?? 18;     // vix default
+    return marketCache.vixValue || null;     // vix default
   }
 }
 // ===============================
 // EMA HELPER (D25)
 // ===============================
 function EMA(prices, period) {
+  if (!prices || prices.length === 0) return null;
+
   const k = 2 / (period + 1);
   let ema = prices[0];
 
@@ -368,7 +527,377 @@ function EMA(prices, period) {
   }
 
   return ema;
+}function computeRSI14(prices) {
+  if (!prices || prices.length < 15) return null;
+
+  let gains = 0, losses = 0;
+
+  for (let i = 1; i <= 14; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff > 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+
+  let avgGain = gains / 14;
+  let avgLoss = losses / 14;
+
+if (avgLoss === 0) return 100;
+if (avgGain === 0) return 0;
+
+const rs = avgGain / avgLoss;
+const rsi = 100 - (100 / (1 + rs));
+return Number(rsi.toFixed(2));
 }
+
+function computeSMA(prices, period) {
+  if (!prices || prices.length < period) return null;
+  const slice = prices.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+// ===============================
+// DSS v6 — EQUITY SIGNAL BUILDER
+// ===============================
+function buildEquitySignals(cache) {
+
+  const rsi = cache?.rsi ?? null;
+  const sma50 = cache?.sma50 ?? null;
+  const sma200 = cache?.sma200 ?? null;
+  const macd = cache?.macd ?? null;
+  const crossSignal = cache?.crossSignal ?? null;
+  const nifty = cache?.niftyLtp ?? null;
+  const vix = cache?.vixValue ?? null;
+
+  const dma50Signal =
+    nifty && sma50
+      ? nifty > sma50 ? "BUY" : "SELL"
+      : "WATCH";
+
+  const dma200Signal =
+    nifty && sma200
+      ? nifty > sma200 ? "BUY" : "SELL"
+      : "WATCH";
+
+  return {
+    rsi: {
+      value: rsi,
+      signal:
+        rsi >= 70
+          ? "SELL"
+          : rsi <= 30
+          ? "BUY"
+          : "WATCH",
+
+      sentiment:
+        rsi >= 70
+          ? "bearish"
+          : rsi <= 30
+          ? "bullish"
+          : "neutral"
+    },
+
+    dma50: {
+      value: sma50,
+      signal: dma50Signal,
+      sentiment:
+        dma50Signal === "BUY"
+          ? "bullish"
+          : dma50Signal === "SELL"
+          ? "bearish"
+          : "neutral"
+    },
+
+    dma200: {
+      value: sma200,
+      signal: dma200Signal,
+      sentiment:
+        dma200Signal === "BUY"
+          ? "bullish"
+          : dma200Signal === "SELL"
+          ? "bearish"
+          : "neutral"
+    },
+
+    macd: {
+      value: macd,
+      signal:
+        macd > 0
+          ? "BUY"
+          : macd < 0
+          ? "SELL"
+          : "WATCH",
+
+      sentiment:
+        macd > 0
+          ? "bullish"
+          : macd < 0
+          ? "bearish"
+          : "neutral"
+    },
+
+    cross: {
+      value: crossSignal,
+      signal:
+        crossSignal === "GOLDEN_CROSS"
+          ? "BUY"
+          : crossSignal === "DEATH_CROSS"
+          ? "SELL"
+          : "WATCH",
+
+      sentiment:
+        crossSignal === "GOLDEN_CROSS"
+          ? "bullish"
+          : crossSignal === "DEATH_CROSS"
+          ? "bearish"
+          : "neutral"
+    },
+
+    volatility: {
+      value: vix,
+
+      signal:
+        vix >= 20
+          ? "SELL"
+          : vix <= 14
+          ? "BUY"
+          : "WATCH",
+
+      sentiment:
+        vix >= 20
+          ? "bearish"
+          : vix <= 14
+          ? "bullish"
+          : "neutral"
+    }
+  };
+}
+ 
+// ===============================
+// DSS v6 — BRAIN RESPONSE BUILDER
+// ===============================
+function buildBrainResponse({
+  regime,
+  compositeScore,
+  confidence,
+  marketQuality,
+  signals,
+  intelligence,
+  risk,
+  interpretation,
+  advisory
+}) {
+
+  const marketView = safeExecute(() =>
+    buildMarketView({
+      regime,
+      compositeScore,
+      confidence,
+      marketQuality,
+      signals,
+      intelligence
+    }),
+    {}
+  );
+
+  const portfolioGuidance = safeExecute(() =>
+    buildPortfolioGuidance({
+      regime,
+      confidence
+    }),
+    {}
+  );
+
+  const riskDashboard = safeExecute(() =>
+    buildRiskDashboard({
+      risk,
+      signals,
+      intelligence
+    }),
+    {}
+  );
+
+  const regimeIntel = {
+    ...intelligence
+  };
+
+  const narrative = safeExecute(() =>
+    buildNarrative({
+      regime,
+      interpretation,
+      advisory
+    }),
+    {}
+  );
+
+  return {
+    marketView,
+    portfolioGuidance,
+    riskDashboard,
+    regimeIntel,
+    narrative
+  };
+}
+
+// ===============================
+// DSS v6 — SIGNAL RESPONSE BUILDER
+// ===============================
+function buildSignalsResponse({
+  regime,
+  compositeScore,
+  confidence,
+  marketQuality,
+  signals,
+  intelligence
+}) {
+
+  const simplifiedSignals = {};
+
+  Object.keys(signals || {}).forEach(key => {
+    simplifiedSignals[key] = signals[key].value;
+  });
+
+  return {
+    regime,
+    compositeScore,
+    confidence,
+    marketQuality,
+
+    signals: simplifiedSignals,
+
+    intelligence: {
+      conviction: intelligence.conviction,
+      signalBalance: intelligence.signalBalance,
+      conflict: intelligence.conflict,
+      positiveSignals: intelligence.positiveSignals,
+      negativeSignals: intelligence.negativeSignals
+    }
+  };
+}
+
+// ===============================
+// DSS v6 — SCHEDULER
+// ===============================
+const NSE_POLL_INTERVAL = 15000;
+
+async function runNSEIndexJob() {
+  try {
+
+    // ❌ NSE REMOVED (blocked in production)
+// PURE YAHOO PIPELINE (FSD v6 compliant)
+
+const niftyData = await safeFetch(
+  "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=5d&interval=5m"
+);
+
+if (!niftyData || !niftyData.chart || !niftyData.chart.result) {
+  logger.error("Yahoo data invalid — skipping cache update");
+  return;
+}
+
+const result = niftyData.chart.result[0];
+
+const closes =
+  result?.indicators?.quote?.[0]?.close
+    ?.filter(v => v !== null && !isNaN(v) && isFinite(v)) || [];
+
+const current =
+  Number(result?.meta?.regularMarketPrice) ||
+  Number(closes[closes.length - 1]) ||
+  null;
+
+const prevClose =
+  closes.length >= 2 ? closes[closes.length - 2] : null;
+
+const changePct =
+  current && prevClose
+    ? Number((((current - prevClose) / prevClose) * 100).toFixed(2))
+    : null;
+
+const rsi =
+  closes.length >= 15
+    ? computeRSI14(closes.slice(-Math.min(50, closes.length)))
+    : null;
+	
+const sma50 =
+  closes.length >= 50
+    ? computeSMA(closes, 50)
+    : null;
+
+const sma200 =
+  closes.length >= 200
+    ? computeSMA(closes, 200)
+    : null;
+
+const ema12 =
+  closes.length >= 26
+    ? EMA(closes.slice(-50), 12)
+    : null;
+
+const ema26 =
+  closes.length >= 26
+    ? EMA(closes.slice(-50), 26)
+    : null;
+
+const macd =
+  ema12 !== null && ema26 !== null
+    ? Number((ema12 - ema26).toFixed(2))
+    : null;
+
+const crossSignal =
+  sma50 && sma200
+    ? sma50 > sma200
+      ? "GOLDEN_CROSS"
+      : "DEATH_CROSS"
+    : null;
+
+const vixValue = await fetchVix();
+
+if (current !== null) {
+  DSSCache.set("nse:index", {
+  niftyLtp: current,
+  niftyChangePct: changePct,
+
+  rsi,
+
+  sma50:
+    sma50 !== null
+      ? Number(sma50.toFixed(2))
+      : null,
+
+  sma200:
+    sma200 !== null
+      ? Number(sma200.toFixed(2))
+      : null,
+
+  macd,
+
+  crossSignal,
+
+  vixValue,
+
+  timestamp: Date.now(),
+  source: "yahoo"
+});
+}
+
+logger.info({
+  source: "yahoo",
+  hasData: !!current
+}, "Market data updated");
+
+
+} catch (err) {
+  logger.error({
+    error: err.message,
+    stack: err.stack
+  }, "NSE Scheduler failed");
+}
+}
+
+// ✅ START SCHEDULER (ONLY ONCE)
+setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
+runNSEIndexJob();
+
 async function fetchNiftyData() {
   try {
     const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=5d&interval=5m";
@@ -381,7 +910,13 @@ async function fetchNiftyData() {
       open: result?.indicators?.quote?.[0]?.open?.[0],
       current: result?.meta?.regularMarketPrice
     };
-  } catch {
+
+  } catch (err) {
+    logger.error({
+      error: err.message,
+      stack: err.stack
+    }, "fetchNiftyData failed");
+
     return null;
   }
 }
@@ -1207,6 +1742,289 @@ app.get("/health", (req, res) => {
     timestamp: Date.now()
   });
 });
+
+// ===============================
+// DSS v6 — SIGNALS API
+// ===============================
+app.get("/api/v1/signals", async (req, res) => {
+  try {
+
+    const body = {};
+
+    const inputs = await safeExecuteAsync(
+      () => autoFillInputs(body),
+      DEFAULT_SIGNALS
+    );
+
+    const niftyData = await safeExecuteAsync(
+      fetchNiftyData,
+      null
+    );
+
+    let trendSignal = "neutral";
+    let momentumSignal = "neutral";
+    let strengthSignal = "neutral";
+    let breadthSignal = 0.5;
+
+    if (
+      niftyData &&
+      Array.isArray(niftyData.prices) &&
+      niftyData.prices.length >= 50
+    ) {
+
+      const ema20 = EMA(niftyData.prices.slice(-20), 20);
+      const ema50 = EMA(niftyData.prices.slice(-50), 50);
+
+      if (ema20 && ema50) {
+        trendSignal = ema20 > ema50 ? "bullish" : "bearish";
+      }
+
+      if (ema20 && niftyData.current) {
+
+        const momentumDiff =
+          (niftyData.current - ema20) / ema20;
+
+        if (momentumDiff > 0.002) {
+          momentumSignal = "bullish";
+        } else if (momentumDiff < -0.002) {
+          momentumSignal = "bearish";
+        }
+      }
+
+      const openPrice =
+        niftyData.open ||
+        niftyData.prices?.[0] ||
+        niftyData.current;
+
+      const strength =
+        openPrice
+          ? (niftyData.current - openPrice) / openPrice
+          : 0;
+
+      if (strength > 0.002) {
+        strengthSignal = "strong";
+      } else if (strength < -0.002) {
+        strengthSignal = "weak";
+      }
+
+      breadthSignal =
+        openPrice &&
+        (niftyData.current - openPrice) > 0
+          ? 0.6
+          : 0.4;
+    }
+
+    inputs.trend = trendSignal;
+    inputs.momentum = momentumSignal;
+    inputs.strength = strengthSignal;
+    inputs.breadth = breadthSignal;
+
+    let { signals, compositeScore } =
+      buildSignals(inputs, "NEUTRAL");
+
+    let regime = getRegime(compositeScore);
+
+    ({ signals, compositeScore } =
+      buildSignals(inputs, regime));
+
+    const intelligence =
+      computeSignalIntelligence(signals);
+
+    const confidence =
+      getConfidence(signals);
+
+    const marketQuality =
+      getMarketQuality(confidence);
+
+    const response =
+      buildSignalsResponse({
+        regime,
+        compositeScore,
+        confidence,
+        marketQuality,
+        signals,
+        intelligence
+      });
+
+    return res.json({
+      status: "OK",
+      timestamp: Date.now(),
+      dataStatus: "live",
+      data: response
+    });
+
+  } catch (err) {
+
+    logger.error({
+      error: err.message,
+      stack: err.stack
+    }, "SIGNALS_API_ERROR");
+
+    return res.status(500).json({
+      status: "ERROR",
+      timestamp: Date.now(),
+      error: {
+        code: "SIGNALS_API_FAILED",
+        message: "Failed to generate signals response"
+      }
+    });
+  }
+});
+
+// ===============================
+// DSS v6 — BRAIN API
+// ===============================
+app.get("/api/v1/brain", async (req, res) => {
+  try {
+
+    const body = {};
+
+    const inputs = await safeExecuteAsync(
+      () => autoFillInputs(body),
+      DEFAULT_SIGNALS
+    );
+
+    const niftyData = await safeExecuteAsync(
+      fetchNiftyData,
+      null
+    );
+
+    let trendSignal = "neutral";
+    let momentumSignal = "neutral";
+    let strengthSignal = "neutral";
+    let breadthSignal = 0.5;
+
+    if (
+      niftyData &&
+      Array.isArray(niftyData.prices) &&
+      niftyData.prices.length >= 50
+    ) {
+
+      const ema20 = EMA(niftyData.prices.slice(-20), 20);
+      const ema50 = EMA(niftyData.prices.slice(-50), 50);
+
+      if (ema20 && ema50) {
+        trendSignal = ema20 > ema50 ? "bullish" : "bearish";
+      }
+
+      if (ema20 && niftyData.current) {
+        const momentumDiff =
+          (niftyData.current - ema20) / ema20;
+
+        if (momentumDiff > 0.002) {
+          momentumSignal = "bullish";
+        } else if (momentumDiff < -0.002) {
+          momentumSignal = "bearish";
+        }
+      }
+
+      const openPrice =
+        niftyData.open ||
+        niftyData.prices?.[0] ||
+        niftyData.current;
+
+      const strength = openPrice
+        ? (niftyData.current - openPrice) / openPrice
+        : 0;
+
+      if (strength > 0.002) {
+        strengthSignal = "strong";
+      } else if (strength < -0.002) {
+        strengthSignal = "weak";
+      }
+
+      breadthSignal =
+        openPrice &&
+        (niftyData.current - openPrice) > 0
+          ? 0.6
+          : 0.4;
+    }
+
+    inputs.trend = trendSignal;
+    inputs.momentum = momentumSignal;
+    inputs.strength = strengthSignal;
+    inputs.breadth = breadthSignal;
+
+    let { signals, compositeScore } =
+      buildSignals(inputs, "NEUTRAL");
+
+    let regime = getRegime(compositeScore);
+
+    ({ signals, compositeScore } =
+      buildSignals(inputs, regime));
+
+    const intelligence =
+      computeSignalIntelligence(signals);
+
+    let confidence = getConfidence(signals);
+
+    const marketQuality =
+      getMarketQuality(confidence);
+
+    const risk = {
+      exposure: "50%",
+      riskLevel: "MEDIUM",
+      drawdown: riskState.currentDrawdown || 0,
+      killSwitch: riskState.killSwitch || false
+    };
+
+    const interpretation = interpretationEngine({
+      regime,
+      compositeScore,
+      signals,
+      confidence,
+      marketQuality,
+      conviction: intelligence.conviction,
+      conflict: intelligence.conflict
+    });
+
+    const advisory = buildAdvisory({
+      regime,
+      confidence,
+      marketQuality,
+      intelligence,
+      sectorAllocation:
+        getSectorAllocation(regime),
+      risk
+    });
+
+    const brain = buildBrainResponse({
+      regime,
+      compositeScore,
+      confidence,
+      marketQuality,
+      signals,
+      intelligence,
+      risk,
+      interpretation,
+      advisory
+    });
+
+    return res.json({
+      status: "OK",
+      timestamp: Date.now(),
+      dataStatus: "live",
+      data: brain
+    });
+
+  } catch (err) {
+
+    logger.error({
+      error: err.message,
+      stack: err.stack
+    }, "BRAIN_API_ERROR");
+
+    return res.status(500).json({
+      status: "ERROR",
+      timestamp: Date.now(),
+      error: {
+        code: "BRAIN_API_FAILED",
+        message: "Failed to generate brain response"
+      }
+    });
+  }
+});
+  
 app.post("/brain-auto", async (req, res) => {
   try {
 // RESET FALLBACK STATE (per request)
@@ -1233,22 +2051,39 @@ let strengthSignal = "neutral";
 let breadthSignal = 0.5;
 
 if (niftyData && Array.isArray(niftyData.prices) && niftyData.prices.length >= 50) {
-
+  if (!niftyData.current) {
+    trendSignal = "neutral";
+    momentumSignal = "neutral";
+    strengthSignal = "neutral";
+    breadthSignal = 0.5;
+  } else {
   const ema20 = EMA(niftyData.prices.slice(-20), 20);
   const ema50 = EMA(niftyData.prices.slice(-50), 50);
 
   // ✅ TREND
+  if (ema20 && ema50) {
   trendSignal = ema20 > ema50 ? "bullish" : "bearish";
+} else {
+  trendSignal = "neutral";
+}
 
   // ✅ MOMENTUM
+  if (ema20 && ema20 !== 0) {
   const momentumDiff = (niftyData.current - ema20) / ema20;
 
-if (momentumDiff > 0.002) momentumSignal = "bullish";
-else if (momentumDiff < -0.002) momentumSignal = "bearish";
-else momentumSignal = "neutral";
+  if (momentumDiff > 0.002) momentumSignal = "bullish";
+  else if (momentumDiff < -0.002) momentumSignal = "bearish";
+  else momentumSignal = "neutral";
+} else {
+  momentumSignal = "neutral";
+}
 
   // ✅ STRENGTH
-  const strength = (niftyData.current - niftyData.open) / niftyData.open;
+  const openPrice = niftyData.open || niftyData.prices?.[0] || niftyData.current;
+
+const strength = openPrice
+  ? (niftyData.current - openPrice) / openPrice
+  : 0;
 
  if (strength > 0.002) {
   strengthSignal = "strong";
@@ -1259,8 +2094,11 @@ else momentumSignal = "neutral";
 }
 
   // ✅ BREADTH
-  breadthSignal = (niftyData.current - niftyData.open) > 0 ? 0.6 : 0.4;
-}
+    breadthSignal = openPrice
+    ? (niftyData.current - openPrice) > 0 ? 0.6 : 0.4
+    : 0.5;
+  }
+}  // ✅ THIS LINE WAS MISSING
 
 
 
@@ -1538,7 +2376,7 @@ alerts.push({
 
 // ===== SAVE ALERTS =====
 MEMORY.alerts = MEMORY.alerts || [];
-MEMORY.alerts.push(...alerts);
+MEMORY.alerts = MEMORY.alerts.concat(alerts).slice(-200);
 
 if (MEMORY.alerts.length > 200) {
   MEMORY.alerts.shift();
@@ -1729,6 +2567,22 @@ safeExecute(() => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+app.use((err, req, res, next) => {
+  logger.error({
+    error: err.message,
+    stack: err.stack
+  }, "UNHANDLED ERROR");
+
+  res.status(500).json({
+    status: "ERROR",
+    timestamp: Date.now(),
+    error: {
+      code: "UNHANDLED_EXCEPTION",
+      message: "Unexpected server error"
+    }
+  });
+});
 
 app.listen(PORT, () => {
   logger.info(`DSS running on port ${PORT} (${VERSION})`);

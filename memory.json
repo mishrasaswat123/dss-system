@@ -1,249 +1,6 @@
 {
   "decisions": [
     {
-      "ts": 1777841067130,
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "action": "HOLD",
-      "allocation": "50%",
-      "signals": {
-        "rates": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "liquidity": {
-          "value": "supportive",
-          "score": 1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "crude": {
-          "value": "rising",
-          "score": -1,
-          "weight": 0.15,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "fii": {
-          "value": "buying",
-          "score": 1,
-          "weight": 0.22000000000000003,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "vix": {
-          "value": "low",
-          "score": 1,
-          "weight": 0.1425,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "trend": {
-          "value": "bullish",
-          "score": 1,
-          "weight": 0.11000000000000001,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "momentum": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "strength": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "breadth": {
-          "value": 0.6,
-          "score": 1,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        }
-      }
-    },
-    {
-      "ts": 1777841067357,
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "action": "HOLD",
-      "allocation": "50%",
-      "signals": {
-        "rates": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "liquidity": {
-          "value": "supportive",
-          "score": 1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "crude": {
-          "value": "rising",
-          "score": -1,
-          "weight": 0.15,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "fii": {
-          "value": "buying",
-          "score": 1,
-          "weight": 0.22000000000000003,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "vix": {
-          "value": "low",
-          "score": 1,
-          "weight": 0.1425,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "trend": {
-          "value": "bullish",
-          "score": 1,
-          "weight": 0.11000000000000001,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "momentum": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "strength": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "breadth": {
-          "value": 0.6,
-          "score": 1,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        }
-      }
-    },
-    {
-      "ts": 1777841071999,
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "action": "HOLD",
-      "allocation": "50%",
-      "signals": {
-        "rates": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "liquidity": {
-          "value": "supportive",
-          "score": 1,
-          "weight": 0.2,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "crude": {
-          "value": "rising",
-          "score": -1,
-          "weight": 0.15,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "fii": {
-          "value": "buying",
-          "score": 1,
-          "weight": 0.22000000000000003,
-          "baseWeight": 0.2,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "vix": {
-          "value": "low",
-          "score": 1,
-          "weight": 0.1425,
-          "baseWeight": 0.15,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "trend": {
-          "value": "bullish",
-          "score": 1,
-          "weight": 0.11000000000000001,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        },
-        "momentum": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "strength": {
-          "value": "neutral",
-          "score": 0,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "neutral"
-        },
-        "breadth": {
-          "value": 0.6,
-          "score": 1,
-          "weight": 0.1,
-          "baseWeight": 0.1,
-          "reliability": 1,
-          "strength": "strong"
-        }
-      }
-    },
-    {
       "ts": 1777841074304,
       "regime": "STRONG RISK ON",
       "score": 81,
@@ -8099,39 +7856,252 @@
           "strength": "strong"
         }
       }
+    },
+    {
+      "ts": 1777896680496,
+      "regime": "RISK ON",
+      "score": 61,
+      "action": "HOLD",
+      "allocation": "35%",
+      "signals": {
+        "rates": {
+          "value": "neutral",
+          "score": 0,
+          "weight": 0.2,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "neutral"
+        },
+        "liquidity": {
+          "value": "supportive",
+          "score": 1,
+          "weight": 0.2,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "crude": {
+          "value": "rising",
+          "score": -1,
+          "weight": 0.15,
+          "baseWeight": 0.15,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "fii": {
+          "value": "buying",
+          "score": 1,
+          "weight": 0.22000000000000003,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "vix": {
+          "value": "high",
+          "score": -1,
+          "weight": 0.1425,
+          "baseWeight": 0.15,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "trend": {
+          "value": "bearish",
+          "score": -1,
+          "weight": 0.11000000000000001,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "momentum": {
+          "value": "neutral",
+          "score": 0,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "neutral"
+        },
+        "strength": {
+          "value": "strong",
+          "score": 1,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "breadth": {
+          "value": 0.6,
+          "score": 1,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        }
+      }
+    },
+    {
+      "ts": 1777896982023,
+      "regime": "RISK ON",
+      "score": 61,
+      "action": "HOLD",
+      "allocation": "35%",
+      "signals": {
+        "rates": {
+          "value": "neutral",
+          "score": 0,
+          "weight": 0.2,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "neutral"
+        },
+        "liquidity": {
+          "value": "supportive",
+          "score": 1,
+          "weight": 0.2,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "crude": {
+          "value": "rising",
+          "score": -1,
+          "weight": 0.15,
+          "baseWeight": 0.15,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "fii": {
+          "value": "buying",
+          "score": 1,
+          "weight": 0.22000000000000003,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "vix": {
+          "value": "high",
+          "score": -1,
+          "weight": 0.1425,
+          "baseWeight": 0.15,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "trend": {
+          "value": "bearish",
+          "score": -1,
+          "weight": 0.11000000000000001,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "momentum": {
+          "value": "neutral",
+          "score": 0,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "neutral"
+        },
+        "strength": {
+          "value": "strong",
+          "score": 1,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "breadth": {
+          "value": 0.6,
+          "score": 1,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        }
+      }
+    },
+    {
+      "ts": 1777900889098,
+      "regime": "STRONG RISK ON",
+      "score": 75,
+      "action": "HOLD",
+      "allocation": "50%",
+      "signals": {
+        "rates": {
+          "value": "neutral",
+          "score": 0,
+          "weight": 0.2,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "neutral"
+        },
+        "liquidity": {
+          "value": "supportive",
+          "score": 1,
+          "weight": 0.2,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "crude": {
+          "value": "rising",
+          "score": -1,
+          "weight": 0.15,
+          "baseWeight": 0.15,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "fii": {
+          "value": "buying",
+          "score": 1,
+          "weight": 0.22000000000000003,
+          "baseWeight": 0.2,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "vix": {
+          "value": "low",
+          "score": 1,
+          "weight": 0.1425,
+          "baseWeight": 0.15,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "trend": {
+          "value": "bearish",
+          "score": -1,
+          "weight": 0.11000000000000001,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "momentum": {
+          "value": "neutral",
+          "score": 0,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "neutral"
+        },
+        "strength": {
+          "value": "strong",
+          "score": 1,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        },
+        "breadth": {
+          "value": 0.6,
+          "score": 1,
+          "weight": 0.1,
+          "baseWeight": 0.1,
+          "reliability": 1,
+          "strength": "strong"
+        }
+      }
     }
   ],
   "regimeHistory": [
-    {
-      "ts": 1777841067130,
-      "regime": "STRONG RISK ON",
-      "score": 81
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777841067130
-    },
-    {
-      "ts": 1777841067357,
-      "regime": "STRONG RISK ON",
-      "score": 81
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777841067357
-    },
-    {
-      "ts": 1777841071999,
-      "regime": "STRONG RISK ON",
-      "score": 81
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777841071999
-    },
     {
       "ts": 1777841074304,
       "regime": "STRONG RISK ON",
@@ -9101,141 +9071,83 @@
       "regime": "STRONG RISK ON",
       "score": 81,
       "ts": 1777846145829
+    },
+    {
+      "ts": 1777896680495,
+      "regime": "RISK ON",
+      "score": 61
+    },
+    {
+      "regime": "RISK ON",
+      "score": 61,
+      "ts": 1777896680496
+    },
+    {
+      "ts": 1777896982022,
+      "regime": "RISK ON",
+      "score": 61
+    },
+    {
+      "regime": "RISK ON",
+      "score": 61,
+      "ts": 1777896982023
+    },
+    {
+      "ts": 1777900889097,
+      "regime": "STRONG RISK ON",
+      "score": 75
+    },
+    {
+      "regime": "STRONG RISK ON",
+      "score": 75,
+      "ts": 1777900889098
     }
   ],
   "signalsHistory": [
     {
-      "ts": 1777845775918,
+      "ts": 1777900889097,
       "signals": {
         "rates": 0,
         "liquidity": 1,
         "crude": -1,
         "fii": 1,
         "vix": 1,
-        "trend": 1,
+        "trend": -1,
         "momentum": 0,
-        "strength": 0,
+        "strength": 1,
         "breadth": 1
       },
-      "compositeScore": 81,
-      "regime": "STRONG RISK ON",
-      "confidence": 60
-    },
-    {
-      "ts": 1777845786043,
-      "signals": {
-        "rates": 0,
-        "liquidity": 1,
-        "crude": -1,
-        "fii": 1,
-        "vix": 1,
-        "trend": 1,
-        "momentum": 0,
-        "strength": 0,
-        "breadth": 1
-      },
-      "compositeScore": 81,
-      "regime": "STRONG RISK ON",
-      "confidence": 60
-    },
-    {
-      "ts": 1777845801408,
-      "signals": {
-        "rates": 0,
-        "liquidity": 1,
-        "crude": -1,
-        "fii": 1,
-        "vix": 1,
-        "trend": 1,
-        "momentum": 0,
-        "strength": 0,
-        "breadth": 1
-      },
-      "compositeScore": 81,
-      "regime": "STRONG RISK ON",
-      "confidence": 60
-    },
-    {
-      "ts": 1777846145553,
-      "signals": {
-        "rates": 0,
-        "liquidity": 1,
-        "crude": -1,
-        "fii": 1,
-        "vix": 1,
-        "trend": 1,
-        "momentum": 0,
-        "strength": 0,
-        "breadth": 1
-      },
-      "compositeScore": 81,
-      "regime": "STRONG RISK ON",
-      "confidence": 60
-    },
-    {
-      "ts": 1777846145829,
-      "signals": {
-        "rates": 0,
-        "liquidity": 1,
-        "crude": -1,
-        "fii": 1,
-        "vix": 1,
-        "trend": 1,
-        "momentum": 0,
-        "strength": 0,
-        "breadth": 1
-      },
-      "compositeScore": 81,
+      "compositeScore": 75,
       "regime": "STRONG RISK ON",
       "confidence": 60
     }
   ],
   "alerts": [],
   "lastSnapshot": {
-    "ts": 1777846145829,
+    "ts": 1777900889097,
     "signals": {
       "rates": 0,
       "liquidity": 1,
       "crude": -1,
       "fii": 1,
       "vix": 1,
-      "trend": 1,
+      "trend": -1,
       "momentum": 0,
-      "strength": 0,
+      "strength": 1,
       "breadth": 1
     },
-    "compositeScore": 81,
+    "compositeScore": 75,
     "regime": "STRONG RISK ON",
     "confidence": 60,
     "allocation": 50
   },
-  "cyclesSinceChange": 4,
-  "lastRegimeChangeTs": 1777845775917,
+  "cyclesSinceChange": 0,
+  "lastRegimeChangeTs": 1777900889096,
   "v8_regimeHistory": [
     {
       "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777845775918
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777845786043
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777845801408
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777846145553
-    },
-    {
-      "regime": "STRONG RISK ON",
-      "score": 81,
-      "ts": 1777846145829
+      "score": 75,
+      "ts": 1777900889097
     }
   ]
 }
