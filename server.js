@@ -556,6 +556,193 @@ function computeSMA(prices, period) {
 }
 
 // ===============================
+// DSS v6 — SECTOR ROTATION ENGINE
+// ===============================
+
+const CACHE_TTL_SECTOR = 120000;
+
+const SECTOR_SYMBOLS = {
+  FMCG: "%5ECNXFMCG",
+  IT: "%5ECNXIT",
+  PHARMA: "%5ECNXPHARMA",
+  AUTO: "%5ECNXAUTO",
+  REALTY: "%5ECNXREALTY",
+  METALS: "%5ECNXMETAL",
+  PSU_BANK: "%5ECNXPSUBANK",
+  PRIVATE_BANK: "%5EBANKEX"
+};
+
+const SECTOR_THEMES = {
+  FMCG: "Defensive",
+  IT: "Forex tailwind",
+  PHARMA: "US generics demand",
+  AUTO: "Consumption sensitivity",
+  REALTY: "Rate sensitivity",
+  METALS: "China demand weak",
+  PSU_BANK: "Credit growth",
+  PRIVATE_BANK: "NIM pressure"
+};
+
+async function fetchSectorData(symbol) {
+
+  try {
+
+    const url =
+      `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1mo&interval=1d`;
+
+    const data = await safeFetch(url);
+
+    const result = data?.chart?.result?.[0];
+
+    if (!result) return null;
+
+    const closes =
+      result?.indicators?.quote?.[0]?.close
+        ?.filter(v => v !== null && !isNaN(v))
+        || [];
+
+    if (closes.length < 10) return null;
+
+    const current =
+      Number(result?.meta?.regularMarketPrice)
+      || closes[closes.length - 1];
+
+    const prev =
+      closes[closes.length - 2];
+
+    const returnPct =
+      prev
+        ? Number((((current - prev) / prev) * 100).toFixed(2))
+        : 0;
+
+    const ema5 = EMA(closes.slice(-10), 5);
+    const ema10 = EMA(closes.slice(-10), 10);
+
+    const momentum =
+      ema5 > ema10
+        ? "improving"
+        : "deteriorating";
+
+    return {
+      current,
+      prev,
+      closes,
+      returnPct,
+      momentum
+    };
+
+  } catch (err) {
+
+    logger.error({
+      err: err.message,
+      symbol
+    }, "Sector fetch failed");
+
+    return null;
+  }
+}
+
+function classifySectorPhase(returnPct, momentum) {
+
+  if (returnPct >= 1.5 && momentum === "improving") {
+    return "LEADING";
+  }
+
+  if (returnPct < 1.5 && momentum === "improving") {
+    return "IMPROVING";
+  }
+
+  if (returnPct >= -1 && momentum === "deteriorating") {
+    return "WEAKENING";
+  }
+
+  return "LAGGING";
+}
+
+function buildSectorSignal(returnPct) {
+
+  if (returnPct >= 2) {
+    return {
+      signal: "BUY",
+      sentiment: "bullish",
+      strength: "STRONG"
+    };
+  }
+
+  if (returnPct <= -2) {
+    return {
+      signal: "SELL",
+      sentiment: "bearish",
+      strength: "WEAK"
+    };
+  }
+
+  return {
+    signal: "WATCH",
+    sentiment: "neutral",
+    strength: "NEUTRAL"
+  };
+}
+
+function buildSectorFlow(returnPct, momentum) {
+
+  let score = returnPct * 400;
+
+  if (momentum === "improving") {
+    score += 600;
+  } else {
+    score -= 600;
+  }
+
+  return {
+    valueCr: Math.round(score),
+    direction:
+      score >= 0
+        ? "inflow"
+        : "outflow"
+  };
+}
+
+function buildThemeSignal(sector, signalObj) {
+
+  const bullishThemes = {
+    FMCG: "FMCG Rural Recovery",
+    IT: "Export IT Tailwind",
+    PHARMA: "Pharma US Generics",
+    PSU_BANK: "PSU Credit Expansion"
+  };
+
+  const bearishThemes = {
+    REALTY: "Real Estate Affordability",
+    METALS: "China Metal Demand Weakness",
+    PRIVATE_BANK: "Banking NIM Compression"
+  };
+
+  if (signalObj.sentiment === "bullish") {
+    return {
+      name:
+        bullishThemes[sector]
+        || `${sector} Strength`,
+      sentiment: "bullish"
+    };
+  }
+
+  if (signalObj.sentiment === "bearish") {
+    return {
+      name:
+        bearishThemes[sector]
+        || `${sector} Weakness`,
+      sentiment: "bearish"
+    };
+  }
+
+  return {
+    name: `${sector} Consolidation`,
+    sentiment: "neutral"
+  };
+}
+
+// ===============================
 // DSS v6 — EQUITY SIGNAL BUILDER
 // ===============================
 function buildEquitySignals(cache) {
@@ -897,6 +1084,163 @@ logger.info({
 // ✅ START SCHEDULER (ONLY ONCE)
 setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
 runNSEIndexJob();
+
+// =====================================
+// LIVE SECTOR ROTATION DATA GENERATOR
+// =====================================
+
+async function buildSectorPayload() {
+
+  try {
+
+    const heatmap = [];
+    const rotation = [];
+    const flows = [];
+    const themes = [];
+
+    for (const [sector, symbol] of Object.entries(SECTOR_SYMBOLS)) {
+
+      const sectorData =
+        await fetchSectorData(symbol);
+
+      if (!sectorData) {
+        continue;
+      }
+
+      const {
+        returnPct,
+        momentum
+      } = sectorData;
+
+      const phase =
+        classifySectorPhase(
+          returnPct,
+          momentum
+        );
+
+      const signalObj =
+        buildSectorSignal(returnPct);
+
+      const flowObj =
+        buildSectorFlow(
+          returnPct,
+          momentum
+        );
+
+      const themeObj =
+        buildThemeSignal(
+          sector,
+          signalObj
+        );
+
+      const bull =
+        signalObj.sentiment === "bullish"
+          ? true
+          : signalObj.sentiment === "bearish"
+          ? false
+          : null;
+
+      heatmap.push({
+        name: sector.replaceAll("_", " "),
+        change:
+          `${returnPct >= 0 ? "+" : ""}${returnPct}%`,
+        narrative:
+          `${signalObj.signal} · ${SECTOR_THEMES[sector] || "Sector rotation"}`,
+        color:
+          bull === true
+            ? "#00e0a4"
+            : bull === false
+            ? "#ff5f87"
+            : "#9fb3c8",
+        border:
+          bull === true
+            ? "rgba(0,224,164,0.25)"
+            : bull === false
+            ? "rgba(255,95,135,0.25)"
+            : "rgba(159,179,200,0.18)",
+        glow:
+          bull === true
+            ? "rgba(0,224,164,0.06)"
+            : bull === false
+            ? "rgba(255,95,135,0.06)"
+            : "rgba(159,179,200,0.04)"
+      });
+
+      rotation.push({
+        sector:
+          sector.replaceAll("_", " "),
+        phase,
+        bull
+      });
+
+      flows.push([
+        sector.replaceAll("_", " "),
+        `${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`,
+        flowObj.direction === "inflow"
+      ]);
+
+      themes.push(themeObj);
+
+    }
+
+    return {
+      heatmap,
+      rotation,
+      flows,
+      themes
+    };
+
+  } catch (err) {
+
+    logger.error({
+      err: err.message
+    }, "Sector payload build failed");
+
+    return null;
+  }
+}
+
+// =====================================
+// LIVE SECTOR CACHE REFRESH
+// =====================================
+
+async function refreshSectorCache() {
+
+  try {
+
+    const payload =
+      await buildSectorPayload();
+
+    if (!payload) {
+      return;
+    }
+
+    DSSCache.set(
+      "nse:sector",
+      {
+        timestamp: Date.now(),
+        data: payload
+      }
+    );
+
+    logger.info({
+      sectors: payload.heatmap.length
+    }, "Sector cache updated");
+
+  } catch (err) {
+
+    logger.error({
+      err: err.message
+    }, "Sector refresh failed");
+  }
+}
+
+refreshSectorCache();
+
+setInterval(
+  refreshSectorCache,
+  60000
+);
 
 async function fetchNiftyData() {
   try {
@@ -1746,6 +2090,59 @@ app.get("/health", (req, res) => {
 // ===============================
 // DSS v6 — SIGNALS API
 // ===============================
+
+// =====================================
+// LIVE SECTOR ROTATION API
+// =====================================
+
+app.get("/api/v1/sectors", async (req, res) => {
+
+  try {
+
+    const cached =
+      DSSCache.get("nse:sector");
+
+    if (!cached) {
+
+      return res.json({
+        status: "OK",
+        timestamp: Date.now(),
+        dataStatus: "unavailable",
+        data: {
+          heatmap: [],
+          rotation: [],
+          flows: [],
+          themes: []
+        }
+      });
+    }
+
+    const age =
+      Date.now() - cached.timestamp;
+
+    return res.json({
+      status: "OK",
+      timestamp: Date.now(),
+      dataStatus:
+        age > CACHE_TTL_SECTOR
+          ? "stale"
+          : "live",
+      data: cached.data
+    });
+
+  } catch (err) {
+
+    logger.error({
+      err: err.message
+    }, "Sector API failed");
+
+    return res.status(500).json({
+      status: "ERROR",
+      message: "Sector API failure"
+    });
+  }
+});
+
 app.get("/api/v1/signals", async (req, res) => {
   try {
 
@@ -2587,3 +2984,4 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   logger.info(`DSS running on port ${PORT} (${VERSION})`);
 });
+
