@@ -23,7 +23,7 @@
 // SECTION-06 : MEMORY LAYER
 // SECTION-07 : LOGGING
 // SECTION-08 : SAFE EXECUTION
-// SECTION-09 : FETCH UTILITIES (safeFetch / safeFetchText)
+// SECTION-09 : FETCH UTILITIES (fetchWithRetry / safeFetch / safeFetchText)
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES (crude / vix)
 // SECTION-11 : MACRO PARSERS (TradingEconomics / GST / PMI / AMFI)
 // SECTION-12 : MACRO ENGINE (fetchMacroEconomics)
@@ -510,40 +510,76 @@ const ERROR_ENUM = Object.freeze({
 
 ////////////////////////////////////////////////////////
 // SECTION-09 : FETCH UTILITIES
-// safeFetch (JSON) + safeFetchText (HTML/text)
-// Timeout, abort controller, basic retry loop.
-// Phase B: formal retry/backoff/jitter hardening pending.
+// fetchWithRetry — FSD Appendix D.2 (B1) + D.3 (B2) + B3
+// safeFetch     — thin wrapper, backward-compatible
+// safeFetchText — HTML/text fetch (below, unchanged)
+//
+// Retry schedule (FETCH_RETRY_COUNT = 3):
+//   attempt 1 : immediate
+//   attempt 2 : wait FETCH_BACKOFF_BASE_MS * 1 + jitter
+//   attempt 3 : wait FETCH_BACKOFF_BASE_MS * 2 + jitter
+//   jitter    = random(0, FETCH_BACKOFF_BASE_MS * 0.5)
+// 429 : log RATE_LIMITED, wait RATE_LIMIT_COOLDOWN_MS, return null immediately
+// UA  : rotated via getNextUA() on every attempt (D.3)
 ////////////////////////////////////////////////////////
 
-		async function safeFetch(url, timeout = 2000, retries = 2) {
-		  for (let i = 0; i <= retries; i++) {
+		async function fetchWithRetry(url, timeout = FETCH_TIMEOUT_MS, retries = FETCH_RETRY_COUNT) {
+		  for (let attempt = 0; attempt < retries; attempt++) {
 			try {
 			  const controller = new AbortController();
 			  const id = setTimeout(() => controller.abort(), timeout);
 
 			  const res = await fetch(url, {
-	  signal: controller.signal,
-	  headers: {
-		"User-Agent":
-		  "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-		"Accept":
-		  "application/json,text/plain,*/*"
-	  }
-	});
+				signal: controller.signal,
+				headers: {
+				  "User-Agent": getNextUA(),
+				  "Accept":     "application/json,text/plain,*/*"
+				}
+			  });
 			  clearTimeout(id);
+
+			  // B3 — Systematic 429 detection (FSD Appendix D.2)
+			  if (res.status === 429) {
+				logger.warn(
+				  { url, attempt: attempt + 1, code: ERROR_ENUM.RATE_LIMITED },
+				  "Rate limited (429) — cooling down, serving stale cache"
+				);
+				await new Promise(r => setTimeout(r, RATE_LIMIT_COOLDOWN_MS));
+				return null; // do NOT retry after 429
+			  }
 
 			  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
 			  return await res.json();
-			} catch (err) {
-			  logger.warn({ url, attempt: i + 1, err: err.message }, "Fetch failed");
 
-			  if (i === retries) {
-				logger.error({ url }, "All retries failed");
+			} catch (err) {
+			  const isLast = attempt === retries - 1;
+
+			  logger.warn(
+				{ url, attempt: attempt + 1, err: err.message },
+				"fetchWithRetry attempt failed"
+			  );
+
+			  if (isLast) {
+				logger.error(
+				  { url, code: ERROR_ENUM.FETCH_FAILED },
+				  "fetchWithRetry — all attempts exhausted"
+				);
 				return null;
 			  }
+
+			  // Exponential backoff + jitter per FSD Appendix D.2
+			  const baseWait = FETCH_BACKOFF_BASE_MS * (attempt + 1);
+			  const jitter   = Math.random() * FETCH_BACKOFF_BASE_MS * 0.5;
+			  await new Promise(r => setTimeout(r, baseWait + jitter));
 			}
 		  }
+		  return null;
+		}
+
+		// Backward-compatible wrapper — all existing call sites unaffected
+		async function safeFetch(url, timeout = FETCH_TIMEOUT_MS, retries = FETCH_RETRY_COUNT) {
+		  return fetchWithRetry(url, timeout, retries);
 		}
 ////////////////////////////////////////////////////////
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES
@@ -725,6 +761,30 @@ const ERROR_ENUM = Object.freeze({
 	  DXY: "DX-Y.NYB",
 	  GOLD: "GC=F"
 	};
+
+////////////////////////////////////////////////////////
+// SECTION-03 (continued) : FETCH LAYER CONSTANTS
+// Phase B — B1/B2/B3
+// FSD Appendix D.2 (retry/backoff) + D.3 (UA rotation)
+////////////////////////////////////////////////////////
+
+	const FETCH_TIMEOUT_MS       = 3000;
+	const FETCH_RETRY_COUNT      = 3;
+	const FETCH_BACKOFF_BASE_MS  = 500;
+	const RATE_LIMIT_COOLDOWN_MS = 60000;
+
+	// B2 — User-Agent rotation pool (FSD Appendix D.3)
+	const UA_POOL = [
+	  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+	  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+	  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+	  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+	  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	];
+	let uaIndex = 0;
+	function getNextUA() {
+	  return UA_POOL[uaIndex++ % UA_POOL.length];
+	}
 
 		const SECTOR_SYMBOLS = {
 		  FMCG: "%5ECNXFMCG",
@@ -1465,8 +1525,9 @@ pmi:
 		// STEP 2 — Activate NSE App Cookies
 		// ---------------------------------
 
+		// B4 — Mandatory 2500ms delay before second warmup request (FSD O2-A)
 		await new Promise(
-		  r => setTimeout(r, 800)
+		  r => setTimeout(r, 2500)
 		);
 
 		const warmup2 = await fetch(
@@ -1695,137 +1756,117 @@ fiiFuturesPositioning = null;
 	  }, "FII futures positioning parse failed");
 	}
 	  
-		// -----------------------------
-// PCR DATA
-// -----------------------------
+		// -----------------------------------------------------------------
+	// PCR DATA — B4 FIX (FSD Master Build Plan O2-A)
+	// Protocol:
+	//   Step 1: GET homepage → cookies         (done in main warmup above)
+	//   Step 2: Wait 2500ms                    (done in main warmup above)
+	//   Step 3: GET market-data page → cookies  (done in main warmup above)
+	//   Step 4: Wait 500ms                     (here)
+	//   Step 5: GET option-chain-indices API using accumulated session headers
+	//   Step 6: Validate records.data is array
+	//   Step 7: Compute PCR from records.data (NOT filtered — filtered is NSE pre-subset)
+	//   Step 8: Cache to DSSCache("nse:optionchain") TTL 60000ms
+	// -----------------------------------------------------------------
 
-let optionJson = null;
+	let optionJson = null;
 
-await safeExecuteAsync(
+	await safeExecuteAsync(
 
-  async () => {
+	  async () => {
 
-    const optionUrl =
-  "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY";
+		// Step 4 — mandatory 500ms before option chain API call
+		await new Promise(r => setTimeout(r, 500));
 
-const optionPage =
-  await fetch(
-    "https://www.nseindia.com/option-chain",
-    {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language":
-          "en-US,en;q=0.9"
-      }
-    }
-  );
+		const optionUrl =
+		  "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY";
 
-const optionCookies =
-  optionPage.headers.get("set-cookie") || "";
+		// Step 5 — use the accumulated main-session headers (cookies set above)
+		const optionRes = await fetch(optionUrl, {
+		  headers: {
+			...headers,
+			"Accept":           "application/json,text/plain,*/*",
+			"Accept-Language":  "en-US,en;q=0.9",
+			"Accept-Encoding":  "gzip, deflate, br",
+			"Connection":       "keep-alive",
+			"Sec-Fetch-Dest":   "empty",
+			"Sec-Fetch-Mode":   "cors",
+			"Sec-Fetch-Site":   "same-origin"
+		  }
+		});
 
-const optionCookieHeader =
-  optionCookies
-    .split(",")
-    .map(c => c.split(";")[0].trim())
-    .join("; ");
+		const rawText = await optionRes.text();
 
-await new Promise(r => setTimeout(r, 1200));
+		logger.info(
+		  { optionStatus: optionRes.status, textSample: rawText.slice(0, 120) },
+		  "Option chain raw response"
+		);
 
-const res =
-  await fetch(
-    optionUrl,
-    {
-      headers: {
+		if (!rawText || rawText.startsWith("<!DOCTYPE") || rawText.startsWith("<html")) {
+		  logger.warn("Option chain returned HTML — session likely not established");
+		  return;
+		}
 
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+		const parsed = JSON.parse(rawText);
 
-        "Accept":
-          "application/json,text/plain,*/*",
+		// Step 6 — validate records.data is a non-empty array
+		if (!Array.isArray(parsed?.records?.data) || parsed.records.data.length === 0) {
+		  logger.warn(
+			{ keys: Object.keys(parsed || {}) },
+			"Option chain: records.data missing or empty"
+		  );
+		  return;
+		}
 
-        "Accept-Language":
-          "en-US,en;q=0.9",
+		optionJson = parsed;
 
-        "Referer":
-          "https://www.nseindia.com/option-chain",
+		// Step 8 — cache raw option chain data
+		DSSCache.set("nse:optionchain", { data: parsed, ts: Date.now() });
 
-        "X-Requested-With":
-          "XMLHttpRequest",
+		logger.info(
+		  { strikes: parsed.records.data.length },
+		  "Option chain fetched and cached successfully"
+		);
 
-        "Cookie":
-          optionCookieHeader
-      }
-    }
-  );
+	  },
 
-const rawText =
-  await res.text();
+	  null
+	);
 
-logger.info({
-  optionStatus: res.status,
-  textSample: rawText.slice(0, 120)
-}, "Option chain raw response");
-
-optionJson =
-  JSON.parse(rawText);
-    
-  },
-
-  null
-);
-		// -----------------------------
+	// -----------------------------------------------------------------
 	// LIVE PCR COMPUTATION
-	// -----------------------------
+	// Uses records.data exclusively (NOT filtered — per FSD O2-A Step 7)
+	// filtered is NSE's pre-filtered subset and under-counts real OI
+	// -----------------------------------------------------------------
 
 	let pcr = null;
 
 	try {
 
-	  const optionRows =
-	  optionJson?.filtered?.data ||
-	  optionJson?.records?.data ||
-	  optionJson?.data ||
-	  [];
-	  
-	  logger.info({
-	  rows: optionRows.length
-	}, "PCR option rows loaded");
+	  // B4 — use records.data ONLY (not filtered.data, not data fallback)
+	  const optionRows = Array.isArray(optionJson?.records?.data)
+		? optionJson.records.data
+		: [];
+
+	  logger.info({ rows: optionRows.length }, "PCR option rows loaded");
 
 	  let totalPEOI = 0;
 	  let totalCEOI = 0;
 
 	  for (const row of optionRows) {
-
-		totalPEOI += Number(
-		  row?.PE?.openInterest || 0
-		);
-
-		totalCEOI += Number(
-		  row?.CE?.openInterest || 0
-		);
+		totalPEOI += Number(row?.PE?.openInterest || 0);
+		totalCEOI += Number(row?.CE?.openInterest || 0);
 	  }
 
-	  if (
-		totalPEOI > 0 &&
-		totalCEOI > 0
-	  ) {
-
-		pcr = Number(
-		  (
-			totalPEOI /
-			totalCEOI
-		  ).toFixed(2)
-		);
+	  if (totalPEOI > 0 && totalCEOI > 0) {
+		pcr = Number((totalPEOI / totalCEOI).toFixed(2));
+		logger.info({ pcr, totalPEOI, totalCEOI }, "PCR computed successfully");
+	  } else {
+		logger.warn({ totalPEOI, totalCEOI }, "PCR could not be computed — zero OI");
 	  }
 
 	} catch (err) {
-
-	  logger.error({
-		err: err.message
-	  }, "PCR computation failed");
+	  logger.error({ err: err.message }, "PCR computation failed");
 	}
 
 		const fiiBuy = Number(
