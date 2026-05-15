@@ -1,9 +1,47 @@
+# Runtime files — never commit these
+dss.db
+memory.json
+data.json
+state.json
+logs.json
+history.json
+market.json
+data/logs.json
+data/market.json
+
+# Live API snapshot files
+equity.json
+equity_live.json
+debt_live.json
+derivatives_live.json
+sectors_live.json
+global_live.json
+functions.txt
+
+# Node
 node_modules/
+npm-debug.log*
+
+# Environment
 .env
-*.log
-pm2.log
-breeze/
-venv/
-__pycache__/
-*.pyc
+.env.*
+!.env.example
+
+# PM2
+.pm2/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Scratch files
+0
+18
+75
+80
+adjusted*
+ema50
+
+# Data folder runtime files
+data/
+server_D24_backup.js
