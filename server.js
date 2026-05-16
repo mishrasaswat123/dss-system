@@ -1809,11 +1809,26 @@ fiiFuturesPositioning = null;
 
 		const parsed = JSON.parse(rawText);
 
-		// Step 6 — validate records.data is a non-empty array
-		if (!Array.isArray(parsed?.records?.data) || parsed.records.data.length === 0) {
+		// Step 6 — Structural analysis (logged every run for diagnostics)
+		const hasRecordsData  = Array.isArray(parsed?.records?.data)  && parsed.records.data.length  > 0;
+		const hasFilteredData = Array.isArray(parsed?.filtered?.data) && parsed.filtered.data.length > 0;
+
+		logger.info({
+		  hasRecordsData,
+		  recordsLen:   parsed?.records?.data?.length  ?? "N/A",
+		  hasFilteredData,
+		  filteredLen:  parsed?.filtered?.data?.length ?? "N/A",
+		  topKeys:      Object.keys(parsed || {}),
+		  recordsKeys:  Object.keys(parsed?.records || {})
+		}, "Option chain structure analysis");
+
+		// Step 7 — Prefer records.data (all strikes, per FSD O2-A).
+		// Fall back to filtered.data when records.data is empty/absent
+		// (NSE returns records.data:[] after market hours — filtered retains last-session OI).
+		if (!hasRecordsData && !hasFilteredData) {
 		  logger.warn(
-			{ keys: Object.keys(parsed || {}) },
-			"Option chain: records.data missing or empty"
+			{ topKeys: Object.keys(parsed || {}) },
+			"Option chain: no usable data in records.data or filtered.data"
 		  );
 		  return;
 		}
@@ -1823,8 +1838,10 @@ fiiFuturesPositioning = null;
 		// Step 8 — cache raw option chain data
 		DSSCache.set("nse:optionchain", { data: parsed, ts: Date.now() });
 
+		const dataSource = hasRecordsData ? "records.data" : "filtered.data (fallback)";
+		const dataLen    = hasRecordsData ? parsed.records.data.length : parsed.filtered.data.length;
 		logger.info(
-		  { strikes: parsed.records.data.length },
+		  { strikes: dataLen, source: dataSource },
 		  "Option chain fetched and cached successfully"
 		);
 
@@ -1835,20 +1852,29 @@ fiiFuturesPositioning = null;
 
 	// -----------------------------------------------------------------
 	// LIVE PCR COMPUTATION
-	// Uses records.data exclusively (NOT filtered — per FSD O2-A Step 7)
-	// filtered is NSE's pre-filtered subset and under-counts real OI
+	// Primary  : records.data  (all strikes, per FSD O2-A Step 7)
+	// Fallback : filtered.data (NSE ATM subset — used after market hours
+	//            when NSE returns records.data:[] but filtered.data retains
+	//            last-session OI). Fallback ensures PCR is never null
+	//            simply because the market is closed.
 	// -----------------------------------------------------------------
 
 	let pcr = null;
 
 	try {
 
-	  // B4 — use records.data ONLY (not filtered.data, not data fallback)
-	  const optionRows = Array.isArray(optionJson?.records?.data)
+	  // Prefer records.data; fall back to filtered.data
+	  const hasRecords  = Array.isArray(optionJson?.records?.data)  && optionJson.records.data.length  > 0;
+	  const hasFiltered = Array.isArray(optionJson?.filtered?.data) && optionJson.filtered.data.length > 0;
+
+	  const optionRows = hasRecords
 		? optionJson.records.data
+		: hasFiltered
+		? optionJson.filtered.data
 		: [];
 
-	  logger.info({ rows: optionRows.length }, "PCR option rows loaded");
+	  const pcrSource = hasRecords ? "records.data" : hasFiltered ? "filtered.data" : "none";
+	  logger.info({ rows: optionRows.length, source: pcrSource }, "PCR option rows loaded");
 
 	  let totalPEOI = 0;
 	  let totalCEOI = 0;
@@ -1860,9 +1886,9 @@ fiiFuturesPositioning = null;
 
 	  if (totalPEOI > 0 && totalCEOI > 0) {
 		pcr = Number((totalPEOI / totalCEOI).toFixed(2));
-		logger.info({ pcr, totalPEOI, totalCEOI }, "PCR computed successfully");
+		logger.info({ pcr, totalPEOI, totalCEOI, source: pcrSource }, "PCR computed successfully");
 	  } else {
-		logger.warn({ totalPEOI, totalCEOI }, "PCR could not be computed — zero OI");
+		logger.warn({ totalPEOI, totalCEOI, source: pcrSource }, "PCR could not be computed — zero OI");
 	  }
 
 	} catch (err) {
@@ -4020,7 +4046,17 @@ value:
 		// ===============================
 		const NSE_POLL_INTERVAL = 15000;
 
+		// B5 — Guard against concurrent runs caused by Yahoo 429 60s cooldowns
+		// setInterval fires every 15s regardless of async completion. Without this
+		// guard, 4+ instances stack up simultaneously waiting on 60s cooldowns.
+		let nseIndexJobRunning = false;
+
 		async function runNSEIndexJob() {
+		  if (nseIndexJobRunning) {
+			logger.warn("runNSEIndexJob skipped — previous run still in progress");
+			return;
+		  }
+		  nseIndexJobRunning = true;
 
 	  try {
 
@@ -4240,6 +4276,9 @@ value:
 		  error: err.message,
 		  stack: err.stack
 		}, "NSE Scheduler failed");
+	  } finally {
+		// B5 — always release lock so next tick can run
+		nseIndexJobRunning = false;
 	  }
 	}
 
