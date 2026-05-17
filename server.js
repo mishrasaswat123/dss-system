@@ -4816,6 +4816,8 @@ async function buildDebtPayload() {
 
 		  recommendation,
 
+		  gsecLive: !!(macro.gsecLive),
+
 		  global: [
 
 			{
@@ -5005,6 +5007,11 @@ async function buildDebtPayload() {
 		  if (age > CACHE_TTL_DEBT * 30) { // 30min before marking unavailable
 			dataStatus = "unavailable";
 		  } else if (age > CACHE_TTL_DEBT) {
+			dataStatus = "stale";
+		  }
+
+		  // DEF-004: hardcoded G-Sec yields must not claim live
+		  if (cached.gsecLive === false && dataStatus === "live") {
 			dataStatus = "stale";
 		  }
 
