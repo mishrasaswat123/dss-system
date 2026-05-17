@@ -144,6 +144,12 @@ const ERROR_ENUM = Object.freeze({
 		// DSS v6 — CACHE LAYER
 		// ===============================
 ////////////////////////////////////////////////////////
+
+let YAHOO_PAUSED = false; // C3-STABILITY: true=paused, false=live
+let yahoo429Count = 0;           // C3-STABILITY: consecutive 429 counter
+let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
+
+////////////////////////////////////////////////////////
 // SECTION-05 : CACHE LAYER (DSSCache)
 // In-memory key/value store with TTL metadata.
 // All engines read/write via DSSCache.get() / DSSCache.set()
@@ -193,6 +199,69 @@ const ERROR_ENUM = Object.freeze({
 			return fallback;
 		  }
 		}
+
+		// --------------------------------------------------------
+		// SECTION-08 : validateSignalObject (Phase C - C1)
+		// Validates signal objects before cache/API emission.
+		// Non-blocking: logs warning but returns signal intact
+		// to avoid suppressing live data during DEF-009 phase.
+		// --------------------------------------------------------
+		function validateSignalObject(signal, context = "unknown") {
+		  if (!signal || typeof signal !== "object") {
+			logger.warn({ context, code: ERROR_ENUM.VALIDATION_FAILED }, "validateSignalObject: null or non-object");
+			return signal;
+		  }
+		  const validSignals = Object.values(SIGNAL_ENUM);
+		  const validSentiments = Object.values(SENTIMENT_ENUM);
+		  if (signal.signal !== undefined && !validSignals.includes(signal.signal)) {
+			logger.warn({ context, invalidSignal: signal.signal, code: ERROR_ENUM.VALIDATION_FAILED }, "validateSignalObject: signal not in SIGNAL_ENUM");
+		  }
+		  if (signal.sentiment !== undefined && !validSentiments.includes(signal.sentiment)) {
+			logger.warn({ context, invalidSentiment: signal.sentiment, code: ERROR_ENUM.VALIDATION_FAILED }, "validateSignalObject: sentiment not in SENTIMENT_ENUM");
+		  }
+		  if (signal.confidence !== undefined && (typeof signal.confidence !== "number" || signal.confidence < 0 || signal.confidence > 1)) {
+			logger.warn({ context, confidence: signal.confidence, code: ERROR_ENUM.VALIDATION_FAILED }, "validateSignalObject: confidence out of range [0,1]");
+		  }
+		  return signal;
+		}
+
+		// --------------------------------------------------------
+		// SECTION-08 : computeConfidence (Phase C - C3)
+		// Appendix H formula: freshness * 0.35 + strength * 0.40 + agreement * 0.25
+		// --------------------------------------------------------
+		function computeFreshnessScore(dataTs, ttlMs) {
+		  if (!dataTs) return 0.0;
+		  const age = Date.now() - dataTs;
+		  if (age <= ttlMs) return 1.00;
+		  if (age <= ttlMs * 1.5) return 0.75;
+		  if (age <= ttlMs * 2.0) return 0.50;
+		  if (age <= ttlMs * 3.0) return 0.25;
+		  return 0.00;
+		}
+
+		function computeStrengthScore(value, signal, thresholds) {
+		  if (value === null || value === undefined) return 0.30;
+		  const { buyThreshold, sellThreshold, min, max } = thresholds;
+		  if (signal === SIGNAL_ENUM.BUY && buyThreshold !== undefined) {
+			return Math.min(1.0, Math.abs(value - buyThreshold) / Math.abs(buyThreshold - min || 1));
+		  }
+		  if (signal === SIGNAL_ENUM.SELL && sellThreshold !== undefined) {
+			return Math.min(1.0, Math.abs(value - sellThreshold) / Math.abs(max - sellThreshold || 1));
+		  }
+		  return 0.40;
+		}
+
+		function computeAgreementScore(thisSentiment, otherSentiments) {
+		  if (!otherSentiments || otherSentiments.length === 0) return 0.50;
+		  const agreeing = otherSentiments.filter(s => s === thisSentiment).length;
+		  return agreeing / otherSentiments.length;
+		}
+
+		function computeConfidence(freshnessScore, strengthScore, agreementScore) {
+		  const raw = (freshnessScore * 0.35) + (strengthScore * 0.40) + (agreementScore * 0.25);
+		  return Math.min(1.0, Math.max(0.0, parseFloat(raw.toFixed(3))));
+		}
+
 		const app = express();
 
 		const rateLimit = require("express-rate-limit");
@@ -529,27 +598,49 @@ const ERROR_ENUM = Object.freeze({
 			  const controller = new AbortController();
 			  const id = setTimeout(() => controller.abort(), timeout);
 
+			  const isYahoo = url.includes("yahoo.com");
+			  if (isYahoo) await yahooThrottle();
+			  const cookieHdr = isYahoo ? await getYahooCookie() : "";
+			  const reqHeaders = {
+				"User-Agent": getNextUA(),
+				"Accept": "application/json,text/html,*/*;q=0.9",
+				"Accept-Language": "en-US,en;q=0.9",
+				"Accept-Encoding": "gzip, deflate, br",
+				"Connection": "keep-alive",
+				"Referer": "https://finance.yahoo.com"
+			  };
+			  if (cookieHdr) reqHeaders["Cookie"] = cookieHdr;
 			  const res = await fetch(url, {
 				signal: controller.signal,
-				headers: {
-				  "User-Agent": getNextUA(),
-				  "Accept":     "application/json,text/plain,*/*"
-				}
+				headers: reqHeaders
 			  });
 			  clearTimeout(id);
 
 			  // B3 — Systematic 429 detection (FSD Appendix D.2)
 			  if (res.status === 429) {
+				yahoo429Count++;
 				logger.warn(
-				  { url, attempt: attempt + 1, code: ERROR_ENUM.RATE_LIMITED },
-				  "Rate limited (429) — cooling down, serving stale cache"
+				  { url, attempt: attempt + 1, code: ERROR_ENUM.RATE_LIMITED, consecutive429s: yahoo429Count },
+				  "Rate limited (429) — returning null immediately, cache fallback applies"
 				);
-				await new Promise(r => setTimeout(r, RATE_LIMIT_COOLDOWN_MS));
-				return null; // do NOT retry after 429
+				if (yahoo429Count >= 6 && !YAHOO_PAUSED) {
+				  YAHOO_PAUSED = true;
+				  logger.warn({ pauseMs: 300000 }, "Yahoo circuit breaker OPEN — pausing all Yahoo fetches for 5min");
+				  if (yahooResumeTimer) clearTimeout(yahooResumeTimer);
+				  yahooResumeTimer = setTimeout(() => {
+					YAHOO_PAUSED = false;
+					yahoo429Count = 0;
+					yahooResumeTimer = null;
+					logger.info("Yahoo circuit breaker CLOSED — resuming fetches");
+				  }, 300000);
+				}
+				return null;
 			  }
 
 			  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
+			  // Successful fetch — reset 429 counter
+			  yahoo429Count = 0;
 			  return await res.json();
 
 			} catch (err) {
@@ -577,6 +668,51 @@ const ERROR_ENUM = Object.freeze({
 		  return null;
 		}
 
+		// Yahoo session cookie jar (module-level, refreshed hourly)
+		let yahooCookieJar = "";
+		let yahooCookieTs = 0;
+		const YAHOO_COOKIE_TTL = 60 * 60 * 1000; // 1 hour
+
+		// Yahoo global request throttle — minimum 3s between requests
+		let yahooLastRequestTs = 0;
+		const YAHOO_MIN_GAP_MS = 3000;
+		async function yahooThrottle() {
+		  const now = Date.now();
+		  const gap = now - yahooLastRequestTs;
+		  if (gap < YAHOO_MIN_GAP_MS) {
+			await new Promise(r => setTimeout(r, YAHOO_MIN_GAP_MS - gap));
+		  }
+		  yahooLastRequestTs = Date.now();
+		}
+
+		async function getYahooCookie() {
+		  const age = Date.now() - yahooCookieTs;
+		  if (yahooCookieJar && age < YAHOO_COOKIE_TTL) return yahooCookieJar;
+		  try {
+			const res = await fetch("https://finance.yahoo.com", {
+			  headers: {
+				"User-Agent": getNextUA(),
+				"Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+				"Accept-Language": "en-US,en;q=0.9"
+			  },
+			  signal: AbortSignal.timeout(5000)
+			});
+			const setCookie = res.headers.get("set-cookie");
+			if (setCookie) {
+			  // Extract key=value pairs, skip attributes
+			  yahooCookieJar = setCookie.split(",")
+				.map(c => c.split(";")[0].trim())
+				.filter(c => c.includes("="))
+				.join("; ");
+			  yahooCookieTs = Date.now();
+			  logger.info("Yahoo session cookie refreshed");
+			}
+		  } catch(e) {
+			logger.warn({ err: e.message }, "Yahoo cookie fetch failed");
+		  }
+		  return yahooCookieJar;
+		}
+
 		// Backward-compatible wrapper — all existing call sites unaffected
 		async function safeFetch(url, timeout = FETCH_TIMEOUT_MS, retries = FETCH_RETRY_COUNT) {
 		  return fetchWithRetry(url, timeout, retries);
@@ -596,6 +732,7 @@ const ERROR_ENUM = Object.freeze({
 		return marketCache.crudePrice || null;   // crude default
 		  }
 
+		  if (YAHOO_PAUSED) { fallbackState.crude = true; return marketCache.crudePrice || null; }
 		  try {
 			const url = "https://query1.finance.yahoo.com/v8/finance/chart/CL=F";
 			const data = await safeFetch(url);
@@ -638,6 +775,7 @@ const ERROR_ENUM = Object.freeze({
 			return marketCache.vixValue || null;     // vix default
 		  }
 
+		  if (YAHOO_PAUSED) { fallbackState.vix = true; return marketCache.vixValue || null; }
 		  try {
 			const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX";
 			const data = await safeFetch(url);
@@ -815,61 +953,44 @@ const ERROR_ENUM = Object.freeze({
 // refreshSectorCache / SECTOR_SYMBOLS / SECTOR_THEMES
 ////////////////////////////////////////////////////////
 
-		async function fetchSectorData(symbol) {
+		const NSE_SECTOR_MAP = {
+		  "NIFTY FMCG":         "FMCG",
+		  "NIFTY IT":           "IT",
+		  "NIFTY PHARMA":       "PHARMA",
+		  "NIFTY AUTO":         "AUTO",
+		  "NIFTY REALTY":       "REALTY",
+		  "NIFTY METAL":        "METALS",
+		  "NIFTY PSU BANK":     "PSU_BANK",
+		  "NIFTY PRIVATE BANK": "PRIVATE_BANK"
+		};
 
+		async function fetchNSESectorData() {
 		  try {
-
-			const url =
-			  `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1mo&interval=1d`;
-
-			const data = await safeFetch(url);
-
-			const result = data?.chart?.result?.[0];
-
-			if (!result) return null;
-
-			const closes =
-			  result?.indicators?.quote?.[0]?.close
-				?.filter(v => v !== null && !isNaN(v))
-				|| [];
-
-			if (closes.length < 10) return null;
-
-			const current =
-			  Number(result?.meta?.regularMarketPrice)
-			  || closes[closes.length - 1];
-
-			const prev =
-			  closes[closes.length - 2];
-
-			const returnPct =
-			  prev
-				? Number((((current - prev) / prev) * 100).toFixed(2))
-				: 0;
-
-			const ema5 = EMA(closes.slice(-10), 5);
-			const ema10 = EMA(closes.slice(-10), 10);
-
-			const momentum =
-			  ema5 > ema10
-				? "improving"
-				: "deteriorating";
-
-			return {
-			  current,
-			  prev,
-			  closes,
-			  returnPct,
-			  momentum
-			};
-
+			const res = await fetch("https://www.nseindia.com/api/allIndices", {
+			  headers: {
+				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+				"Accept": "application/json, text/plain, */*",
+				"Accept-Language": "en-US,en;q=0.9",
+				"Referer": "https://www.nseindia.com/market-data/live-equity-market",
+				"X-Requested-With": "XMLHttpRequest"
+			  }
+			});
+			if (!res || !res.ok) throw new Error("NSE allIndices sector fetch: " + (res ? res.status : "null"));
+			const json = await res.json();
+			const rows = json && json.data ? json.data : [];
+			const sectorMap = {};
+			for (const row of rows) {
+			  const key = NSE_SECTOR_MAP[row.index];
+			  if (!key) continue;
+			  const returnPct = Number(Number(row.percentChange).toFixed(2));
+			  const momentum = returnPct >= 0 ? "improving" : "deteriorating";
+			  sectorMap[key] = { current: Number(row.last), returnPct, momentum };
+			}
+			const found = Object.keys(sectorMap).length;
+			logger.info({ found }, "fetchNSESectorData: sectors fetched from allIndices");
+			return found >= 4 ? sectorMap : null;
 		  } catch (err) {
-
-			logger.error({
-			  err: err.message,
-			  symbol
-			}, "Sector fetch failed");
-
+			logger.error({ err: err.message }, "fetchNSESectorData failed");
 			return null;
 		  }
 		}
@@ -2218,7 +2339,7 @@ const fiiDebtSell = Number(
 
 		return {
 		  stance: "Hawkish",
-		  signal: "RISK-OFF",
+		  signal: SIGNAL_ENUM.SELL,
 		  bull: false
 		};
 	  }
@@ -2230,14 +2351,14 @@ const fiiDebtSell = Number(
 
 		return {
 		  stance: "Dovish",
-		  signal: "RISK-ON",
+		  signal: SIGNAL_ENUM.BUY,
 		  bull: true
 		};
 	  }
 
 	  return {
 		stance: "Neutral",
-		signal: "WATCH",
+		signal: SIGNAL_ENUM.WATCH,
 		bull: null
 	  };
 	}
@@ -2304,6 +2425,10 @@ const fiiDebtSell = Number(
 
 	async function fetchYahooQuote(symbol) {
 
+	  if (YAHOO_PAUSED) { return null; }
+
+	  const cacheKey = `yahoo:quote:${symbol}`;
+
 	  try {
 
 		const url =
@@ -2315,6 +2440,8 @@ const fiiDebtSell = Number(
 		  data?.chart?.result?.[0];
 
 		if (!result) {
+		  const cached = DSSCache.get(cacheKey);
+		  if (cached) { logger.warn({ symbol }, "fetchYahooQuote: no result — serving cache"); return cached; }
 		  return null;
 		}
 
@@ -2324,6 +2451,8 @@ const fiiDebtSell = Number(
 			|| [];
 
 		if (!closes.length) {
+		  const cached = DSSCache.get(cacheKey);
+		  if (cached) { logger.warn({ symbol }, "fetchYahooQuote: no closes — serving cache"); return cached; }
 		  return null;
 		}
 
@@ -2339,12 +2468,15 @@ const fiiDebtSell = Number(
 			? Number((((current - prev) / prev) * 100).toFixed(2))
 			: 0;
 
-		return {
+		const quote = {
 		  current,
 		  prev,
 		  changePct,
 		  closes
 		};
+
+		DSSCache.set(cacheKey, quote);
+		return quote;
 
 	  } catch (err) {
 
@@ -2353,32 +2485,60 @@ const fiiDebtSell = Number(
 		  symbol
 		}, "Debt quote fetch failed");
 
+		const cached = DSSCache.get(cacheKey);
+		if (cached) { logger.warn({ symbol }, "fetchYahooQuote: exception — serving cache"); return cached; }
 		return null;
 	  }
 	}
 
 	async function fetchIndiaMacro() {
 
+	  // Helper: fetch a Trading Economics page and extract the first yield value
+	  async function fetchTEYield(url, label) {
+		try {
+		  const res = await fetchWithRetry(url, {
+			headers: {
+			  "User-Agent": getNextUA(),
+			  "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+			  "Accept-Language": "en-US,en;q=0.9"
+			}
+		  }, "TE");
+		  if (!res) return null;
+		  const html = await res.text();
+		  // Match pattern: "X.XX%" appearing after "Bond Yield" context
+		  const match = html.match(/Bond Yield[^0-9]*([0-9]+\.[0-9]+)%/);
+		  if (match) {
+			const val = parseFloat(match[1]);
+			if (val > 1 && val < 20) {
+			  logger.info({ label, yield: val }, "TE yield fetched");
+			  return val;
+			}
+		  }
+		  logger.warn({ label, url }, "TE yield parse failed — no match");
+		  return null;
+		} catch (err) {
+		  logger.warn({ label, err: err.message }, "TE yield fetch failed");
+		  return null;
+		}
+	  }
+
 	  try {
 
-		// TEMPORARY LIVE MACRO INGESTION
-		// Replaceable later with RBI/FRED pipeline
+		// Fetch live G-Sec yields from Trading Economics
+		const [gsec10Y, gsec5Y, gsec2Y] = await Promise.all([
+		  fetchTEYield("https://tradingeconomics.com/india/government-bond-yield", "10Y"),
+		  fetchTEYield("https://tradingeconomics.com/india/5-year-note-yield", "5Y"),
+		  fetchTEYield("https://tradingeconomics.com/india/2-year-note-yield", "2Y")
+		]);
 
+		// Fall back to last-known values if fetch fails
 		return {
-
 		  repoRate: 6.5,
-
-		  cpi:
-			4.75,
-
-		  gsec10Y:
-			7.08,
-
-		  gsec5Y:
-			6.96,
-
-		  gsec1Y:
-			6.82
+		  cpi: 4.75,
+		  gsec10Y: gsec10Y || 7.08,
+		  gsec5Y: gsec5Y || 6.96,
+		  gsec1Y: gsec2Y || 6.82,
+		  gsecLive: !!(gsec10Y && gsec5Y && gsec2Y)
 		};
 
 	  } catch (err) {
@@ -2427,9 +2587,9 @@ const fiiDebtSell = Number(
 		  }
 
 		  return {
-			signal: "WATCH",
-			sentiment: "neutral",
-			strength: "NEUTRAL"
+			signal: SIGNAL_ENUM.WATCH,
+			sentiment: SENTIMENT_ENUM.NEUTRAL,
+			strength: "WEAK"
 		  };
 		}
 
@@ -3105,6 +3265,15 @@ function formatNumber(value, digits = 2) {
 		  const rsi = cache?.rsi ?? null;
 		  const macd = cache?.macd ?? null;
 
+		  const dataTs = cache?.ts || 0;
+		  const ttlMs = 30000;
+		  const freshnessScore = computeFreshnessScore(dataTs, ttlMs);
+
+		  const rsiSentiment = rsi === null ? SENTIMENT_ENUM.NEUTRAL : rsi >= 70 ? SENTIMENT_ENUM.BEARISH : rsi <= 30 ? SENTIMENT_ENUM.BULLISH : SENTIMENT_ENUM.NEUTRAL;
+		  const macdSentiment = macd === null ? SENTIMENT_ENUM.NEUTRAL : macd > 0 ? SENTIMENT_ENUM.BULLISH : SENTIMENT_ENUM.BEARISH;
+		  const sma50Sentiment = (nifty === null || sma50 === null) ? SENTIMENT_ENUM.NEUTRAL : nifty > sma50 ? SENTIMENT_ENUM.BULLISH : SENTIMENT_ENUM.BEARISH;
+		  const sma200Sentiment = (nifty === null || sma200 === null) ? SENTIMENT_ENUM.NEUTRAL : nifty > sma200 ? SENTIMENT_ENUM.BULLISH : SENTIMENT_ENUM.BEARISH;
+
 		  return [
 
 			{
@@ -3130,7 +3299,13 @@ function formatNumber(value, digits = 2) {
 				  ? true
 				  : rsi >= 70
 				  ? false
-				  : null
+				  : null,
+
+			  confidence: rsi === null ? 0.30 : computeConfidence(
+				freshnessScore,
+				computeStrengthScore(rsi, rsi >= 70 ? SIGNAL_ENUM.SELL : rsi <= 30 ? SIGNAL_ENUM.BUY : SIGNAL_ENUM.WATCH, { buyThreshold: 30, sellThreshold: 70, min: 0, max: 100 }),
+				computeAgreementScore(rsiSentiment, [macdSentiment, sma50Sentiment, sma200Sentiment])
+			  )
 			},
 
 			{
@@ -3155,7 +3330,13 @@ function formatNumber(value, digits = 2) {
 	  bull:
 	  macd === null
 		? null
-		: macd > 0
+		: macd > 0,
+
+	  confidence: macd === null ? 0.30 : computeConfidence(
+		freshnessScore,
+		computeStrengthScore(macd, macd > 0 ? SIGNAL_ENUM.BUY : SIGNAL_ENUM.SELL, { buyThreshold: 0, sellThreshold: 0, min: -50, max: 50 }),
+		computeAgreementScore(macdSentiment, [rsiSentiment, sma50Sentiment, sma200Sentiment])
+	  )
 	},
 
 			{
@@ -3180,7 +3361,13 @@ function formatNumber(value, digits = 2) {
 			  bull:
 	  nifty === null || sma50 === null
 		? null
-		: nifty > sma50
+		: nifty > sma50,
+
+			  confidence: (nifty === null || sma50 === null) ? 0.30 : computeConfidence(
+				freshnessScore,
+				computeStrengthScore(nifty, nifty > sma50 ? SIGNAL_ENUM.BUY : SIGNAL_ENUM.SELL, { buyThreshold: sma50, sellThreshold: sma50, min: sma50 * 0.8, max: sma50 * 1.2 }),
+				computeAgreementScore(sma50Sentiment, [rsiSentiment, macdSentiment, sma200Sentiment])
+			  )
 			},
 
 			{
@@ -3205,7 +3392,13 @@ function formatNumber(value, digits = 2) {
 			  bull:
 	  nifty === null || sma200 === null
 		? null
-		: nifty > sma200
+		: nifty > sma200,
+
+			  confidence: (nifty === null || sma200 === null) ? 0.30 : computeConfidence(
+				freshnessScore,
+				computeStrengthScore(nifty, nifty > sma200 ? SIGNAL_ENUM.BUY : SIGNAL_ENUM.SELL, { buyThreshold: sma200, sellThreshold: sma200, min: sma200 * 0.8, max: sma200 * 1.2 }),
+				computeAgreementScore(sma200Sentiment, [rsiSentiment, macdSentiment, sma50Sentiment])
+			  )
 			}
 
 		  ];
@@ -3622,23 +3815,22 @@ function formatNumber(value, digits = 2) {
 		  : "#f5a623"
 	},
 
-			{
-			  name: "Credit Growth",
-			  score: 60,
-			  color: "#00c97a"
-			},
-
-			{
-			  name: "GST Collections",
-			  score: 72,
-			  color: "#00c97a"
-			},
-
-			{
-			  name: "IIP / PMI",
-			  score: 58,
-			  color: "#f5a623"
-			}
+			...(() => {
+			  const macro = DSSCache.get("equity:macro") || {};
+			  const pmi = macro.manufacturingPMI || null;
+			  const gst = macro.gstCollections || null;
+			  // PMI score: >55 bullish, 50-55 neutral, <50 bearish
+			  const pmiScore = pmi ? (pmi >= 55 ? 72 : pmi >= 50 ? 58 : 42) : 58;
+			  // GST score: >2.0L cr bullish, 1.7-2.0 neutral, <1.7 bearish
+			  const gstScore = gst ? (gst >= 2.0 ? 75 : gst >= 1.7 ? 62 : 45) : 60;
+			  const pmiColor = pmiScore >= 70 ? "#00c97a" : pmiScore <= 45 ? "#ff4d6d" : "#f5a623";
+			  const gstColor = gstScore >= 70 ? "#00c97a" : gstScore <= 45 ? "#ff4d6d" : "#f5a623";
+			  return [
+				{ name: "Credit Growth", score: 60, color: "#00c97a" },
+				{ name: "GST Collections", score: gstScore, color: gstColor },
+				{ name: "IIP / PMI", score: pmiScore, color: pmiColor }
+			  ];
+			})()
 
 		  ];
 		}
@@ -4061,84 +4253,104 @@ value:
 	  try {
 
 		// =====================================
-		// LIVE INTRADAY FETCH
+		// LIVE INTRADAY FETCH — NSE allIndices (no Yahoo dependency)
 		// =====================================
 
-		const niftyData = await safeFetch(
-		  "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=5d&interval=5m"
-		);
+		let current = null;
+		let changePct = null;
 
-		if (!niftyData?.chart?.result?.[0]) {
-
-		  logger.error(
-			"Yahoo 5m data invalid — skipping cache update"
-		  );
-
-		  return;
+		try {
+		  // NSE session warmup — inline pattern (same as fetchNSEFlows)
+		  // Step 1: GET homepage — establish session cookie
+		  const warmup1 = await fetch("https://www.nseindia.com", {
+			headers: {
+			  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+			  "Accept-Language": "en-US,en;q=0.9"
+			}
+		  });
+		  const cookieHeader1 = warmup1.headers.get("set-cookie") || "";
+		  const cookies1 = cookieHeader1.split(",").map(c => c.split(";")[0]).join("; ");
+		  // Step 2: mandatory 2500ms wait
+		  await new Promise(r => setTimeout(r, 2500));
+		  // Step 3: GET market-data page — accumulate cookies
+		  const warmup2 = await fetch("https://www.nseindia.com/market-data/live-equity-market", {
+			headers: {
+			  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			  "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+			  "Referer": "https://www.nseindia.com/",
+			  "Cookie": cookies1
+			}
+		  });
+		  const cookieHeader2 = warmup2.headers.get("set-cookie") || "";
+		  const allCookies = [
+			...cookies1.split("; "),
+			...cookieHeader2.split(",").map(c => c.split(";")[0].trim())
+		  ].filter(Boolean).join("; ");
+		  // Step 4: 500ms wait before API call
+		  await new Promise(r => setTimeout(r, 500));
+		  // Step 5: GET allIndices with accumulated session cookies
+		  const nseIndexRes = await fetch("https://www.nseindia.com/api/allIndices", {
+			headers: {
+			  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			  "Accept": "application/json, text/plain, */*",
+			  "Accept-Language": "en-US,en;q=0.9",
+			  "Referer": "https://www.nseindia.com/market-data/live-equity-market",
+			  "X-Requested-With": "XMLHttpRequest",
+			  "Cookie": allCookies
+			}
+		  });
+		  if (!nseIndexRes) throw new Error("NSE allIndices returned null after session protocol");
+		  const nseIndexJson = await nseIndexRes.json();
+		  const niftyRow = nseIndexJson?.data?.find(x => x.index === "NIFTY 50");
+		  if (niftyRow) {
+			current = Number(niftyRow.last) || null;
+			changePct = Number(niftyRow.percentChange) || null;
+			logger.info({ current, changePct }, "NSE LTP updated");
+		  } else {
+			throw new Error("NIFTY 50 row not found in allIndices response");
+		  }
+		} catch (err) {
+		  logger.warn({ err: err.message }, "NSE allIndices fetch failed — using cached LTP");
+		  const cachedIndex = DSSCache.get("nse:index");
+		  current = cachedIndex?.niftyLtp || null;
+		  changePct = cachedIndex?.niftyChangePct || null;
 		}
-
-		const result5m =
-		  niftyData.chart.result[0];
-
-		const intraCloses =
-		  result5m?.indicators?.quote?.[0]?.close
-			?.filter(
-			  v =>
-				v !== null &&
-				!isNaN(v) &&
-				isFinite(v)
-			) || [];
-
-		const current =
-		  Number(
-			result5m?.meta?.regularMarketPrice
-		  ) ||
-		  Number(
-			intraCloses[intraCloses.length - 1]
-		  ) ||
-		  null;
-
-		const prevClose =
-		  intraCloses.length >= 2
-			? intraCloses[intraCloses.length - 2]
-			: null;
-
-		const changePct =
-		  current && prevClose
-			? Number(
-				(
-				  (
-					(current - prevClose) /
-					prevClose
-				  ) * 100
-				).toFixed(2)
-			  )
-			: null;
 
 		// =====================================
 		// DAILY CANDLES FOR REAL TECHNICALS
 		// =====================================
 
-		const niftyDaily =
-		  await safeFetch(
-			"https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=2y&interval=1d"
+		// Fetch only if cache is stale (>6h) — daily candles change once per day
+		const cachedCandles = DSSCache.get("nse:dailyCandles");
+		let dailyCloses = cachedCandles?.closes || [];
+		const candleAge = cachedCandles ? Date.now() - cachedCandles.ts : Infinity;
+		const candleFailedAt = DSSCache.get("nse:dailyCandlesFailedAt") || 0;
+		const candleCooldownOk = (Date.now() - candleFailedAt) > 30 * 60 * 1000;
+		if (!YAHOO_PAUSED && candleAge > 6 * 60 * 60 * 1000 && candleCooldownOk) {
+		  const niftyDaily = await safeFetch(
+			"https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=1y&interval=1d"
 		  );
-
-		let dailyCloses = [];
-
-		if (
-		  niftyDaily?.chart?.result?.[0]
-		) {
-
-		  dailyCloses =
-			niftyDaily.chart.result[0]
+		  if (niftyDaily?.chart?.result?.[0]) {
+			const fetched = niftyDaily.chart.result[0]
 			  ?.indicators?.quote?.[0]?.close
-			  ?.filter(
-				v =>
-				  v !== null &&
-				  !isNaN(v) &&
-				  isFinite(v)
-			  ) || [];
+			  ?.filter(v => v !== null && !isNaN(v) && isFinite(v)) || [];
+			if (fetched.length > 0) {
+			  dailyCloses = fetched;
+			  const candlePayload = { closes: dailyCloses, ts: Date.now() };
+			  DSSCache.set("nse:dailyCandles", candlePayload);
+			  DSSCache.set("nse:dailyCandlesFailedAt", 0);
+			  logger.info({ candles: dailyCloses.length }, "Daily candles cache refreshed");
+			  try { require("fs").writeFileSync("/home/ubuntu/dss-system/data/candles-cache.json", JSON.stringify(candlePayload)); } catch(e) { logger.warn({ err: e.message }, "candles-cache.json write failed"); }
+			} else {
+			  DSSCache.set("nse:dailyCandlesFailedAt", Date.now());
+			  logger.warn("Daily candles fetch returned empty — cooldown 30min");
+			}
+		  } else {
+			// null response = 429 or network fail — set short 5min cooldown to avoid hammering Yahoo
+			DSSCache.set("nse:dailyCandlesFailedAt", Date.now() - (25 * 60 * 1000)); // 5min effective cooldown
+			logger.warn("Daily candles fetch returned null (429 or network) — cooldown 5min");
+		  }
 		}
 
 		// =====================================
@@ -4203,19 +4415,16 @@ value:
 			: null;
 
 		// =====================================
-		// LIVE VIX
+		// VIX — use cached value (fetched by refreshEquityMacroCaches every 15min)
 		// =====================================
 
-		const vixValue =
-		  await fetchVix();
+		const vixValue = marketCache.vixValue || null;
 
 		// =====================================
 		// CACHE UPDATE
 		// =====================================
 
-		if (current !== null) {
-
-		  DSSCache.set(
+		DSSCache.set(
 			"nse:index",
 			{
 
@@ -4246,14 +4455,13 @@ value:
 
 			  timestamp: Date.now(),
 
-			  source: "yahoo"
+			  source: "NSE"
 			}
 		  );
-		}
 
 		logger.info({
 
-		  source: "yahoo",
+		  source: "NSE",
 
 		  hasData: !!current,
 
@@ -4285,15 +4493,14 @@ value:
 
 		// ✅ START SCHEDULER (ONLY ONCE)
 		setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
-		(async () => {
-
-	  await runNSEIndexJob();
-	  
-	  await fetchAMFISIPData();
-
-	  await refreshEquityMacroCaches();
-
-	})();
+		setTimeout(async () => { await runNSEIndexJob(); }, 60000);
+		setTimeout(() => {
+		  refreshSectorCache();
+		  setInterval(() => refreshSectorCache(), 600000);
+		}, 180000);
+		// refreshDebtCache setTimeout moved to 1-tab scope (scope fix)
+		setTimeout(async () => { await fetchAMFISIPData(); }, 600000);
+		setTimeout(async () => { await refreshEquityMacroCaches(); }, 660000);
 		
 		let macroRefreshRunning = false;
 		
@@ -4383,7 +4590,7 @@ value:
 
 	setInterval(
 	  refreshEquityMacroCaches,
-	  5 * 60 * 1000
+	  15 * 60 * 1000
 	);
 
 	// =====================================
@@ -4467,89 +4674,37 @@ value:
 			const flows = [];
 			const themes = [];
 
-			for (const [sector, symbol] of Object.entries(SECTOR_SYMBOLS)) {
-
-			  const sectorData =
-				await fetchSectorData(symbol);
-
-			  if (!sectorData) {
-				continue;
-			  }
-
-			  const {
-				returnPct,
-				momentum
-			  } = sectorData;
-
-			  const phase =
-				classifySectorPhase(
-				  returnPct,
-				  momentum
-				);
-
-			  const signalObj =
-				buildSectorSignal(returnPct);
-
-			  const flowObj =
-				buildSectorFlow(
-				  returnPct,
-				  momentum
-				);
-
-			  const themeObj =
-				buildThemeSignal(
-				  sector,
-				  signalObj
-				);
-
-			  const bull =
-				signalObj.sentiment === "bullish"
-				  ? true
-				  : signalObj.sentiment === "bearish"
-				  ? false
-				  : null;
-
+			const nseSectorMap = await fetchNSESectorData();
+			if (!nseSectorMap) {
+			  logger.warn("buildSectorPayload: fetchNSESectorData returned null");
+			  return null;
+			}
+			for (const [sector, sectorData] of Object.entries(nseSectorMap)) {
+			  const { returnPct, momentum } = sectorData;
+			  const phase = classifySectorPhase(returnPct, momentum);
+			  const signalObj = buildSectorSignal(returnPct);
+			  const flowObj = buildSectorFlow(returnPct, momentum);
+			  const themeObj = buildThemeSignal(sector, signalObj);
+			  const bull = signalObj.sentiment === "bullish" ? true : signalObj.sentiment === "bearish" ? false : null;
 			  heatmap.push({
 				name: sector.replaceAll("_", " "),
-				change:
-				  `${returnPct >= 0 ? "+" : ""}${returnPct}%`,
-				narrative:
-				  `${signalObj.signal} · ${SECTOR_THEMES[sector] || "Sector rotation"}`,
-				color:
-				  bull === true
-					? "#00e0a4"
-					: bull === false
-					? "#ff5f87"
-					: "#9fb3c8",
-				border:
-				  bull === true
-					? "rgba(0,224,164,0.25)"
-					: bull === false
-					? "rgba(255,95,135,0.25)"
-					: "rgba(159,179,200,0.18)",
-				glow:
-				  bull === true
-					? "rgba(0,224,164,0.06)"
-					: bull === false
-					? "rgba(255,95,135,0.06)"
-					: "rgba(159,179,200,0.04)"
+				change: `${returnPct >= 0 ? "+" : ""}${returnPct}%`,
+				narrative: `${signalObj.signal} · ${SECTOR_THEMES[sector] || "Sector rotation"}`,
+				color: bull === true ? "#00e0a4" : bull === false ? "#ff5f87" : "#9fb3c8",
+				border: bull === true ? "rgba(0,224,164,0.25)" : bull === false ? "rgba(255,95,135,0.25)" : "rgba(159,179,200,0.18)",
+				glow: bull === true ? "rgba(0,224,164,0.06)" : bull === false ? "rgba(255,95,135,0.06)" : "rgba(159,179,200,0.04)"
 			  });
-
-			  rotation.push({
-				sector:
-				  sector.replaceAll("_", " "),
-				phase,
-				bull
-			  });
-
-			  flows.push([
-				sector.replaceAll("_", " "),
-				`${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`,
-				flowObj.direction === "inflow"
-			  ]);
-
+			  rotation.push({ sector: sector.replaceAll("_", " "), phase, bull });
+			  flows.push([sector.replaceAll("_", " "), `${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`, flowObj.direction === "inflow"]);
 			  themes.push(themeObj);
+			}
 
+			if (heatmap.length < 4) {
+			  logger.warn({ got: heatmap.length }, "buildSectorPayload: fewer than 4 sectors succeeded — payload suppressed");
+			  return null;
+			}
+			if (heatmap.length < 8) {
+			  logger.warn({ got: heatmap.length }, "buildSectorPayload: partial sector payload — persisting degraded cache");
 			}
 
 			return {
@@ -4586,24 +4741,26 @@ async function buildDebtPayload() {
 		  dxyData,
 		  goldData,
 		  macro
-		] = await Promise.all([
+		] = [
 
-		  fetchYahooQuote(DEBT_SYMBOLS.US10Y),
+		  await fetchYahooQuote(DEBT_SYMBOLS.US10Y),
 
-		  fetchYahooQuote(DEBT_SYMBOLS.US2Y),
+		  await (async () => { await new Promise(r => setTimeout(r, 2000)); return fetchYahooQuote(DEBT_SYMBOLS.US2Y); })(),
 
-		  fetchYahooQuote(DEBT_SYMBOLS.DXY),
+		  await (async () => { await new Promise(r => setTimeout(r, 4000)); return fetchYahooQuote(DEBT_SYMBOLS.DXY); })(),
 
-		  fetchYahooQuote(DEBT_SYMBOLS.GOLD),
+		  await (async () => { await new Promise(r => setTimeout(r, 6000)); return fetchYahooQuote(DEBT_SYMBOLS.GOLD); })(),
 
-		  fetchIndiaMacro()
-		]);
+		  await fetchIndiaMacro()
+		];
 
+		logger.info({ us10Y: !!us10YData, us2Y: !!us2YData, dxy: !!dxyData, gold: !!goldData, macro: !!macro }, "buildDebtPayload: data availability check");
+		// Only us10Y and macro are required — dxy/gold degrade gracefully
 		if (
 		  !us10YData ||
-		  !dxyData ||
 		  !macro
 		) {
+		  logger.warn({ us10Y: !!us10YData, dxy: !!dxyData, macro: !!macro }, "buildDebtPayload: null guard hit — returning null");
 		  return null;
 		}
 
@@ -4620,7 +4777,7 @@ async function buildDebtPayload() {
 		  buildRateSignals({
 			realRate,
 			us10Y: us10YData.current,
-			dxy: dxyData.current
+			dxy: dxyData?.current || null
 		  });
 
 		const recommendation =
@@ -4691,7 +4848,13 @@ async function buildDebtPayload() {
 	  }
 	}
 
+		let sectorCacheRunning = false;
 		async function refreshSectorCache() {
+		  if (sectorCacheRunning) {
+			logger.warn("refreshSectorCache skipped — previous run still in progress");
+			return;
+		  }
+		  sectorCacheRunning = true;
 
 		  try {
 
@@ -4699,6 +4862,7 @@ async function buildDebtPayload() {
 			  await buildSectorPayload();
 
 			if (!payload) {
+			  sectorCacheRunning = false;
 			  return;
 			}
 
@@ -4707,6 +4871,20 @@ async function buildDebtPayload() {
 	  payload
 	);
 
+			// Persist to disk so cache survives PM2 reloads
+			try {
+			  require("fs").writeFileSync(
+				"/home/ubuntu/dss-system/data/sector-cache.json",
+				JSON.stringify({ payload, ts: Date.now() })
+			  );
+			} catch(e) { logger.warn({ err: e.message }, "sector-cache.json write failed"); }
+			// Persist to disk so cache survives PM2 reloads
+			try {
+			  require("fs").writeFileSync(
+				"/home/ubuntu/dss-system/data/sector-cache.json",
+				JSON.stringify({ payload, ts: Date.now() })
+			  );
+			} catch(e) { logger.warn({ err: e.message }, "sector-cache.json write failed"); }
 			logger.info({
 			  sectors: payload.heatmap.length
 			}, "Sector cache updated");
@@ -4716,23 +4894,41 @@ async function buildDebtPayload() {
 			logger.error({
 			  err: err.message
 			}, "Sector refresh failed");
+		  } finally {
+			sectorCacheRunning = false;
 		  }
 		}
 
-		refreshSectorCache();
 		
 		// =====================================
 	// LIVE DEBT CACHE REFRESH
 	// =====================================
 
 	async function refreshDebtCache() {
+	  logger.info("refreshDebtCache: triggered");
+
+	  // Retry up to 3 times with 2min gap — Yahoo 429s clear within ~2min
+	  let payload = null;
+	  for (let attempt = 1; attempt <= 3; attempt++) {
+		if (attempt > 1) {
+		  logger.info({ attempt }, "refreshDebtCache: retrying after 2min Yahoo cooldown");
+		  await new Promise(r => setTimeout(r, 120000));
+		}
+		try {
+		  payload = await Promise.race([
+			buildDebtPayload(),
+			new Promise((_, reject) => setTimeout(() => reject(new Error("buildDebtPayload timeout 45s")), 45000))
+		  ]);
+		} catch(e) {
+		  logger.warn({ attempt, err: e.message }, "refreshDebtCache: attempt failed");
+		}
+		if (payload) break;
+		logger.warn({ attempt }, "refreshDebtCache: payload null, will retry if attempts remain");
+	  }
 
 	  try {
-
-		const payload =
-		  await buildDebtPayload();
-
 		if (!payload) {
+		  logger.error("refreshDebtCache: all attempts exhausted — debt cache not updated");
 		  return;
 		}
 
@@ -4740,6 +4936,14 @@ async function buildDebtPayload() {
 	  "nse:debt",
 	  payload
 	);
+
+		// Persist to disk so cache survives PM2 reloads
+		try {
+		  require("fs").writeFileSync(
+			"/home/ubuntu/dss-system/data/debt-cache.json",
+			JSON.stringify({ payload, ts: Date.now() })
+		  );
+		} catch(e) { logger.warn({ err: e.message }, "debt-cache.json write failed"); }
 
 		logger.info({
 		  source: "debt-engine"
@@ -4753,17 +4957,15 @@ async function buildDebtPayload() {
 	  }
 	}
 
-	refreshDebtCache();
-
 	setInterval(
 	  refreshDebtCache,
-	  60000
+	  20 * 60 * 1000
 	);
 
-		setInterval(
-		  refreshSectorCache,
-		  60000
-		);
+
+	// Trigger first debt refresh after 5min (staggered after sector job to avoid Yahoo 429 collision)
+	setTimeout(() => refreshDebtCache(), 300000);
+
 
 		
 	  app.get("/api/v1/debt",
@@ -4775,11 +4977,19 @@ async function buildDebtPayload() {
 	  DSSCache.get("nse:debt");
 
 	if (!cached) {
-
-			return res.status(503).json({
-			  status: "ERROR",
-			  dataStatus: "unavailable"
-			});
+				// Disk fallback before giving up
+				try {
+				  const _disk = JSON.parse(require('fs').readFileSync('/home/ubuntu/dss-system/data/debt-cache.json', 'utf8'));
+				  if (_disk && _disk.payload && (Date.now() - _disk.ts) < 3600000) {
+				    DSSCache.set('nse:debt', _disk.payload);
+				    logger.info({ ageMin: Math.round((Date.now() - _disk.ts) / 60000) }, 'Debt cache restored from disk at request time');
+				    return res.json({ status: 'OK', dataStatus: 'stale', timestamp: Date.now(), data: _disk.payload });
+				  }
+				} catch(e) { /* no disk cache available */ }
+				return res.status(503).json({
+				  status: "ERROR",
+				  dataStatus: "unavailable"
+				});
 		  }
 
 		  const meta =
@@ -4792,7 +5002,7 @@ async function buildDebtPayload() {
 
 		  let dataStatus = "live";
 
-		  if (age > CACHE_TTL_DEBT * 4) {
+		  if (age > CACHE_TTL_DEBT * 30) { // 30min before marking unavailable
 			dataStatus = "unavailable";
 		  } else if (age > CACHE_TTL_DEBT) {
 			dataStatus = "stale";
@@ -4840,7 +5050,15 @@ async function buildDebtPayload() {
 	  DSSCache.get("nse:sector");
 
 	if (!cached) {
-
+				// Disk fallback before giving up
+				try {
+				  const _disk = JSON.parse(require("fs").readFileSync("/home/ubuntu/dss-system/data/sector-cache.json", "utf8"));
+				  if (_disk && _disk.payload && (Date.now() - _disk.ts) < 21600000) {
+					DSSCache.set("nse:sector", _disk.payload);
+					logger.info({ ageMin: Math.round((Date.now() - _disk.ts) / 60000) }, "Sector cache restored from disk at request time");
+					return res.json({ status: "OK", dataStatus: "stale", timestamp: Date.now(), data: _disk.payload });
+				  }
+				} catch(e) { /* no disk cache available */ }
 				return res.status(503).json({
 				  status: "ERROR",
 				  dataStatus: "unavailable"
@@ -4894,6 +5112,7 @@ async function buildDebtPayload() {
 
 		async function fetchNiftyData() {
 		  try {
+			if (YAHOO_PAUSED) { return null; }
 			const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=5d&interval=5m";
 			const data = await safeFetch(url);
 
@@ -6658,6 +6877,53 @@ async function buildDebtPayload() {
 	  }, "CRITICAL: unhandledRejection — promise rejected without catch");
 	});
 
-		app.listen(PORT, () => {
+		app.listen(PORT, async () => {
 		  logger.info(`DSS running on port ${PORT} (${VERSION})`);
+		  // Pre-establish Yahoo session cookie before scheduler jobs fire
+		  try {
+			await getYahooCookie();
+			logger.info("Yahoo session cookie pre-established at startup");
+			// Small warm-up delay — let Yahoo session settle before data requests
+			await new Promise(r => setTimeout(r, 10000));
+			// Candle cache now restored from disk (candles-cache.json) — startup Yahoo fetch removed
+			// to prevent triggering 429s on reload which cascade into circuit breaker opening
+		  } catch(e) {
+			logger.warn({ err: e.message }, "Yahoo cookie pre-fetch failed at startup");
+		  }
+		  // Restore debt cache from disk if available and fresh (<1hr)
+		  try {
+			const _debtDisk = JSON.parse(require("fs").readFileSync("/home/ubuntu/dss-system/data/debt-cache.json", "utf8"));
+			if (_debtDisk && _debtDisk.payload && (Date.now() - _debtDisk.ts) < 3600000) {
+			  DSSCache.set("nse:debt", _debtDisk.payload);
+			  logger.info({ ageMin: Math.round((Date.now() - _debtDisk.ts) / 60000) }, "Debt cache restored from disk");
+			} else {
+			  logger.info("Debt disk cache too old — will build fresh");
+			}
+		  } catch(e) {
+			logger.info({ err: e.message }, "No debt cache file found — will build fresh");
+		  }
+		  // Restore candle cache from disk if available and fresh (<24hr)
+		  try {
+			const _candleDisk = JSON.parse(require("fs").readFileSync("/home/ubuntu/dss-system/data/candles-cache.json", "utf8"));
+			if (_candleDisk && _candleDisk.closes && _candleDisk.closes.length > 0 && (Date.now() - _candleDisk.ts) < 86400000) {
+			  DSSCache.set("nse:dailyCandles", _candleDisk);
+			  logger.info({ candles: _candleDisk.closes.length, ageMin: Math.round((Date.now() - _candleDisk.ts) / 60000) }, "Candle cache restored from disk");
+			} else {
+			  logger.info("Candle disk cache too old — will build fresh");
+			}
+		  } catch(e) {
+			logger.info({ err: e.message }, "No candle cache file found — will build fresh");
+		  }
+		  // Restore sector cache from disk if available and fresh (<6hr)
+		  try {
+			const _sectorDisk = JSON.parse(require("fs").readFileSync("/home/ubuntu/dss-system/data/sector-cache.json", "utf8"));
+			if (_sectorDisk && _sectorDisk.payload && (Date.now() - _sectorDisk.ts) < 21600000) {
+			  DSSCache.set("nse:sector", _sectorDisk.payload);
+			  logger.info({ ageMin: Math.round((Date.now() - _sectorDisk.ts) / 60000) }, "Sector cache restored from disk");
+			} else {
+			  logger.info("Sector disk cache too old — will build fresh");
+			}
+		  } catch(e) {
+			logger.info({ err: e.message }, "No sector cache file found — will build fresh");
+		  }
 		});
