@@ -5994,6 +5994,86 @@ async function buildDebtPayload() {
 		});
 
 		// ===============================
+		// DEF-007: /api/v1/health — Full observability endpoint (FSD Section 25.1)
+		// ===============================
+		app.get("/api/v1/health", (req, res) => {
+		  try {
+			const now = Date.now();
+
+			// Source freshness — map cache keys to source names and TTLs
+			const sourceMap = {
+			  NSE: { keys: ["nse:index", "nse:optionchain", "equity:flows", "nse:sector"], ttl: 30000 },
+			  RBI: { keys: ["equity:macro"], ttl: 3600000 },
+			  Yahoo: { keys: ["equity:global", "nse:debt"], ttl: 120000 },
+			  MOSPI: { keys: ["equity:fundamental"], ttl: 21600000 }
+			};
+
+			const sources = {};
+			for (const [sourceName, { keys, ttl }] of Object.entries(sourceMap)) {
+			  // Find most recent fetch across all keys for this source
+			  let lastFetch = null;
+			  for (const key of keys) {
+				const meta = DSSCache.meta[key];
+				if (meta && meta.ts && (!lastFetch || meta.ts > lastFetch)) {
+				  lastFetch = meta.ts;
+				}
+			  }
+			  const staleFor = lastFetch ? now - lastFetch : null;
+			  let status = "UNKNOWN";
+			  if (lastFetch === null) {
+				status = "UNKNOWN";
+			  } else if (staleFor <= ttl) {
+				status = "OK";
+			  } else if (staleFor <= ttl * 3) {
+				status = "STALE";
+			  } else {
+				status = "DOWN";
+			  }
+			  sources[sourceName] = {
+				status,
+				lastFetch,
+				staleFor
+			  };
+			}
+
+			// Overall status derived from sources
+			const sourceStatuses = Object.values(sources).map(s => s.status);
+			let overallStatus = "OK";
+			if (sourceStatuses.every(s => s === "DOWN" || s === "UNKNOWN")) {
+			  overallStatus = "DOWN";
+			} else if (sourceStatuses.some(s => s === "DOWN" || s === "STALE")) {
+			  overallStatus = "DEGRADED";
+			}
+
+			// Alerts — simple rule-based
+			const alerts = [];
+			for (const [sourceName, info] of Object.entries(sources)) {
+			  if (info.status === "DOWN") {
+				alerts.push({ code: "FETCH_FAILURE_REPEATED", severity: "CRITICAL", source: sourceName });
+			  } else if (info.status === "STALE") {
+				alerts.push({ code: "STALE_THRESHOLD_BREACH", severity: "HIGH", source: sourceName });
+			  }
+			}
+
+			return res.json({
+			  status: overallStatus,
+			  version: VERSION,
+			  release: RELEASE_TAG,
+			  uptime: Math.round(process.uptime()),
+			  timestamp: now,
+			  sources,
+			  metrics: {
+				note: "Rolling 1h metrics pending Phase F full implementation"
+			  },
+			  deprecated_endpoints: [],
+			  alerts
+			});
+		  } catch (err) {
+			return res.json({ status: "DOWN", timestamp: Date.now(), error: err.message });
+		  }
+		});
+
+		// ===============================
 		// DSS v6 — SIGNALS API
 		// ===============================
 
