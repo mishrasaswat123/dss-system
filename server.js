@@ -1633,14 +1633,11 @@ pmi:
 		  }
 		);
 
-		const cookieHeader =
-		  warmup1.headers.get("set-cookie") || "";
-
-		const cookies =
-		  cookieHeader
-			.split(",")
-			.map(c => c.split(";")[0])
-			.join("; ");
+		// DEF-001 fix: getSetCookie() captures ALL Set-Cookie headers (not just first)
+		const cookies = (warmup1.headers.getSetCookie() || [])
+		  .map(c => c.split(";")[0].trim())
+		  .filter(Boolean)
+		  .join("; ");
 
 		// ---------------------------------
 		// STEP 2 — Activate NSE App Cookies
@@ -1672,17 +1669,13 @@ pmi:
 		  }
 		);
 
-		const cookies2 =
-		  warmup2.headers.get("set-cookie") || "";
-
+		// DEF-001 fix: getSetCookie() captures ALL Set-Cookie headers
+		const cookies2arr = (warmup2.headers.getSetCookie() || [])
+		  .map(c => c.split(";")[0].trim())
+		  .filter(Boolean);
 		const allCookies = [
-
 		  ...cookies.split("; "),
-
-		  ...cookies2
-			.split(",")
-			.map(c => c.split(";")[0].trim())
-
+		  ...cookies2arr
 		]
 		  .filter(Boolean)
 		  .join("; ");
