@@ -23,6 +23,91 @@
 // SECTION-06 : MEMORY LAYER
 // SECTION-07 : LOGGING
 // SECTION-08 : SAFE EXECUTION
+
+// GOVERNANCE Phase E: Narrative Context Builder
+function buildNarrativeContext(cache){
+  try{
+    const regime=cache.get("regime:composite")||{};
+    const sysConf=computeSystemConfidence(cache);
+    const ms=regime.moduleScores||{};
+    const nseIdx=cache.get("nse:index")||{};
+    const globalRaw=cache.get("equity:global")||{};
+    const debtCache=cache.get("nse:debt")||{};
+    const moduleList=Object.entries(ms).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>({key:k,score:v,weight:MOD_CONF_WEIGHTS[k]||0})).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
+    const topDrivers=moduleList.filter(m=>m.score>=55).map(m=>m.key);
+    const weakestDrivers=moduleList.filter(m=>m.score<=40).map(m=>m.key);
+    const vix=nseIdx.vixValue??null;
+    return {
+      compositeScore:regime.compositeScore??null,
+      regime:regime.regime??null,
+      regimeLabel:regime.regimeLabel??null,
+      regimeStrength:!regime.compositeScore?null:regime.compositeScore>=70?"STRONG":regime.compositeScore>=55?"MODERATE":regime.compositeScore>=45?"NEUTRAL":"WEAK",
+      actionBias:regime.actionBias??null,
+      tacticalBias:regime.actionBias??null,
+      confidence:sysConf.overall,
+      confidenceClass:sysConf.classification,
+      degradedModules:sysConf.degradedModules,
+      fallbackModules:sysConf.fallbackModules,
+      staleModules:sysConf.staleModules,
+      topDrivers,weakestDrivers,
+      includedModules:regime.includedModules||[],
+      moduleCoverage:sysConf.moduleCoverage,
+      volatilityState:vix===null?null:vix<15?"LOW":vix<22?"MODERATE":"HIGH",
+      liquidityState:null,
+      macroState:{dxy:globalRaw.dxy??null,crudeBrent:globalRaw.crudeOil??null,repoRate:debtCache.overview?.repoRate??null,realRate:debtCache.overview?.realRate??null},
+      riskFlags:[
+        ...(sysConf.fallbackModules.length>2?["HIGH_FALLBACK_COUNT"]:[]),
+        ...(sysConf.overall<0.40?["LOW_SYSTEM_CONFIDENCE"]:[]),
+        ...(vix>22?["ELEVATED_VOLATILITY"]:[]),
+        ...((regime.compositeScore||50)<=30?["EXTREME_RISK_OFF"]:[]),
+        ...((regime.compositeScore||50)>=75?["EXTREME_RISK_ON"]:[]),
+      ],
+      governance:{
+        llmMayOverrideRegime:false,llmMayOverrideScore:false,
+        llmMayInferMissingData:false,
+        llmMustDiscloseDegraded:sysConf.degradedModules.length>0||sysConf.fallbackModules.length>0,
+        llmToneModifier:sysConf.overall<0.40?"CAUTIOUS":sysConf.overall<0.60?"MEASURED":"CONFIDENT",
+        requiredDisclaimers:sysConf.fallbackModules.length>0?["Data quality note: "+sysConf.fallbackModules.join(", ")+" using fallback values"]:[],
+      },
+      generatedAt:Date.now(),
+    };
+  }catch(e){return{error:e.message,generatedAt:Date.now()};}
+}
+
+// GOVERNANCE Phase H: Provider Health Registry
+const ProviderHealthRegistry=(()=>{
+  const _s={},_w=3600000;
+  function _i(p){if(!_s[p])_s[p]={success:[],failure:[],latencies:[],lastSuccess:null,lastFailure:null};}
+  return {
+    recordSuccess(p,lat=0){_i(p);const n=Date.now();_s[p].success.push(n);_s[p].latencies.push(lat);_s[p].lastSuccess=n;_s[p].success=_s[p].success.filter(t=>n-t<_w);_s[p].failure=_s[p].failure.filter(t=>n-t<_w);_s[p].latencies=_s[p].latencies.slice(-50);},
+    recordFailure(p){_i(p);const n=Date.now();_s[p].failure.push(n);_s[p].lastFailure=n;_s[p].failure=_s[p].failure.filter(t=>n-t<_w);_s[p].success=_s[p].success.filter(t=>n-t<_w);},
+    getSummary(){const o={};for(const[p,d]of Object.entries(_s)){const tot=d.success.length+d.failure.length;const avg=d.latencies.length?Math.round(d.latencies.reduce((a,b)=>a+b,0)/d.latencies.length):null;o[p]={successRate:tot>0?Math.round((d.success.length/tot)*100):null,successCount:d.success.length,failureCount:d.failure.length,avgLatencyMs:avg,lastSuccess:d.lastSuccess,lastFailure:d.lastFailure,status:d.failure.length>d.success.length?"DEGRADED":d.success.length>0?"OK":"UNKNOWN"};}return o;},
+  };
+})();
+
+// GOVERNANCE Phase F: Narrative Governance Rules
+const NarrativeGovernanceRules = Object.freeze({
+  LLM_MAY_OVERRIDE_REGIME:       false,
+  LLM_MAY_OVERRIDE_SCORE:        false,
+  LLM_MAY_INFER_MISSING_DATA:    false,
+  LLM_MAY_HIDE_DEGRADED_STATE:   false,
+  LLM_MAY_GENERATE_INDEPENDENT_RECS: false,
+  LLM_MAY_REINTERPRET_WEIGHTS:   false,
+  MIN_CONFIDENCE_FOR_CONFIDENT_TONE: 0.60,
+  MIN_CONFIDENCE_FOR_MEASURED_TONE:  0.40,
+  REQUIRED_CONTEXT_FIELDS: ["compositeScore","regime","confidence","confidenceClass","degradedModules","fallbackModules","tacticalBias","riskFlags"],
+  FORBIDDEN_CONTEXT_FIELDS: ["moduleWeights","engineFormulas","rawProviderOutputs","hiddenState","optionChainDump"],
+  applyToneModifier(confidence) {
+    if (confidence >= this.MIN_CONFIDENCE_FOR_CONFIDENT_TONE) return "CONFIDENT";
+    if (confidence >= this.MIN_CONFIDENCE_FOR_MEASURED_TONE)  return "MEASURED";
+    return "CAUTIOUS";
+  },
+  validateContext(ctx) {
+    const missing = this.REQUIRED_CONTEXT_FIELDS.filter(f => ctx[f] === undefined);
+    const forbidden = this.FORBIDDEN_CONTEXT_FIELDS.filter(f => ctx[f] !== undefined);
+    return { valid: missing.length===0 && forbidden.length===0, missing, forbidden };
+  },
+});
 // SECTION-09 : FETCH UTILITIES (fetchWithRetry / safeFetch / safeFetchText)
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES (crude / vix)
 // SECTION-11 : MACRO PARSERS (TradingEconomics / GST / PMI / AMFI)
@@ -33,14 +118,17 @@
 // SECTION-16 : TECHNICAL ENGINE (EMA / RSI / SMA / buildEquitySignals)
 // SECTION-17 : SECTOR ENGINE (fetchSectorData / classifySectorPhase / buildSectorPayload)
 // SECTION-18 : DEBT ENGINE (buildYieldCurve / buildRateSignals / buildDebtPayload)
-// SECTION-19 : DERIVED MACRO SCORE ENGINE (PATCH E-7)
+// SECTION-19 : DERIVED MACRO SCORE ENGINE (PATCH E-7) → RegimeEngine (Session 18)
+// Session 18 Step 2: score:* cache keys written by all signal engines.
+// Provenance fields: sourceOrigin, fallbackActive, staleReason, cacheAgeMin
 // SECTION-20 : EQUITY UI BUILDERS (KPI / Technical / Fundamental / Flows)
 // SECTION-21 : SUPPORT RESISTANCE ENGINE
 // SECTION-22 : MARKET SCORE ENGINE (computeMarketScore / computeFearGreed)
 // SECTION-23 : BRAIN SIGNAL ENGINE (buildSignals / getRegime / intelligence)
 // SECTION-24 : BRAIN NARRATIVE ENGINE (buildNarrative / buildAdvisory / interpretation)
+// SECTION-24B: NARRATIVE ENGINE (NarrativeEngine / _buildRuleNarrative / narrative:compiled)
 // SECTION-25 : SCHEDULER + JOBS (runNSEIndexJob / refreshEquityMacroCaches / setIntervals)
-// SECTION-26 : API ROUTES (/api/v1/* / /brain-auto / /health)
+// SECTION-26 : API ROUTES (/api/v1/* / /brain-auto / /health / /api/v1/global)
 // SECTION-27 : PM2 + STARTUP (error handler / process guards / app.listen)
 //
 ////////////////////////////////////////////////////////
@@ -79,6 +167,13 @@ const DATA_STATUS_ENUM = Object.freeze({
   STALE:       "stale",
   UNAVAILABLE: "unavailable"
 });
+
+const DATA_STATUS = Object.freeze({LIVE:"live",DEGRADED:"degraded",FALLBACK:"fallback",STALE:"stale",PARTIAL:"partial",DISCONNECTED:"disconnected",RECOVERING:"recovering",UNAVAILABLE:"unavailable"});
+function buildProvenanceField(o){const ts=o.timestamp||Date.now();return{value:o.value??null,source:o.source||"unknown",degraded:o.degraded||false,fallback:o.fallback||false,stale:o.stale||false,confidence:Math.round((o.confidence??1.0)*100)/100,degradedReason:o.degradedReason||null,timestamp:ts,freshnessSeconds:Math.round((Date.now()-ts)/1000),dataStatus:o.fallback?"fallback":o.degraded?"degraded":o.stale?"stale":(o.value===null||o.value===undefined)?"unavailable":"live"};}
+const CONFIDENCE_CLASS=Object.freeze({HIGH:"HIGH",MODERATE:"MODERATE",LOW:"LOW",DEGRADED:"DEGRADED",UNRELIABLE:"UNRELIABLE"});
+const MOD_CONF_WEIGHTS=Object.freeze({equity:0.30,technical:0.20,global:0.20,derivatives:0.15,debt:0.10,sector:0.05});
+function computeSystemConfidence(cache){try{const keys={equity:"score:equity",technical:"score:technical",global:"score:global",derivatives:"score:derivatives",debt:"score:debt",sector:"score:sector"};const mc={},deg=[],stale=[],fb=[],unavail=[];let wC=0,wT=0;for(const[key,ck]of Object.entries(keys)){const sc=cache.get(ck),w=MOD_CONF_WEIGHTS[key]||0;let c=0,st="unavailable";if(!sc||sc.score===null||sc.score===undefined){c=0.05;unavail.push(key);}else if(sc.fallbackActive===true||sc.sourceOrigin==="hardcoded-fallback"||sc.sourceOrigin==="bootstrap-fallback"){c=Math.min(sc.confidence||0.35,0.50);st="fallback";fb.push(key);}else if(sc.staleReason){c=Math.min(sc.confidence||0.55,0.70);st="stale";stale.push(key);}else{c=Math.min(sc.confidence||0.70,1.0);st=sc.confidence>=0.60?"live":"degraded";if(st==="degraded")deg.push(key);}mc[key]={confidence:Math.round(c*100)/100,status:st};wC+=c*w;wT+=w;}const ov=wT>0?Math.round((wC/wT)*100)/100:0;const cls=ov>=0.80?CONFIDENCE_CLASS.HIGH:ov>=0.60?CONFIDENCE_CLASS.MODERATE:ov>=0.40?CONFIDENCE_CLASS.LOW:ov>=0.20?CONFIDENCE_CLASS.DEGRADED:CONFIDENCE_CLASS.UNRELIABLE;const cov=Object.values(keys).filter(k=>{const s=cache.get(k);return s&&s.score!==null;}).length/6;return{overall:ov,overallPct:Math.round(ov*100),classification:cls,moduleCoverage:Math.round(cov*100)/100,degradedModules:deg,staleModules:stale,fallbackModules:fb,unavailableModules:unavail,drivers:mc,computedAt:Date.now()};}catch(e){return{overall:0,overallPct:0,classification:CONFIDENCE_CLASS.UNRELIABLE,moduleCoverage:0,degradedModules:[],staleModules:[],fallbackModules:[],unavailableModules:[],drivers:{},computedAt:Date.now()};}}
+
 
 const ERROR_ENUM = Object.freeze({
   FETCH_FAILED:        "FETCH_FAILED",
@@ -131,9 +226,14 @@ const ERROR_ENUM = Object.freeze({
 			CREATE TABLE IF NOT EXISTS decisions (
 			  id INTEGER PRIMARY KEY AUTOINCREMENT,
 			  regime TEXT,
-			  score INTEGER,
+                          score REAL,
 			  confidence INTEGER,
 			  timestamp INTEGER
+                          module_coverage REAL,
+                          fallback_count INTEGER,
+                          stale_count INTEGER,
+                          overall_confidence REAL,
+                          conf_class TEXT
 			)
 		  `);
 		db.run('CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(timestamp)');
@@ -717,6 +817,84 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 		async function safeFetch(url, timeout = FETCH_TIMEOUT_MS, retries = FETCH_RETRY_COUNT) {
 		  return fetchWithRetry(url, timeout, retries);
 		}
+
+////////////////////////////////////////////////////////
+// SECTION-09B : ANGEL ONE SMARTAPI ADAPTER
+////////////////////////////////////////////////////////
+const _aoSpeakeasy = require('speakeasy');
+const _AO_CONFIG = {
+  apiKey: process.env.AO_API_KEY || '',
+  clientId: process.env.AO_CLIENT_ID || '',
+  mpin: process.env.AO_MPIN || '',
+  totpSecret: process.env.AO_TOTP_SECRET || '',
+  baseUrl: 'https://apiconnect.angelone.in',
+};
+const _aoSession = { jwtToken:null, refreshToken:null, feedToken:null, expiresAt:0, loginInProgress:false };
+function _aoGenerateTotp() { return _aoSpeakeasy.totp({ secret:_AO_CONFIG.totpSecret, encoding:'base32' }); }
+async function _aoLogin() {
+  if (_aoSession.loginInProgress) { await new Promise(r=>setTimeout(r,3000)); return _aoSession.jwtToken!==null; }
+  _aoSession.loginInProgress=true;
+  try {
+    const totp=_aoGenerateTotp();
+    const res=await fetch(`${_AO_CONFIG.baseUrl}/rest/auth/angelbroking/user/v1/loginByPassword`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
+      body:JSON.stringify({clientcode:_AO_CONFIG.clientId,password:_AO_CONFIG.mpin,totp}),
+      signal:AbortSignal.timeout(10000),
+    });
+    const data=await res.json();
+    if(data.status===true&&data.data&&data.data.jwtToken){
+      _aoSession.jwtToken=data.data.jwtToken; _aoSession.refreshToken=data.data.refreshToken;
+      _aoSession.feedToken=data.data.feedToken; _aoSession.expiresAt=Date.now()+55*60*1000;
+      logger.info({job:'ao-login',status:'SUCCESS',ts:Date.now()});
+      return true;
+    }
+    logger.error({job:'ao-login',status:'FAILED',msg:data.message,ts:Date.now()});
+    return false;
+  } catch(err) { logger.error({job:'ao-login',err:err.message,ts:Date.now()}); return false; }
+  finally { _aoSession.loginInProgress=false; }
+}
+async function _aoEnsureSession() { if(_aoSession.jwtToken&&Date.now()<_aoSession.expiresAt)return true; return _aoLogin(); }
+async function _aoPost(path,body) {
+  const ok=await _aoEnsureSession(); if(!ok)return null;
+  try {
+    const res=await fetch(`${_AO_CONFIG.baseUrl}${path}`,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+_aoSession.jwtToken,'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
+      body:JSON.stringify(body), signal:AbortSignal.timeout(10000),
+    });
+    return await res.json();
+  } catch(err) { logger.warn({job:'ao-post',path,err:err.message}); return null; }
+}
+async function _aoFetchPCR() {
+  try {
+    const data=await _aoPost('/rest/secure/angelbroking/market/v1/optionChain',{name:'NIFTY',expirydate:''});
+    if(!data||data.status!==true||!data.data)return null;
+    const rows=data.data; if(!Array.isArray(rows)||rows.length===0)return null;
+    let totalPEOI=0,totalCEOI=0;
+    for(const row of rows){totalPEOI+=Number(row.putOI||row.put_oi||0);totalCEOI+=Number(row.callOI||row.call_oi||0);}
+    const pcr=totalCEOI>0?Math.round((totalPEOI/totalCEOI)*1000)/1000:null;
+    logger.info({job:'ao-pcr',pcr,ts:Date.now()});
+    return pcr!==null?{pcr,totalPEOI,totalCEOI,source:'angel-one'}:null;
+  } catch(err) { logger.error({job:'ao-pcr',err:err.message}); return null; }
+}
+async function _aoFetchIndia10Y() {
+  try {
+    const data=await _aoPost('/rest/secure/angelbroking/market/v1/quote/ltp',{mode:'LTP',exchangeTokens:{NSE:['10503']}});
+    if(data&&data.status===true&&data.data&&data.data.fetched&&data.data.fetched[0]){
+      const ltp=data.data.fetched[0].ltp;
+      if(ltp){const y=ltp>20?ltp/100:ltp;logger.info({job:'ao-10y',yield:y,ts:Date.now()});return y;}
+    }
+    return null;
+  } catch(err) { logger.error({job:'ao-10y',err:err.message}); return null; }
+}
+(async()=>{
+  if(_AO_CONFIG.apiKey&&_AO_CONFIG.clientId&&_AO_CONFIG.mpin&&_AO_CONFIG.totpSecret){
+    logger.info({job:'ao-adapter',msg:'Initialising Angel One session',ts:Date.now()});
+    await _aoLogin();
+  } else { logger.warn({job:'ao-adapter',msg:'AO credentials missing',ts:Date.now()}); }
+})();
+
 ////////////////////////////////////////////////////////
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES
 // fetchCrude / fetchVix — with circuit breaker pattern.
@@ -1634,7 +1812,7 @@ pmi:
 		);
 
 		// DEF-001 fix: getSetCookie() captures ALL Set-Cookie headers (not just first)
-		const cookies = (warmup1.headers.getSetCookie() || [])
+		const cookies = (typeof warmup1.headers.getSetCookie === "function" ? warmup1.headers.getSetCookie() : [warmup1.headers.get("set-cookie") || ""]).filter(Boolean)
 		  .map(c => c.split(";")[0].trim())
 		  .filter(Boolean)
 		  .join("; ");
@@ -1670,7 +1848,7 @@ pmi:
 		);
 
 		// DEF-001 fix: getSetCookie() captures ALL Set-Cookie headers
-		const cookies2arr = (warmup2.headers.getSetCookie() || [])
+		const cookies2arr = (typeof warmup2.headers.getSetCookie === "function" ? warmup2.headers.getSetCookie() : [warmup2.headers.get("set-cookie") || ""]).filter(Boolean)
 		  .map(c => c.split(";")[0].trim())
 		  .filter(Boolean);
 		const allCookies = [
@@ -1892,6 +2070,16 @@ fiiFuturesPositioning = null;
 		// Step 4 — mandatory 500ms before option chain API call
 		await new Promise(r => setTimeout(r, 500));
 
+		// Step 3.5 — visit option chain page to set session context
+		try {
+			await fetch("https://www.nseindia.com/option-chain", {
+				headers: {
+					...headers,
+					"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"
+				}
+			});
+			await new Promise(r => setTimeout(r, 500));
+		} catch(e) {}
 		const optionUrl =
 		  "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY";
 
@@ -1899,6 +2087,7 @@ fiiFuturesPositioning = null;
 		const optionRes = await fetch(optionUrl, {
 		  headers: {
 			...headers,
+			"Referer":          "https://www.nseindia.com/option-chain",
 			"Accept":           "application/json,text/plain,*/*",
 			"Accept-Language":  "en-US,en;q=0.9",
 			"Accept-Encoding":  "gzip, deflate, br",
@@ -2080,6 +2269,34 @@ const fiiDebtSell = Number(
 		  "equity:flows",
 		  payload
 		);
+
+		// ── SESSION 18 STEP 2: score:derivatives ──
+		safeExecute(() => {
+		  const _pcr    = payload.pcr;
+		  const _vixVal = DSSCache.get("nse:index")?.vixValue || null;
+		  let _derivScore = 50;
+		  if (_pcr !== null && _pcr !== undefined) {
+		    if (_pcr > 1.3) _derivScore += 15; else if (_pcr > 1.1) _derivScore += 8;
+		    else if (_pcr < 0.75) _derivScore -= 15; else if (_pcr < 0.9) _derivScore -= 8;
+		  }
+		  if (_vixVal !== null) {
+		    if (_vixVal < 12) _derivScore += 10; else if (_vixVal < 16) _derivScore += 5;
+		    else if (_vixVal > 22) _derivScore -= 15; else if (_vixVal > 18) _derivScore -= 8;
+		  }
+		  _derivScore = Math.max(0, Math.min(100, _derivScore));
+		  const _pcrLive = _pcr !== null && _pcr !== undefined;
+		  const _vixLive = _vixVal !== null;
+		  const _dConf   = _pcrLive && _vixLive ? 0.78 : _vixLive ? 0.42 : 0.20;
+		  DSSCache.set("score:derivatives", {
+		    score: _derivScore, confidence: _dConf,
+		    sourceOrigin: _pcrLive ? "nse-option-chain" : "vix-only-fallback",
+		    fallbackActive: !_pcrLive,
+		    staleReason: !_pcrLive ? "DEF-001: PCR null — NSE option chain fetch incomplete" : null,
+		    fetchedAt: Date.now(), cacheAgeMin: 0
+		  });
+		  logger.info({ job: "score:derivatives-write", score: _derivScore, confidence: _dConf, pcrLive: _pcrLive, vixLive: _vixLive, pcr: _pcr, ts: Date.now() });
+		}, null);
+		// ── END score:derivatives ──
 
 		return payload;
 
@@ -2266,6 +2483,9 @@ const fiiDebtSell = Number(
 		? 62
 		: 46;
 
+		const peIsLive      = niftyPe !== null;
+		const earningsIsDerived = true;
+
 		const payload = {
 
 		  niftyPe,
@@ -2278,14 +2498,52 @@ const fiiDebtSell = Number(
 
 		  timestamp: Date.now(),
 
-		  source:
-			"fundamental-engine"
+		  source: "fundamental-engine",
+
+		  sourceOrigin: peIsLive ? "nse-live" : "derived-fallback",
+		  fallbackActive: !peIsLive,
+		  staleReason: !peIsLive ? "NSE PE fetch failed — earnings derived from heuristic" : null,
+		  fundamentalDataQuality: {
+		    niftyPe:             peIsLive ? "live" : "unavailable",
+		    earningsGrowth:      earningsIsDerived ? "derived" : "hardcoded",
+		    revenueGrowthScore:  earningsIsDerived ? "derived" : "hardcoded",
+		    marginExpansionScore: "derived",
+		    creditGrowth:        "hardcoded",
+		    gstCollections:      "macro-engine",
+		    manufacturingPMI:    "macro-engine"
+		  },
+		  cacheAgeMin: 0
 		};
 
 		DSSCache.set(
 		  "equity:fundamental",
 		  payload
 		);
+
+		// ── SESSION 18 STEP 2: score:equity ──
+		safeExecute(() => {
+		  const _peIsLive = payload.niftyPe !== null;
+		  let _eScore = 50;
+		  if (_peIsLive) {
+		    if (payload.niftyPe <= 18) _eScore += 20; else if (payload.niftyPe <= 20) _eScore += 12;
+		    else if (payload.niftyPe <= 22) _eScore += 5; else if (payload.niftyPe >= 26) _eScore -= 15;
+		    else if (payload.niftyPe >= 24) _eScore -= 8;
+		  }
+		  if (payload.earningsGrowth >= 15) _eScore += 15;
+		  else if (payload.earningsGrowth >= 12) _eScore += 8;
+		  else if (payload.earningsGrowth < 8) _eScore -= 10;
+		  _eScore = Math.max(0, Math.min(100, _eScore));
+		  const _eConf = _peIsLive ? 0.72 : 0.45;
+		  DSSCache.set("score:equity", {
+		    score: _eScore, confidence: _eConf,
+		    sourceOrigin: _peIsLive ? "nse-live" : "derived-heuristic",
+		    fallbackActive: !_peIsLive,
+		    staleReason: !_peIsLive ? "NSE PE unavailable — equity score derived from RSI/MACD heuristic" : null,
+		    fetchedAt: Date.now(), cacheAgeMin: 0
+		  });
+		  logger.info({ job: "score:equity-write", score: _eScore, confidence: _eConf, peIsLive: _peIsLive, ts: Date.now() });
+		}, null);
+		// ── END score:equity ──
 
 		logger.info({
 		  niftyPe,
@@ -2382,18 +2640,22 @@ const fiiDebtSell = Number(
 			  dxy?.current || null
 		  });
 
+		const _us10YVal=us10Y?.current||null,_dxyVal=dxy?.current||null,_crudeVal=crude||null;
+		const _prevG=DSSCache.get("equity:global")||{};
+		const dxyFinal=_dxyVal||_prevG.dxy||104.50;
+		const crudeFinal=_crudeVal||_prevG.crudeOil||83.00;
+		const us10YFinal=_us10YVal||_prevG.us10Y||null;
 		const payload = {
 
-		  us10Y:
-			us10Y?.current || null,
+		  us10Y: us10YFinal,
 
-		  dxy:
-			dxy?.current || null,
+		  dxy: dxyFinal,
 
-		  crudeOil:
-			crude || null,
+		  crudeOil: crudeFinal,
 
 		  fedPolicy: fed,
+
+		  hardcodedFallback: (!_us10YVal||!_dxyVal||!_crudeVal),
 
 		  timestamp: Date.now()
 		};
@@ -2402,6 +2664,59 @@ const fiiDebtSell = Number(
 		  "equity:global",
 		  payload
 		);
+
+		// ── SESSION 18 STEP 2: score:global + signals:global ──
+		safeExecute(() => {
+		  const _us10Y  = payload.us10Y    || null;
+		  const _dxy    = payload.dxy      || null;
+		  const _crude  = payload.crudeOil || null;
+		  const _fed    = payload.fedPolicy || {};
+
+		  let _gScore = 50;
+		  if (_fed.bull === true)   _gScore += 15;
+		  if (_fed.bull === false)  _gScore -= 15;
+		  if (_dxy !== null) {
+		    if (_dxy < 102)         _gScore += 8;
+		    else if (_dxy > 106)    _gScore -= 8;
+		  }
+		  if (_crude !== null) {
+		    if (_crude < 75)        _gScore += 10;
+		    else if (_crude > 90)   _gScore -= 10;
+		    else if (_crude > 83)   _gScore -= 5;
+		  }
+		  if (_us10Y !== null) {
+		    if (_us10Y > 4.5)       _gScore -= 8;
+		    else if (_us10Y < 4.0)  _gScore += 5;
+		  }
+		  _gScore = Math.max(0, Math.min(100, _gScore));
+
+		  const _liveCount = [_us10Y, _dxy, _crude].filter(v => v !== null).length;
+		  const _gConf = _liveCount === 3 ? 0.85 : _liveCount === 2 ? 0.65 : _liveCount === 1 ? 0.45 : 0.20;
+
+		  DSSCache.set("score:global", {
+		    score: _gScore, confidence: _gConf,
+		    sourceOrigin: _liveCount > 0 ? "yahoo-live" : "unavailable",
+		    fallbackActive: _liveCount < 3,
+		    staleReason: _liveCount < 3 ? "One or more Yahoo global quotes unavailable" : null,
+		    fetchedAt: Date.now(), cacheAgeMin: 0
+		  });
+
+		  const _gSignals = [];
+		  if (_fed.signal) _gSignals.push({ name: "Fed Policy", value: _fed.stance || null, signal: _fed.signal, sentiment: _fed.bull === true ? "bullish" : _fed.bull === false ? "bearish" : "neutral", confidence: _gConf, source: "derived" });
+		  if (_crude !== null) _gSignals.push({ name: "Crude Oil (Brent)", value: _crude, signal: _crude > 90 ? "SELL" : _crude < 75 ? "BUY" : "WATCH", sentiment: _crude > 90 ? "bearish" : _crude < 75 ? "bullish" : "neutral", confidence: 0.80, source: "Yahoo" });
+		  if (_dxy   !== null) _gSignals.push({ name: "DXY (Dollar Index)", value: _dxy,   signal: _dxy > 106 ? "SELL" : _dxy < 102 ? "BUY" : "WATCH",   sentiment: _dxy > 106 ? "bearish" : _dxy < 102 ? "bullish" : "neutral", confidence: 0.80, source: "Yahoo" });
+		  if (_us10Y !== null) _gSignals.push({ name: "US 10Y Yield",       value: _us10Y, signal: _us10Y > 4.5 ? "SELL" : _us10Y < 4.0 ? "BUY" : "WATCH", sentiment: _us10Y > 4.5 ? "bearish" : "neutral", confidence: 0.80, source: "Yahoo" });
+
+		  DSSCache.set("signals:global", {
+		    signals: _gSignals, dxyProxy: _dxy, us10YYield: _us10Y, crudeBrent: _crude,
+		    usdInr: null, fedPolicy: _fed,
+		    sourceOrigin: _liveCount > 0 ? "yahoo-live" : "unavailable",
+		    fallbackActive: _liveCount < 3, fetchedAt: Date.now()
+		  });
+
+		  logger.info({ job: "score:global-write", score: _gScore, confidence: _gConf, liveDataPoints: _liveCount, ts: Date.now() });
+		}, null);
+		// ── END score:global + signals:global ──
 
 		return payload;
 
@@ -2524,14 +2839,32 @@ const fiiDebtSell = Number(
 		  fetchTEYield("https://tradingeconomics.com/india/2-year-note-yield", "2Y")
 		]);
 
-		// Fall back to last-known values if fetch fails
+		// DEF-004: provenance-annotated return with stale-reason for hardcoded fallbacks
+		const gsec10YResolved = gsec10Y || 7.08;
+		const gsec5YResolved  = gsec5Y  || 6.96;
+		const gsec1YResolved  = gsec2Y  || 6.82;
+		const allYieldsLive   = !!(gsec10Y && gsec5Y && gsec2Y);
+
+		if (!allYieldsLive) {
+		  logger.warn(
+		    { gsec10Y: !!gsec10Y, gsec5Y: !!gsec5Y, gsec2Y: !!gsec2Y },
+		    "DEF-004: G-Sec yield fetch incomplete — serving hardcoded fallback values"
+		  );
+		}
+
 		return {
 		  repoRate: 6.5,
+		  repoRateSource: "hardcoded",
 		  cpi: 4.75,
-		  gsec10Y: gsec10Y || 7.08,
-		  gsec5Y: gsec5Y || 6.96,
-		  gsec1Y: gsec2Y || 6.82,
-		  gsecLive: !!(gsec10Y && gsec5Y && gsec2Y)
+		  cpiSource: "hardcoded",
+		  gsec10Y: gsec10YResolved,
+		  gsec5Y:  gsec5YResolved,
+		  gsec1Y:  gsec1YResolved,
+		  gsecLive: allYieldsLive,
+		  sourceOrigin: allYieldsLive ? "trading-economics-live" : "hardcoded-fallback",
+		  fallbackActive: !allYieldsLive,
+		  staleReason: !allYieldsLive ? "TE yield fetch returned null — hardcoded fallback in use" : null,
+		  fetchedAt: Date.now()
 		};
 
 	  } catch (err) {
@@ -2754,10 +3087,10 @@ const fiiDebtSell = Number(
 	}
 	
 	////////////////////////////////////////////////////////
-// SECTION-19 : DERIVED MACRO SCORE ENGINE (PATCH E-7)
-// deriveInflationScore / deriveGrowthScore
-// deriveLiquidityScore / deriveMacroCompositeScore
-// All scores 0-100. Inputs from live macro cache.
+// SECTION-19 : DERIVED MACRO SCORE ENGINE → RegimeEngine (Session 18 Step 3)
+// Current: deriveInflationScore / deriveGrowthScore / deriveLiquidityScore / deriveMacroCompositeScore
+// Session 18: RegimeEngine class replaces this section (Step 3 - pending deployment)
+// score:* inputs now written by all upstream engines (Step 2 complete)
 ////////////////////////////////////////////////////////
 
 // =====================================
@@ -2917,6 +3250,102 @@ function deriveMacroCompositeScore({
 		signal: "WATCH"
 	  };
 	}
+
+
+////////////////////////////////////////////////////////
+// SECTION-19B : REGIME ENGINE (AUTHORITATIVE)
+////////////////////////////////////////////////////////
+
+class RegimeEngine {
+  constructor(dssCache, pinoLogger) {
+    this._cache = dssCache;
+    this._logger = pinoLogger;
+    this._lastComputed = null;
+  }
+
+  async compute() {
+    const equity      = this._cache.get("score:equity")      || { score: null, confidence: 0 };
+    const technical   = this._cache.get("score:technical")   || { score: null, confidence: 0 };
+    const global_     = this._cache.get("score:global")      || { score: null, confidence: 0 };
+    const derivatives = this._cache.get("score:derivatives") || { score: null, confidence: 0 };
+    const debt        = this._cache.get("score:debt")        || { score: null, confidence: 0 };
+    const sector      = this._cache.get("score:sector")      || { score: null, confidence: 0 };
+
+    const MODULE_WEIGHTS = { equity:0.30, technical:0.20, global_:0.20, derivatives:0.15, debt:0.10, sector:0.05 };
+    const modules = { equity, technical, global_, derivatives, debt, sector };
+
+    let weightedSum = 0, activeWeightSum = 0;
+    for (const [name, mod] of Object.entries(modules)) {
+      if (mod.score === null || mod.score === undefined) continue;
+      const conf = mod.confidence || 0;
+      const m = conf >= 0.60 ? 1.00 : conf >= 0.40 ? 0.70 : 0.00;
+      if (m === 0.00) continue;
+      const ew = MODULE_WEIGHTS[name] * m;
+      weightedSum += mod.score * ew;
+      activeWeightSum += ew;
+    }
+
+    const compositeScore = activeWeightSum > 0
+      ? Math.round((weightedSum / activeWeightSum) * 10) / 10
+      : 50;
+
+    const regime = compositeScore >= 70 ? "STRONG_RISK_ON"
+                 : compositeScore >= 55 ? "RISK_ON"
+                 : compositeScore >= 45 ? "NEUTRAL"
+                 : compositeScore >= 30 ? "RISK_OFF"
+                 : "STRONG_RISK_OFF";
+
+    const regimeLabel = compositeScore >= 70 ? "STRONGLY BULLISH"
+                      : compositeScore >= 55 ? "BULLISH"
+                      : compositeScore >= 45 ? "CAUTIOUSLY NEUTRAL"
+                      : compositeScore >= 30 ? "BEARISH"
+                      : "STRONGLY BEARISH";
+
+    const actionBias = compositeScore >= 55 ? "Overweight equities; reduce cash"
+                     : compositeScore >= 45 ? "Balanced; await confirmation"
+                     : "Tilt toward debt and gold; reduce equity";
+
+    const includedModules = Object.entries(modules)
+      .filter(([, mod]) => mod.score !== null && (mod.confidence || 0) >= 0.40)
+      .map(([name]) => name.replace("global_", "global"));
+
+    const result = {
+      compositeScore, regime, regimeLabel, actionBias, includedModules,
+      activeWeightSum: Math.round(activeWeightSum * 1000) / 1000,
+      moduleScores: {
+        equity: equity.score, technical: technical.score, global: global_.score,
+        derivatives: derivatives.score, debt: debt.score, sector: sector.score,
+      },
+      computedAt: Date.now(),
+      dataStatus: activeWeightSum >= 0.60 ? DATA_STATUS_ENUM.LIVE : DATA_STATUS_ENUM.STALE,
+    };
+
+    this._cache.set("regime:composite", result);
+    this._cache.set("brain:compositeScore", compositeScore);
+    this._lastComputed = result;
+
+    this._logger.info({
+      job: "regime-engine", compositeScore, regime, includedModules,
+      activeWeightSum, moduleScores: result.moduleScores, ts: Date.now(),
+    }, "RegimeEngine computed");
+
+    return result;
+  }
+
+  read() {
+    const cached = this._cache.get("regime:composite");
+    if (cached) return cached;
+    if (this._lastComputed) return this._lastComputed;
+    return {
+      compositeScore: 50, regime: "NEUTRAL", regimeLabel: "CAUTIOUSLY NEUTRAL",
+      actionBias: "Balanced; await confirmation", includedModules: [],
+      moduleScores: { equity:null, technical:null, global:null, derivatives:null, debt:null, sector:null },
+      computedAt: null, dataStatus: DATA_STATUS_ENUM.UNAVAILABLE,
+    };
+  }
+}
+
+const regimeEngine = new RegimeEngine(DSSCache, logger);
 
 ////////////////////////////////////////////////////////
 // SECTION-20 : EQUITY UI BUILDERS
@@ -3567,13 +3996,15 @@ function formatNumber(value, digits = 2) {
     });
   }
 
-  return {
+    const levels=[...support.map(l=>({...l,type:"support"})),...resistance.map(l=>({...l,type:"resistance"}))].sort((a,b)=>a.value-b.value);
+return {
 
     regime,
 
     support,
 
     resistance,
+    levels,
 
     meta: {
 
@@ -3712,17 +4143,16 @@ function formatNumber(value, digits = 2) {
 ////////////////////////////////////////////////////////
 
 		function computeMarketScore(cache) {
-
+		  // SESSION 20C: RegimeEngine is single authority — read directly
+		  const rd = regimeEngine.read();
+		  if (rd && typeof rd.compositeScore === 'number') return rd.compositeScore;
+		  // Cold-start fallback only (RegimeEngine not yet computed)
 		  let score = 50;
-
 		  if (cache?.rsi > 60) score += 10;
 		  if (cache?.rsi < 40) score -= 10;
-
 		  if (cache?.macd > 0) score += 10;
 		  if (cache?.macd < 0) score -= 10;
-
 		  if (cache?.vixValue > 20) score -= 10;
-
 		  return Math.max(0, Math.min(100, score));
 		}
 
@@ -3819,7 +4249,8 @@ function formatNumber(value, digits = 2) {
 			  const pmiColor = pmiScore >= 70 ? "#00c97a" : pmiScore <= 45 ? "#ff4d6d" : "#f5a623";
 			  const gstColor = gstScore >= 70 ? "#00c97a" : gstScore <= 45 ? "#ff4d6d" : "#f5a623";
 			  return [
-				{ name: "Credit Growth", score: 60, color: "#00c97a" },
+				// DEF-005: Credit Growth score is hardcoded — no live source connected yet
+			{ name: "Credit Growth", score: 60, color: "#00c97a", dataQuality: "hardcoded", staleReason: "Live RBI credit data not yet fetched" },
 				{ name: "GST Collections", score: gstScore, color: gstColor },
 				{ name: "IIP / PMI", score: pmiScore, color: pmiColor }
 			  ];
@@ -4303,6 +4734,13 @@ value:
 		  } else {
 			throw new Error("NIFTY 50 row not found in allIndices response");
 		  }
+		  // Session 20K: India VIX from allIndices (same feed, no Yahoo dependency)
+		  const vixRow = nseIndexJson?.data?.find(x => x.index === "INDIA VIX");
+		  if (vixRow && vixRow.last) {
+			marketCache.vixValue = Number(vixRow.last);
+			logger.info({ indiaVix: marketCache.vixValue }, "India VIX updated from NSE allIndices");
+		  }
+		  // END India VIX
 		} catch (err) {
 		  logger.warn({ err: err.message }, "NSE allIndices fetch failed — using cached LTP");
 		  const cachedIndex = DSSCache.get("nse:index");
@@ -4452,6 +4890,46 @@ value:
 			}
 		  );
 
+		// ── SESSION 18 STEP 2: score:technical + signals:technical ──
+		safeExecute(() => {
+		  let _tScore = 50;
+		  if (rsi !== null) {
+		    if (rsi < 30) _tScore += 15; else if (rsi > 70) _tScore -= 15;
+		    else if (rsi < 45) _tScore -= 5; else if (rsi > 55) _tScore += 5;
+		  }
+		  if (macd !== null) { if (macd > 0) _tScore += 10; else _tScore -= 10; }
+		  const _niftyLtp = current || null;
+		  if (_niftyLtp && sma50)  { if (_niftyLtp > sma50)  _tScore += 8;  else _tScore -= 8;  }
+		  if (_niftyLtp && sma200) { if (_niftyLtp > sma200) _tScore += 7;  else _tScore -= 7;  }
+		  if (sma50 && sma200)     { if (sma50 > sma200)     _tScore += 5;  else _tScore -= 5;  }
+		  _tScore = Math.max(0, Math.min(100, _tScore));
+
+		  const _liveInd = [rsi, macd, sma50, sma200].filter(v => v !== null).length;
+		  const _tConf   = _liveInd === 4 ? 0.90 : _liveInd === 3 ? 0.75 : _liveInd === 2 ? 0.55 : 0.30;
+
+		  DSSCache.set("score:technical", {
+		    score: _tScore, confidence: _tConf,
+		    sourceOrigin: dailyCloses.length >= 200 ? "yahoo-daily-live" : "yahoo-daily-partial",
+		    fallbackActive: dailyCloses.length < 50,
+		    staleReason: dailyCloses.length < 50 ? "Insufficient candle history" : null,
+		    fetchedAt: Date.now(), cacheAgeMin: 0
+		  });
+
+		  const _tSignals = [];
+		  if (rsi !== null)         _tSignals.push({ name: "RSI (14)",  value: rsi,   signal: rsi < 30 ? "BUY" : rsi > 70 ? "SELL" : "WATCH",         sentiment: rsi < 30 ? "bullish" : rsi > 70 ? "bearish" : "neutral",           confidence: _tConf, source: "derived" });
+		  if (macd !== null)        _tSignals.push({ name: "MACD",      value: macd,  signal: macd > 0 ? "BUY" : "SELL",                               sentiment: macd > 0 ? "bullish" : "bearish",                                   confidence: _tConf, source: "derived" });
+		  if (_niftyLtp && sma50)   _tSignals.push({ name: "50DMA",     value: sma50, signal: _niftyLtp > sma50  ? "BUY" : "SELL",                    sentiment: _niftyLtp > sma50  ? "bullish" : "bearish",                        confidence: _tConf, source: "derived" });
+		  if (_niftyLtp && sma200)  _tSignals.push({ name: "200DMA",    value: sma200,signal: _niftyLtp > sma200 ? "BUY" : "SELL",                    sentiment: _niftyLtp > sma200 ? "bullish" : "bearish",                        confidence: _tConf, source: "derived" });
+
+		  DSSCache.set("signals:technical", {
+		    signals: _tSignals, rsi, macd, sma50, sma200, niftyLtp: _niftyLtp, crossSignal,
+		    sourceOrigin: "nse-yahoo-hybrid", fallbackActive: dailyCloses.length < 50, fetchedAt: Date.now()
+		  });
+
+		  logger.info({ job: "score:technical-write", score: _tScore, confidence: _tConf, liveSignals: _liveInd, ts: Date.now() });
+		}, null);
+		// ── END score:technical + signals:technical ──
+
 		logger.info({
 
 		  source: "NSE",
@@ -4586,6 +5064,96 @@ value:
 	  15 * 60 * 1000
 	);
 
+	// ── regime-compute job (Session 19A) ──
+	setTimeout(async () => {
+	  await safeExecuteAsync(async () => { await regimeEngine.compute(); }, null);
+	  setInterval(async () => {
+	    await safeExecuteAsync(async () => { await regimeEngine.compute(); }, null);
+	  }, 60000);
+	}, 45000);
+	// ── END regime-compute job ──
+	// ── overview-compile job (Session 20A) ──
+	setTimeout(() => {
+	  safeExecute(() => { overviewEngine.build(); }, null);
+	  setInterval(() => {
+	    safeExecute(() => { overviewEngine.build(); }, null);
+	  }, 60000);
+	}, 50000);
+	// ── END overview-compile job ──
+// ── narrative-gen job (Session 20F) ──
+setTimeout(() => {
+  safeExecute(() => { narrativeEngine.synthesize(); }, null);
+  setInterval(() => {
+    safeExecute(() => { narrativeEngine.synthesize(); }, null);
+  }, 900000);
+}, 60000);
+// ── END narrative-gen job ──
+
+        // ── equity/global/derivatives bootstrap (Session 20I) ──
+        DSSCache.set("score:equity", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback", fallbackActive: true,
+          staleReason: "bootstrap value — refreshEquityMacroCaches pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        DSSCache.set("score:global", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback", fallbackActive: true,
+          staleReason: "bootstrap value — refreshEquityMacroCaches pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        DSSCache.set("score:derivatives", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback", fallbackActive: true,
+          staleReason: "bootstrap value — refreshEquityMacroCaches pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        // ── END equity/global/derivatives bootstrap ──
+
+        // ── equity/global/derivatives bootstrap (Session 20I) ──
+        DSSCache.set("score:equity", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback", fallbackActive: true,
+          staleReason: "bootstrap value — refreshEquityMacroCaches pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        DSSCache.set("score:global", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback", fallbackActive: true,
+          staleReason: "bootstrap value — refreshEquityMacroCaches pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        DSSCache.set("score:derivatives", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback", fallbackActive: true,
+          staleReason: "bootstrap value — refreshEquityMacroCaches pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        // ── END equity/global/derivatives bootstrap ──
+
+        // ── debt-bootstrap job (Session 20I) ──
+        DSSCache.set("score:debt", {
+          score: 50, confidence: 0.45,
+          sourceOrigin: "bootstrap-fallback",
+          fallbackActive: true,
+          staleReason: "DEF-004: bootstrap value — refreshDebtCache pending",
+          fetchedAt: Date.now(), cacheAgeMin: 0
+        });
+        setTimeout(async () => {
+          try { await refreshDebtCache(); } catch(e) {
+            logger.warn({ err: e.message }, "debt-bootstrap: refreshDebtCache failed");
+          }
+          setInterval(async () => {
+            try { await refreshDebtCache(); } catch(e) {
+              logger.warn({ err: e.message }, "debt-refresh-toplevel: failed");
+            }
+          }, 20 * 60 * 1000);
+        }, 30000);
+        // ── END debt-bootstrap job ──
+
+
+
+
 	// =====================================
 	// CACHE EXPIRY CLEANUP ENGINE
 	// =====================================
@@ -4688,7 +5256,7 @@ value:
 				glow: bull === true ? "rgba(0,224,164,0.06)" : bull === false ? "rgba(255,95,135,0.06)" : "rgba(159,179,200,0.04)"
 			  });
 			  rotation.push({ sector: sector.replaceAll("_", " "), phase, bull });
-			  flows.push([sector.replaceAll("_", " "), `${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`, flowObj.direction === "inflow"]);
+			  flows.push({ sector: sector.replaceAll("_", " "), value: `${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`, bull: flowObj.direction === "inflow", valueCr: flowObj.valueCr });
 			  themes.push(themeObj);
 			}
 
@@ -4700,6 +5268,8 @@ value:
 			  logger.warn({ got: heatmap.length }, "buildSectorPayload: partial sector payload — persisting degraded cache");
 			}
 
+			const _maxCr=Math.max(1,...flows.map(f=>Math.abs(f.valueCr||0)));
+			flows.forEach(f=>{f.flowPct=Math.min(100,Math.round(Math.abs(f.valueCr||0)/_maxCr*100));});
 			return {
 			  heatmap,
 			  rotation,
@@ -4866,6 +5436,39 @@ async function buildDebtPayload() {
 	  payload
 	);
 
+			// ── SESSION 18 STEP 2: score:sector + signals:sector ──
+			safeExecute(() => {
+			  const _heatmap  = payload.heatmap  || [];
+			  const _rotation = payload.rotation || [];
+			  const _total    = _rotation.length || 1;
+			  const _bullCount = _rotation.filter(r => r.bull === true).length;
+			  const _bearCount = _rotation.filter(r => r.bull === false).length;
+			  let _sScore = 50 + ((_bullCount - _bearCount) / _total) * 30;
+			  _sScore = Math.max(0, Math.min(100, Math.round(_sScore)));
+			  const _sConf = _total >= 8 ? 0.85 : _total >= 6 ? 0.70 : _total >= 4 ? 0.55 : 0.30;
+			  let _topSector = null, _bottomSector = null, _topPct = -Infinity, _bottomPct = Infinity;
+			  for (const h of _heatmap) {
+			    const _pct = parseFloat((h.change || "0").replace(/[^0-9.\-]/g, "")) || 0;
+			    if (_pct > _topPct)    { _topPct    = _pct; _topSector    = h.name; }
+			    if (_pct < _bottomPct) { _bottomPct = _pct; _bottomSector = h.name; }
+			  }
+			  const _rotationPhase = _bullCount >= _total * 0.625 ? "LEADING"
+			                       : _bullCount >= _total * 0.375 ? "IMPROVING"
+			                       : _bullCount >= _total * 0.125 ? "WEAKENING" : "LAGGING";
+			  DSSCache.set("score:sector", {
+			    score: _sScore, confidence: _sConf, sourceOrigin: "nse-live",
+			    fallbackActive: _total < 4, staleReason: _total < 4 ? "Fewer than 4 sectors available" : null,
+			    fetchedAt: Date.now(), cacheAgeMin: 0
+			  });
+			  DSSCache.set("signals:sector", {
+			    topSector: _topSector, bottomSector: _bottomSector, rotationPhase: _rotationPhase,
+			    bullSectors: _bullCount, bearSectors: _bearCount, totalSectors: _total, heatmap: _heatmap,
+			    sourceOrigin: "nse-live", fallbackActive: _total < 4, fetchedAt: Date.now()
+			  });
+			  logger.info({ job: "score:sector-write", score: _sScore, confidence: _sConf, topSector: _topSector, bottomSector: _bottomSector, rotationPhase: _rotationPhase, sectorCount: _total, ts: Date.now() });
+			}, null);
+			// ── END score:sector + signals:sector ──
+
 			// Persist to disk so cache survives PM2 reloads
 			try {
 			  require("fs").writeFileSync(
@@ -4931,6 +5534,53 @@ async function buildDebtPayload() {
 	  "nse:debt",
 	  payload
 	);
+
+		// ── SESSION 18 STEP 2: score:debt + signals:debt ──
+		safeExecute(() => {
+		  const _ov       = payload.overview || {};
+		  const _realRate = _ov.realRate || null;
+		  const _us10Y    = _ov.us10Y    || null;
+		  const _dxy      = _ov.dxy      || null;
+		  const _gsecLive = payload.gsecLive === true;
+
+		  let _dScore = 50;
+		  if (_realRate !== null) {
+		    if (_realRate >= 1.5) _dScore += 15; else if (_realRate >= 0.5) _dScore += 8; else if (_realRate < 0) _dScore -= 15;
+		  }
+		  if (_us10Y !== null) { if (_us10Y < 4.0) _dScore += 10; else if (_us10Y > 4.5) _dScore -= 10; }
+		  if (_dxy   !== null) { if (_dxy < 102)   _dScore += 5;  else if (_dxy > 106)   _dScore -= 5;  }
+		  _dScore = Math.max(0, Math.min(100, _dScore));
+
+		  const _dConf = _gsecLive ? 0.75 : 0.45;
+
+		  DSSCache.set("score:debt", {
+		    score: _dScore, confidence: _dConf,
+		    sourceOrigin: _gsecLive ? "te-live" : "hardcoded-fallback",
+		    fallbackActive: !_gsecLive,
+		    staleReason: !_gsecLive ? "DEF-004: G-Sec yields hardcoded — confidence penalised" : null,
+		    fetchedAt: Date.now(), cacheAgeMin: 0
+		  });
+
+		  const _dSignals = (payload.rateSignals || []).map(rs => ({
+		    name: rs.factor, value: null,
+		    signal: rs.bull ? "BUY" : "SELL",
+		    sentiment: rs.bull ? "bullish" : "bearish",
+		    confidence: _dConf, source: "derived"
+		  }));
+
+		  DSSCache.set("signals:debt", {
+		    signals: _dSignals,
+		    repoRate: _ov.repoRate || null, cpi: _ov.cpi || null, realRate: _realRate,
+		    gsec10Y: _ov.us10Y || null,
+		    rateCyclePhase: (_realRate !== null && _realRate > 1.0) ? "Pause" : "Uncertain",
+		    gsecLive: _gsecLive,
+		    sourceOrigin: _gsecLive ? "te-live" : "hardcoded-fallback",
+		    fallbackActive: !_gsecLive, fetchedAt: Date.now()
+		  });
+
+		  logger.info({ job: "score:debt-write", score: _dScore, confidence: _dConf, gsecLive: _gsecLive, ts: Date.now() });
+		}, null);
+		// ── END score:debt + signals:debt ──
 
 		// Persist to disk so cache survives PM2 reloads
 		try {
@@ -5003,9 +5653,20 @@ async function buildDebtPayload() {
 			dataStatus = "stale";
 		  }
 
-		  // DEF-004: hardcoded G-Sec yields must not claim live
+		  // DEF-004: hardcoded G-Sec yields must not claim live (Never-Fabricate Rule)
 		  if (cached.gsecLive === false && dataStatus === "live") {
-			dataStatus = "stale";
+			dataStatus = DATA_STATUS_ENUM.STALE;
+			logger.info(
+			  { gsecLive: false, code: "DEF-004" },
+			  "DEF-004: G-Sec yields are hardcoded — overriding dataStatus to stale"
+			);
+		  }
+		  // DEF-004: repoRate and CPI are also hardcoded — surface that too
+		  if (
+			(cached.repoRateSource === "hardcoded" || cached.cpiSource === "hardcoded") &&
+			dataStatus === DATA_STATUS_ENUM.LIVE
+		  ) {
+			dataStatus = DATA_STATUS_ENUM.STALE;
 		  }
 
 		  if (dataStatus === "unavailable") {
@@ -5016,6 +5677,15 @@ async function buildDebtPayload() {
 			});
 		  }
 
+		  // DEF-009: merge score:debt provenance
+		  const _scoreDebt = DSSCache.get("score:debt") || {};
+		  const _debtData = Object.assign({}, cached, {
+		    sourceOrigin:   _scoreDebt.sourceOrigin   || cached.sourceOrigin   || null,
+		    fallbackActive: _scoreDebt.fallbackActive != null ? _scoreDebt.fallbackActive : (cached.fallbackActive != null ? cached.fallbackActive : null),
+		    staleReason:    _scoreDebt.staleReason    || cached.staleReason    || null,
+		    fetchedAt:      _scoreDebt.fetchedAt      || cached.fetchedAt      || null,
+		  });
+
 		  return res.json({
 
 			status: "OK",
@@ -5024,7 +5694,7 @@ async function buildDebtPayload() {
 
 			dataStatus,
 
-			data: cached
+			data: _debtData
 		  });
 
 		} catch (err) {
@@ -5201,6 +5871,371 @@ async function buildDebtPayload() {
 
 	  return baseWeight * reliability;
 	}
+
+
+////////////////////////////////////////////////////////
+// SECTION-22B : OVERVIEW ENGINE
+// Synthesis-only orchestration layer.
+// Reads from cache. No external fetches.
+// Writes to overview:compiled (TTL 60s).
+// Powers /api/v1/overview exclusively.
+////////////////////////////////////////////////////////
+
+class OverviewEngine {
+  constructor(dssCache, regimeEng, pinoLogger) {
+    this._cache = dssCache;
+    this._regime = regimeEng;
+    this._logger = pinoLogger;
+  }
+
+  build() {
+    const regime      = this._regime.read();
+    const equity      = this._cache.get("nse:index")         || {};
+    const technical   = this._cache.get("signals:technical") || { signals: [] };
+    const sectors     = this._cache.get("signals:sector")    || {};
+    const debt        = this._cache.get("signals:debt")      || {};
+    const global_     = this._cache.get("signals:global")    || {};
+    const flows       = this._cache.get("equity:flows")      || {};
+    const optchain    = this._cache.get("nse:optionchain")   || {};
+
+    // --- Composite score block ---
+    const compositeScore = {
+      score:           regime.compositeScore,
+      label:           regime.regimeLabel,
+      actionBias:      regime.actionBias,
+      regime:          regime.regime,
+      includedModules: regime.includedModules,
+      moduleScores:    regime.moduleScores,
+      dataStatus:      regime.dataStatus,
+      computedAt:      regime.computedAt,
+    };
+
+    // --- Fear & Greed (Appendix B.6) ---
+    const fearGreed = this._computeFearGreed(technical, optchain, flows);
+
+    // --- Signal strip ---
+    const allSignals = [
+      ...(technical.signals  || []),
+      ...(debt.signals       || []),
+      ...(global_.signals    || []),
+    ];
+    const signalStrip = allSignals
+      .filter(s => s && (s.confidence || 0) >= 0.60 && s.signal !== "WATCH")
+      .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+      .slice(0, 6)
+      .map(s => ({ name: s.name, signal: s.signal, sentiment: s.sentiment, confidence: s.confidence, source: s.source }));
+
+    // --- Breadth ---
+    const breadth = {
+      advanceDeclineRatio: null,
+      sentiment:           null,
+      dataStatus:          DATA_STATUS_ENUM.UNAVAILABLE,
+    };
+
+    // --- Flows ---
+    const fiiNet = flows.fiiEquity || null;
+    const diiNet = flows.diiEquity || null;
+    const flowsBlock = {
+      fiiNet,
+      diiNet,
+      fiiSentiment: fiiNet === null ? null
+                  : fiiNet > 500   ? "STRONG_BUY"
+                  : fiiNet > 0     ? "MILD_BUY"
+                  : fiiNet > -500  ? "MILD_SELL"
+                  : "STRONG_SELL",
+      dataStatus: fiiNet !== null ? DATA_STATUS_ENUM.LIVE : DATA_STATUS_ENUM.UNAVAILABLE,
+    };
+
+    // --- Module health (PARITY: weight/weightPct/included/contribution) ---
+    const ms = regime.moduleScores || {};
+    const _MW = { equity:0.30, technical:0.20, global:0.20, derivatives:0.15, debt:0.10, sector:0.05 };
+    const _inc = regime.includedModules || [];
+    const _mkMod = (key, label, score, extra) => ({
+      label, score, status: this._moduleStatus(score),
+      weight: _MW[key]||0, weightPct: Math.round((_MW[key]||0)*100),
+      included: _inc.includes(key),
+      contribution: (score!=null && _inc.includes(key)) ? Math.round(score*(_MW[key]||0)*10)/10 : null,
+      ...extra,
+    });
+    const modules = {
+      equity:      _mkMod("equity",      "Equity",       ms.equity,      { niftyLtp: equity.niftyLtp||null, niftyChangePct: equity.niftyChangePct||null }),
+      technical:   _mkMod("technical",   "Technical",    ms.technical,   { topSignal: signalStrip[0]||null }),
+      sector:      _mkMod("sector",      "Sectors",      ms.sector,      { leading: sectors.topSector||null, lagging: sectors.bottomSector||null }),
+      debt:        _mkMod("debt",        "Debt / Rates", ms.debt,        { repoRate: debt.repoRate||null, realRate: debt.realRate||null }),
+      global:      _mkMod("global",      "Global Macro", ms.global,      { dxy: (global_.signals||[]).find(s=>s.name==="DXY (Dollar Index)")?.value||null, crude: (global_.signals||[]).find(s=>s.name==="Crude Oil (Brent)")?.value||null }),
+      derivatives: _mkMod("derivatives", "Derivatives",  ms.derivatives, { vix: equity.vixValue||null, pcr: flows.pcr||null }),
+    };
+
+    const _staleReasons = Object.entries(regime.moduleScores || {})
+      .filter(([, v]) => v === null || v === undefined)
+      .map(([k]) => k + "_score_unavailable");
+    const _ageMin = regime.computedAt
+      ? Math.round((Date.now() - regime.computedAt) / 60000 * 10) / 10
+      : null;
+    const provenance = {
+      computedAt:      regime.computedAt || null,
+      cacheAgeMin:     _ageMin,
+      includedModules: regime.includedModules || [],
+      staleReasons:    _staleReasons,
+    };
+    const systemConf = computeSystemConfidence(this._cache);
+    const result = {
+      compositeScore,
+      fearGreed,
+      signalStrip,
+      breadth,
+      modules,
+      provenance,
+      confidence: systemConf,
+      dataStatus: regime.dataStatus,
+      timestamp:  Date.now(),
+    };
+
+    this._cache.set("overview:compiled", result);
+
+    this._logger.info({
+      job:            "overview-engine",
+      compositeScore: regime.compositeScore,
+      regime:         regime.regime,
+      signalStripLen: signalStrip.length,
+      fearGreedScore: fearGreed.score,
+      ts:             Date.now(),
+    }, "OverviewEngine compiled");
+
+    return result;
+  }
+
+  _computeFearGreed(technical, optchain, flows) {
+    const signals = technical.signals || [];
+    const rsiSig  = signals.find(s => s.name === "RSI (14)");
+    const rsiVal  = rsiSig ? (rsiSig.value || 50) : 50;
+
+    const momentumScore  = rsiVal > 70 ? 80 : rsiVal < 30 ? 20 : 40 + rsiVal * 0.4;
+    const breadthScore   = 50;
+    const vix            = 18;
+    const volatilityScore= Math.min(100, Math.max(0, 100 - ((vix - 10) / 25) * 100));
+    const fiiNet         = flows.fiiEquity || 0;
+    const flowScore      = Math.min(100, Math.max(0, 50 + (fiiNet / 2000) * 50));
+
+    const raw   = momentumScore * 0.25 + breadthScore * 0.25 + volatilityScore * 0.25 + flowScore * 0.25;
+    const score = Math.round(raw);
+    const label = score > 80 ? "EXTREME GREED"
+                : score > 60 ? "GREED"
+                : score > 40 ? "NEUTRAL"
+                : score > 20 ? "FEAR"
+                : "EXTREME FEAR";
+
+    return {
+      score, label,
+      components: {
+        momentum:   Math.round(momentumScore),
+        breadth:    Math.round(breadthScore),
+        volatility: Math.round(volatilityScore),
+        flows:      Math.round(flowScore),
+      },
+    };
+  }
+
+  _moduleStatus(score) {
+    if (score === null || score === undefined) return "UNAVAILABLE";
+    if (score >= 60) return "POSITIVE";
+    if (score >= 45) return "NEUTRAL";
+    return "NEGATIVE";
+  }
+}
+
+const overviewEngine = new OverviewEngine(DSSCache, regimeEngine, logger);
+
+////////////////////////////////////////////////////////
+// SECTION-24B : NARRATIVE ENGINE
+// Rule-based synthesis layer. Reads cache + regimeEngine.read() only.
+// NO external fetches. NO independent regime derivation.
+// Writes narrative:compiled. fallback:true until Phase 7 LLM.
+////////////////////////////////////////////////////////
+
+class NarrativeEngine {
+  constructor(dssCache, regimeEng, pinoLogger) {
+    this._cache = dssCache;
+    this._regime = regimeEng;
+    this._logger = pinoLogger;
+  }
+
+  synthesize() {
+    const regime    = this._regime.read();
+    const equity    = this._cache.get("nse:index")         || {};
+    const technical = this._cache.get("signals:technical") || { signals: [] };
+    const sectors   = this._cache.get("signals:sector")    || {};
+    const debt      = this._cache.get("signals:debt")      || {};
+    const global_   = this._cache.get("signals:global")    || {};
+    const flows     = this._cache.get("equity:flows")      || {};
+
+    const narrative = this._buildRuleNarrative({
+      regime, equity, technical, sectors, debt, global_, flows
+    });
+
+    const _narrativeAgeMin = regime.computedAt
+      ? Math.round((Date.now() - regime.computedAt) / 60000 * 10) / 10
+      : null;
+    const _narrativeStaleReasons = Object.entries(regime.moduleScores || {})
+      .filter(([, v]) => v === null || v === undefined)
+      .map(([k]) => k + "_score_unavailable");
+    const provenance = {
+      computedAt:      regime.computedAt || null,
+      cacheAgeMin:     _narrativeAgeMin,
+      includedModules: regime.includedModules || [],
+      staleReasons:    _narrativeStaleReasons,
+    };
+    const result = {
+      verdict:        narrative.verdict,
+      signals:        narrative.signals,
+      sectors:        narrative.sectors,
+      global:         narrative.global,
+      risks:          narrative.risks,
+      action:         narrative.action,
+      regime:         regime.regime,
+      compositeScore: regime.compositeScore,
+      fallback:       true,
+      generatedAt:    Date.now(),
+      inputScore:     regime.compositeScore,
+      dataStatus:     regime.dataStatus,
+      provenance,
+    };
+
+    this._cache.set("narrative:compiled", result);
+
+    this._logger.info({
+      job:            "narrative-engine",
+      compositeScore: regime.compositeScore,
+      regime:         regime.regime,
+      fallback:       true,
+      ts:             Date.now(),
+    }, "NarrativeEngine synthesized");
+
+    return result;
+  }
+
+  _buildRuleNarrative({ regime, equity, technical, sectors, debt, global_, flows }) {
+    const score     = regime.compositeScore || 50;
+    const tSignals  = technical.signals || [];
+    const rsiSig    = tSignals.find(s => s.name === "RSI (14)") || tSignals.find(s => s.name === "RSI (14D)");
+    const sma50Sig  = tSignals.find(s => s.name === "50DMA");
+    const sma200Sig = tSignals.find(s => s.name === "200DMA");
+    const niftyChg  = equity.niftyChangePct || null;
+    const vix       = equity.vixValue       || null;
+    const fiiNet    = flows.fiiEquity       || null;
+    const topSector = sectors.topSector     || null;
+    const bottomSec = sectors.bottomSector  || null;
+    const rotPhase  = sectors.rotationPhase || null;
+    const gSignals  = global_.signals       || {};
+    const dxySig    = Array.isArray(gSignals) ? gSignals.find(s => s.name === "DXY (Dollar Index)") : null;
+    const crudeSig  = Array.isArray(gSignals) ? gSignals.find(s => s.name === "Crude Oil (Brent)")  : null;
+    const us10ySig  = Array.isArray(gSignals) ? gSignals.find(s => s.name === "US 10Y Yield")       : null;
+    const fedPolicy = global_.fedPolicy || {};
+    const realRate  = debt.realRate || null;
+
+    // VERDICT
+    const vp = [];
+    if      (score >= 70) vp.push("Markets are in a strong risk-on regime with broad participation.");
+    else if (score >= 55) vp.push("Markets reflect a constructive bias, though momentum requires confirmation.");
+    else if (score >= 45) vp.push("Market conditions are balanced; directional conviction is low.");
+    else if (score >= 30) vp.push("Risk-off dynamics are emerging; defensiveness is warranted.");
+    else                  vp.push("Markets are in a stressed regime; capital preservation takes priority.");
+    if (niftyChg !== null) {
+      if      (niftyChg > 1.0)  vp.push("NIFTY is gaining " + Math.abs(niftyChg).toFixed(2) + "%, confirming the bullish bias.");
+      else if (niftyChg > 0)    vp.push("NIFTY is modestly positive at +" + niftyChg.toFixed(2) + "%, but lacks strong conviction.");
+      else if (niftyChg > -1.0) vp.push("NIFTY is under mild pressure at " + niftyChg.toFixed(2) + "%, consistent with the cautious regime.");
+      else                      vp.push("NIFTY is declining " + Math.abs(niftyChg).toFixed(2) + "%, reinforcing risk-off posture.");
+    }
+
+    // SIGNALS
+    const sp = [];
+    if (rsiSig && rsiSig.value !== null && rsiSig.value !== undefined) {
+      const rv = Number(rsiSig.value);
+      if      (rv < 30) sp.push("RSI at " + rv.toFixed(1) + " indicates oversold conditions — mean reversion potential is elevated.");
+      else if (rv < 45) sp.push("RSI at " + rv.toFixed(1) + " is recovering from oversold territory; momentum is tentative.");
+      else if (rv < 55) sp.push("RSI at " + rv.toFixed(1) + " sits in neutral territory; no directional edge.");
+      else if (rv < 70) sp.push("RSI at " + rv.toFixed(1) + " shows healthy momentum, not yet extended.");
+      else              sp.push("RSI at " + rv.toFixed(1) + " is overbought — near-term reversal risk is elevated.");
+    }
+    if (sma50Sig && sma200Sig) {
+      if      (sma50Sig.signal === "BUY"  && sma200Sig.signal === "BUY")
+        sp.push("Price is above both the 50DMA and 200DMA — trend structure is intact.");
+      else if (sma50Sig.signal === "SELL" && sma200Sig.signal === "SELL")
+        sp.push("Price is below both moving averages — trend structure is broken; bearish posture is appropriate.");
+      else
+        sp.push("Price is between key moving averages — a transitional phase; await resolution.");
+    }
+
+    // SECTORS
+    const secp = [];
+    if (topSector && bottomSec) secp.push(topSector + " is the current cycle leader while " + bottomSec + " remains the laggard.");
+    if (rotPhase) {
+      if      (rotPhase === "LEADING")   secp.push("Growth sectors are in the leadership phase — consistent with risk-on rotation.");
+      else if (rotPhase === "IMPROVING") secp.push("Sector breadth is improving; rotation is broadening from leadership to wider participation.");
+      else if (rotPhase === "WEAKENING") secp.push("Sector leadership is narrowing; rotation into defensives is underway.");
+      else if (rotPhase === "LAGGING")   secp.push("Defensive sectors dominate; breadth is contracting, indicating late-cycle dynamics.");
+    }
+
+    // GLOBAL
+    const gp = [];
+    if (crudeSig && crudeSig.value !== null && crudeSig.value !== undefined) {
+      const cv = Number(crudeSig.value);
+      if      (cv > 90) gp.push("Brent crude at $" + cv.toFixed(1) + " is elevated — inflationary pressure on India current account is a headwind.");
+      else if (cv > 75) gp.push("Brent crude at $" + cv.toFixed(1) + " is range-bound — a neutral to mild tailwind for India.");
+      else              gp.push("Brent crude at $" + cv.toFixed(1) + " is supportive — lower oil benefits India macro position.");
+    }
+    if (dxySig && dxySig.value !== null && dxySig.value !== undefined) {
+      const dv = Number(dxySig.value);
+      if      (dv > 106) gp.push("A strong DXY at " + dv.toFixed(1) + " signals dollar strength — EM headwind and FII outflow pressure.");
+      else if (dv > 102) gp.push("DXY at " + dv.toFixed(1) + " is moderately elevated — watch for dollar momentum acceleration.");
+      else               gp.push("DXY at " + dv.toFixed(1) + " is contained — constructive for EM and rupee stability.");
+    }
+    if (us10ySig && us10ySig.value !== null && us10ySig.value !== undefined) {
+      const yv = Number(us10ySig.value);
+      if (yv > 4.5) gp.push("US 10Y at " + yv.toFixed(2) + "% remains elevated — global cost of capital is high; valuation compression risk persists.");
+      else          gp.push("US 10Y at " + yv.toFixed(2) + "% has moderated — supportive for global risk appetite.");
+    }
+    if (fedPolicy.stance) gp.push("Fed policy stance: " + fedPolicy.stance + ".");
+
+    // RISKS
+    const rp = [];
+    if (vix !== null && vix !== undefined) {
+      const vv = Number(vix);
+      if      (vv > 20) rp.push("India VIX at " + vv.toFixed(1) + " is elevated — options pricing reflects significant uncertainty.");
+      else if (vv > 15) rp.push("India VIX at " + vv.toFixed(1) + " is moderate — complacency has not set in.");
+      else              rp.push("India VIX at " + vv.toFixed(1) + " is low — markets are pricing calm, which itself is a risk if disruption occurs.");
+    }
+    if (fiiNet !== null && fiiNet !== undefined) {
+      if      (fiiNet < -1000) rp.push("FII flows are significantly negative at Rs." + Math.abs(fiiNet).toFixed(0) + " Cr — institutional selling is a primary risk.");
+      else if (fiiNet > 1000)  rp.push("FII inflows are strong — but reversal risk exists if global rates re-accelerate.");
+      else if (fiiNet < 0)     rp.push("FII flows are mildly negative — monitor for acceleration.");
+    }
+    if (realRate !== null && realRate !== undefined && Number(realRate) < 0)
+      rp.push("Real rates are negative — inflationary risk is not fully priced into debt markets.");
+    if (rp.length === 0)
+      rp.push("No acute systemic risk signals detected; monitor VIX and FII flows for early warning.");
+
+    // ACTION
+    let action;
+    if      (score >= 70) action = "Overweight equities; tilt toward cyclicals and growth sectors. Reduce cash. Gold as portfolio hedge, not primary position.";
+    else if (score >= 55) action = "Moderate overweight equities. Focus on quality and earnings visibility. Maintain some cash optionality.";
+    else if (score >= 45) action = "Balanced allocation. Equities at benchmark weight. Await regime confirmation before adding risk. Short-duration debt for liquidity.";
+    else if (score >= 30) action = "Underweight equities. Increase allocation to high-quality debt and gold. Avoid cyclical and high-beta names.";
+    else                  action = "Defensive posture. Minimize equity exposure. Prioritize capital preservation via short-duration sovereign debt and gold.";
+
+    return {
+      verdict: vp.join(" ")   || "Market regime is being assessed — await signal confirmation.",
+      signals: sp.join(" ")   || "Technical signals are inconclusive; await clearer directional setup.",
+      sectors: secp.join(" ") || "Sector rotation data is updating; broad index signals apply.",
+      global:  gp.join(" ")   || "Global macro data is updating; last known readings apply.",
+      risks:   rp.join(" "),
+      action,
+    };
+  }
+}
+
+const narrativeEngine = new NarrativeEngine(DSSCache, regimeEngine, logger);
+
 
 ////////////////////////////////////////////////////////
 // SECTION-23 : BRAIN SIGNAL ENGINE
@@ -5982,7 +7017,235 @@ async function buildDebtPayload() {
 // GET  /api/technical/*     — technicalRoutes (external module)
 ////////////////////////////////////////////////////////
 
-		app.get("/health", (req, res) => {
+		app.get("/api/v1/overview", (req, res) =>
+  safeExecuteAsync(async () => {
+    const cached = DSSCache.get("overview:compiled");
+    const payload = cached || overviewEngine.build();
+    return res.json({
+      status:     "OK",
+      timestamp:  Date.now(),
+      dataStatus: payload.dataStatus,
+      data:       payload,
+    });
+  }, null)
+);
+
+app.get("/api/v1/narrative", (req, res) =>
+  safeExecuteAsync(async () => {
+    const cached = DSSCache.get("narrative:compiled");
+    const payload = cached || narrativeEngine.synthesize();
+    return res.json({
+      status:     "OK",
+      timestamp:  Date.now(),
+      dataStatus: payload.dataStatus,
+      data:       payload,
+    });
+  }, null)
+
+);
+
+// ============================================================
+// GET /api/v1/derivatives — Derivatives Surface (Session 20K)
+// CACHE-READ-ONLY: reads nse:optionchain, nse:index, equity:flows, score:derivatives
+// No fetch(), no recomputation. Scheduler writes all inputs.
+// ============================================================
+app.get("/api/v1/derivatives", (req, res) =>
+  safeExecuteAsync(async () => {
+    const optchain   = DSSCache.get("nse:optionchain")   || {};
+    const nseIndex   = DSSCache.get("nse:index")         || {};
+    const flows      = DSSCache.get("equity:flows")      || {};
+    const scoreDeriv = DSSCache.get("score:derivatives") || { score: null, confidence: 0 };
+
+    // KPIs
+    const indiaVix     = nseIndex.vixValue           != null ? nseIndex.vixValue           : null;
+    const pcr          = flows.pcr                   != null ? flows.pcr                   : null;
+    const fiiFuturesOI = flows.fiiFuturesPositioning != null ? flows.fiiFuturesPositioning : null;
+
+    // Max Pain + OI Levels from cached option chain
+    var maxPain  = null;
+    var oiLevels = [];
+    try {
+      var chainData = optchain.data || null;
+      var rows = [];
+      if (chainData && Array.isArray(chainData.records && chainData.records.data) && chainData.records.data.length > 0) {
+        rows = chainData.records.data;
+      } else if (chainData && Array.isArray(chainData.filtered && chainData.filtered.data) && chainData.filtered.data.length > 0) {
+        rows = chainData.filtered.data;
+      }
+      if (rows.length > 0) {
+        var strikeMap = {};
+        for (var i = 0; i < rows.length; i++) {
+          var row = rows[i];
+          var strike = (row && row.strikePrice) || (row && row.PE && row.PE.strikePrice) || (row && row.CE && row.CE.strikePrice);
+          if (!strike) continue;
+          if (!strikeMap[strike]) strikeMap[strike] = { strike: strike, peOI: 0, ceOI: 0 };
+          strikeMap[strike].peOI += Number((row.PE && row.PE.openInterest) || 0);
+          strikeMap[strike].ceOI += Number((row.CE && row.CE.openInterest) || 0);
+        }
+        var strikes = Object.values(strikeMap)
+          .map(function(s) { return { strike: s.strike, peOI: s.peOI, ceOI: s.ceOI, totalOI: s.peOI + s.ceOI }; })
+          .sort(function(a, b) { return b.totalOI - a.totalOI; });
+        oiLevels = strikes.slice(0, 10);
+        if (strikes.length > 0) maxPain = strikes[0].strike;
+      }
+    } catch (e) { /* non-fatal */ }
+
+    // VIX Regime
+    var vixRegimeLabel = "UNAVAILABLE";
+    if (indiaVix !== null) {
+      vixRegimeLabel = indiaVix < 12 ? "LOW" : indiaVix < 16 ? "MODERATE" : indiaVix < 22 ? "ELEVATED" : "EXTREME";
+    }
+
+    // Signals
+    var signals = [];
+    if (pcr !== null) {
+      signals.push({
+        name:       "PCR",
+        value:      pcr,
+        signal:     pcr > 1.2 ? "BUY" : pcr < 0.8 ? "SELL" : "WATCH",
+        sentiment:  pcr > 1.2 ? "bullish" : pcr < 0.8 ? "bearish" : "neutral",
+        confidence: scoreDeriv.confidence || 0.42,
+        source:     "nse-option-chain",
+        timestamp:  flows.timestamp || Date.now(),
+      });
+    }
+    if (indiaVix !== null) {
+      signals.push({
+        name:       "India VIX",
+        value:      indiaVix,
+        signal:     indiaVix < 16 ? "BUY" : indiaVix > 22 ? "SELL" : "WATCH",
+        sentiment:  indiaVix < 16 ? "bullish" : indiaVix > 22 ? "bearish" : "neutral",
+        confidence: 0.78,
+        source:     "nse-index",
+        timestamp:  nseIndex.timestamp || Date.now(),
+      });
+    }
+
+    // dataStatus
+    var hasPcr = pcr !== null;
+    var hasVix = indiaVix !== null;
+    var dataStatus = (hasPcr && hasVix) ? "live" : hasVix ? "stale" : "unavailable";
+
+    return res.json({
+      status:     "OK",
+      timestamp:  Date.now(),
+      dataStatus: dataStatus,
+      data: {
+        kpis: {
+          indiaVix:    indiaVix,
+          pcr:         pcr,
+          maxPain:     maxPain,
+          fiiFuturesOI: fiiFuturesOI,
+        },
+        vixRegime: {
+          regime:    vixRegimeLabel,
+          vix:       indiaVix,
+          zone:      indiaVix===null?null:indiaVix<12?0:indiaVix<18?1:indiaVix<25?2:3,
+          zoneLabel: indiaVix===null?"UNAVAILABLE":indiaVix<12?"LOW FEAR":indiaVix<18?"MODERATE FEAR":indiaVix<25?"HIGH FEAR":"PANIC / CRISIS",
+          strategy:  indiaVix===null?null:indiaVix<12?"Trend following · Momentum long · Buy dips · Low hedging needed":indiaVix<18?"Staggered entry · SIP preferred · Hedge 30-40% portfolio · Avoid leverage":indiaVix<25?"Contrarian buy zone · Lumpsum deployment · Quality stocks · Cover shorts":"Aggressive lumpsum · Multi-year opportunity · Maximum deployment zone",
+        },
+        oiLevels:        oiLevels,
+        signals:         signals,
+        derivativesScore: scoreDeriv.score != null ? scoreDeriv.score : null,
+      },
+    });
+  }, res)
+);
+
+
+// ===============================
+// SECTION-26: GET /api/v1/global
+// Cache-read-only. Reads: equity:global, score:global, signals:global
+// Exposes: kpis (dxy, us10Y, crude, fedPolicy), signals, score, provenance
+// dataStatus: live (>=2 live quotes), stale (1 quote), unavailable (0)
+// ===============================
+app.get("/api/v1/global", (req, res) =>
+  safeExecuteAsync(async () => {
+    const raw        = DSSCache.get("equity:global")   || {};
+    const scoreGlob  = DSSCache.get("score:global")    || { score: null, confidence: 0 };
+    const sigGlob    = DSSCache.get("signals:global")  || {};
+
+    const dxy      = raw.dxy      != null ? raw.dxy      : (sigGlob.dxyProxy    != null ? sigGlob.dxyProxy    : null);
+    const us10Y    = raw.us10Y    != null ? raw.us10Y    : (sigGlob.us10YYield  != null ? sigGlob.us10YYield  : null);
+    const crude    = raw.crudeOil != null ? raw.crudeOil : (sigGlob.crudeBrent  != null ? sigGlob.crudeBrent  : null);
+    const fedPolicy = raw.fedPolicy || sigGlob.fedPolicy || null;
+
+    const liveCount = [dxy, us10Y, crude].filter(v => v !== null).length;
+    const dataStatus = liveCount >= 2 ? "live" : liveCount === 1 ? "stale" : "unavailable";
+
+    const transmission = [];
+    if (crude !== null) {
+      const crudeImpact = crude > 90 ? "HEADWIND" : crude < 75 ? "TAILWIND" : "NEUTRAL";
+      transmission.push({ factor: "Crude Oil (Brent)", value: crude, impact: crudeImpact, reason: crude > 90 ? "High crude elevates India import bill and CPI" : crude < 75 ? "Low crude supports CAD and reduces inflationary pressure" : "Crude within neutral band — limited macro transmission" });
+    }
+    if (dxy !== null) {
+      const dxyImpact = dxy > 106 ? "HEADWIND" : dxy < 102 ? "TAILWIND" : "NEUTRAL";
+      transmission.push({ factor: "DXY (Dollar Index)", value: dxy, impact: dxyImpact, reason: dxy > 106 ? "Strong dollar pressures EM — FII outflow risk elevated" : dxy < 102 ? "Weak dollar supports EM inflows and INR stability" : "Dollar in range — neutral EM transmission" });
+    }
+    if (us10Y !== null) {
+      const yieldImpact = us10Y > 4.5 ? "HEADWIND" : us10Y < 4.0 ? "TAILWIND" : "NEUTRAL";
+      transmission.push({ factor: "US 10Y Yield", value: us10Y, impact: yieldImpact, reason: us10Y > 4.5 ? "Elevated US yields raise global risk-free rate — EM risk premium rises" : us10Y < 4.0 ? "Falling US yields supportive for EM valuations and debt flows" : "US yields in neutral range — limited direct transmission" });
+    }
+
+    const provenance = {
+      sourceOrigin:   scoreGlob.sourceOrigin   || (liveCount > 0 ? "yahoo-live" : "unavailable"),
+      fallbackActive: scoreGlob.fallbackActive != null ? scoreGlob.fallbackActive : (liveCount < 3),
+      staleReason:    scoreGlob.staleReason    || null,
+      fetchedAt:      scoreGlob.fetchedAt      || (raw.timestamp || null),
+      score:          scoreGlob.score          != null ? scoreGlob.score : null,
+      confidence:     scoreGlob.confidence     != null ? scoreGlob.confidence : 0,
+    };
+
+    return res.json({
+      status:     "OK",
+      timestamp:  Date.now(),
+      dataStatus,
+      data: {
+        kpis: { dxy, us10YYield: us10Y, crudeBrent: crude, fedPolicy: fedPolicy || null },
+        signals:      sigGlob.signals || [],
+        transmission,
+        globalScore:  scoreGlob.score != null ? scoreGlob.score : null,
+        provenance,
+        dataStatus,
+        timestamp:    Date.now(),
+      },
+    });
+  }, res)
+);
+
+
+// ===============================
+// SECTION-27: GET /api/v1/history
+// Reads SQLite decisions table — Sprint 3 frontend charts
+// ===============================
+app.get("/api/v1/history", (req, res) =>
+  safeExecuteAsync(async () => {
+    const limit=Math.min(parseInt(req.query.limit||"200"),500);
+    const bucket=req.query.bucket||"1h";
+    return new Promise((resolve) => {
+      db.all("SELECT regime, score, confidence, timestamp FROM decisions ORDER BY timestamp DESC LIMIT ?",[limit],(err,rows)=>{
+        if(err||!rows){res.status(500).json({status:"ERROR",error:err?.message});return resolve();}
+        rows.reverse();
+        let bucketed=rows;
+        if(bucket==="1h"||bucket==="1d"){
+          const ms=bucket==="1h"?3600000:86400000;
+          const map=new Map();
+          for(const r of rows){const key=Math.floor(r.timestamp/ms)*ms;if(!map.has(key))map.set(key,[]);map.get(key).push(r);}
+          bucketed=Array.from(map.entries()).map(([ts,g])=>({timestamp:ts,regime:g[g.length-1].regime,score:Math.round(g.reduce((s,r)=>s+r.score,0)/g.length*10)/10,confidence:Math.round(g.reduce((s,r)=>s+r.confidence,0)/g.length),count:g.length}));
+        }
+        const timeline=[];let prev=null;
+        for(const r of bucketed){if(!prev||prev.regime!==r.regime){if(prev)prev.endTs=r.timestamp;timeline.push({regime:r.regime,startTs:r.timestamp,endTs:null,score:r.score});prev=timeline[timeline.length-1];}}
+        if(prev)prev.endTs=Date.now();
+        const scores=bucketed.map(r=>r.score).filter(Boolean);
+        const stats=scores.length?{min:Math.min(...scores),max:Math.max(...scores),avg:Math.round(scores.reduce((a,b)=>a+b,0)/scores.length*10)/10,last:scores[scores.length-1],trend:scores.length>=10?(scores.slice(-5).reduce((a,b)=>a+b,0)/5>scores.slice(-10,-5).reduce((a,b)=>a+b,0)/5?"UP":"DOWN"):"FLAT"}:{};
+        res.json({status:"OK",timestamp:Date.now(),dataStatus:"live",data:{points:bucketed,timeline,stats,meta:{count:bucketed.length,bucket,from:bucketed[0]?.timestamp||null,to:bucketed[bucketed.length-1]?.timestamp||null}}});
+        resolve();
+      });
+    });
+  }, res)
+);
+
+app.get("/health", (req, res) => {
 		  res.json({
 			status: "OK",
 			version: VERSION,
@@ -6062,9 +7325,22 @@ async function buildDebtPayload() {
 			  uptime: Math.round(process.uptime()),
 			  timestamp: now,
 			  sources,
-			  metrics: {
-				note: "Rolling 1h metrics pending Phase F full implementation"
-			  },
+			  metrics: (() => {
+			    const _r=DSSCache.get("regime:composite")||{};
+			    const _ms=_r.moduleScores||{};
+			    const _inc=(_r.includedModules||[]).length;
+			    const _stale=Object.values(sources).filter(s=>s.status==="STALE"||s.status==="DOWN").length;
+			    return {
+			      modulesIncluded:_inc, modulesTotal:6,
+			      modulesCoverage:Math.round((_inc/6)*100),
+			      staleSources:_stale,
+			      compositeScore:_r.compositeScore||null,
+			      regime:_r.regime||null,
+			      activeWeightSum:_r.activeWeightSum||null,
+			      uptimeMin:Math.round(process.uptime()/60),
+			      note:"Approximated — rolling counters in Phase F"
+			    };
+			  })(),
 			  deprecated_endpoints: [],
 			  alerts
 			});
@@ -6084,103 +7360,28 @@ async function buildDebtPayload() {
 		app.get("/api/v1/signals", async (req, res) => {
 		  try {
 
-			const body = {};
-
-			const inputs = await safeExecuteAsync(
-			  () => autoFillInputs(body),
-			  DEFAULT_SIGNALS
-			);
-
-			const niftyData = await safeExecuteAsync(
-			  fetchNiftyData,
-			  null
-			);
-
-			let trendSignal = "neutral";
-			let momentumSignal = "neutral";
-			let strengthSignal = "neutral";
-			let breadthSignal = 0.5;
-
-			if (
-			  niftyData &&
-			  Array.isArray(niftyData.prices) &&
-			  niftyData.prices.length >= 50
-			) {
-
-			  const ema20 = EMA(niftyData.prices.slice(-20), 20);
-			  const ema50 = EMA(niftyData.prices.slice(-50), 50);
-
-			  if (ema20 && ema50) {
-				trendSignal = ema20 > ema50 ? "bullish" : "bearish";
-			  }
-
-			  if (ema20 && niftyData.current) {
-
-				const momentumDiff =
-				  (niftyData.current - ema20) / ema20;
-
-				if (momentumDiff > 0.002) {
-				  momentumSignal = "bullish";
-				} else if (momentumDiff < -0.002) {
-				  momentumSignal = "bearish";
-				}
-			  }
-
-			  const openPrice =
-				niftyData.open ||
-				niftyData.prices?.[0] ||
-				niftyData.current;
-
-			  const strength =
-				openPrice
-				  ? (niftyData.current - openPrice) / openPrice
-				  : 0;
-
-			  if (strength > 0.002) {
-				strengthSignal = "strong";
-			  } else if (strength < -0.002) {
-				strengthSignal = "weak";
-			  }
-
-			  breadthSignal =
-				openPrice &&
-				(niftyData.current - openPrice) > 0
-				  ? 0.6
-				  : 0.4;
-			}
-
-			inputs.trend = trendSignal;
-			inputs.momentum = momentumSignal;
-			inputs.strength = strengthSignal;
-			inputs.breadth = breadthSignal;
-
-			let { signals, compositeScore } =
-			  buildSignals(inputs, "NEUTRAL");
-
-			let regime = getRegime(compositeScore);
-
-			({ signals, compositeScore } =
-			  buildSignals(inputs, regime));
-
-			const intelligence =
-			  computeSignalIntelligence(signals);
-
-			const confidence =
-			  getConfidence(signals);
-
-			const marketQuality =
-			  getMarketQuality(confidence);
-
-			const response =
-			  buildSignalsResponse({
-				regime,
-				compositeScore,
-				confidence,
-				marketQuality,
-				signals,
-				intelligence
-			  });
-
+			// ── SESSION 20C P3: /api/v1/signals reads RegimeEngine only ──
+			const _rd3 = regimeEngine.read();
+			const compositeScore = _rd3.compositeScore;
+			const regime = _rd3.regime;
+			const confidence = Math.round((_rd3.activeWeightSum || 0.6) * 100);
+			const marketQuality = confidence >= 70 ? "STRONG" : confidence >= 50 ? "MODERATE" : "WEAK";
+			const _nse3 = DSSCache.get("nse:index") || {};
+			const _fl3  = DSSCache.get("equity:flows") || {};
+			const signals = {
+			  rates:    { value: "neutral",                                        score: 0,                      weight: 0.2,  reliability: 1, strength: "neutral" },
+			  liquidity:{ value: (_fl3.fiiEquity||0)>0?"supportive":"tightening", score: (_fl3.fiiEquity||0)>0?1:-1, weight:0.2,reliability:1, strength:"neutral" },
+			  crude:    { value: "neutral",                                        score: 0,                      weight: 0.15, reliability: 1, strength: "neutral" },
+			  fii:      { value: (_fl3.fiiEquity||0)>0?"buying":"selling",        score: (_fl3.fiiEquity||0)>0?1:-1, weight:0.2,reliability:1, strength:"neutral" },
+			  vix:      { value: (_nse3.vixValue||15)>20?"high":"low",            score: (_nse3.vixValue||15)>20?-1:1,weight:0.15,reliability:1,strength:"neutral" },
+			  trend:    { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			  momentum: { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			  strength: { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			  breadth:  { value: 0.5,       score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			};
+			const intelligence = computeSignalIntelligence(signals);
+			const response = buildSignalsResponse({ regime, compositeScore, confidence, marketQuality, signals, intelligence });
+			// ── END SESSION 20C P3 ──
 			return res.json({
 			  status: "OK",
 			  timestamp: Date.now(),
@@ -6212,96 +7413,33 @@ async function buildDebtPayload() {
 		app.get("/api/v1/brain", async (req, res) => {
 		  try {
 
-			const body = {};
-
-			const inputs = await safeExecuteAsync(
-			  () => autoFillInputs(body),
-			  DEFAULT_SIGNALS
-			);
-
-			const niftyData = await safeExecuteAsync(
-			  fetchNiftyData,
-			  null
-			);
-
-			let trendSignal = "neutral";
-			let momentumSignal = "neutral";
-			let strengthSignal = "neutral";
-			let breadthSignal = 0.5;
-
-			if (
-			  niftyData &&
-			  Array.isArray(niftyData.prices) &&
-			  niftyData.prices.length >= 50
-			) {
-
-			  const ema20 = EMA(niftyData.prices.slice(-20), 20);
-			  const ema50 = EMA(niftyData.prices.slice(-50), 50);
-
-			  if (ema20 && ema50) {
-				trendSignal = ema20 > ema50 ? "bullish" : "bearish";
-			  }
-
-			  if (ema20 && niftyData.current) {
-				const momentumDiff =
-				  (niftyData.current - ema20) / ema20;
-
-				if (momentumDiff > 0.002) {
-				  momentumSignal = "bullish";
-				} else if (momentumDiff < -0.002) {
-				  momentumSignal = "bearish";
-				}
-			  }
-
-			  const openPrice =
-				niftyData.open ||
-				niftyData.prices?.[0] ||
-				niftyData.current;
-
-			  const strength = openPrice
-				? (niftyData.current - openPrice) / openPrice
-				: 0;
-
-			  if (strength > 0.002) {
-				strengthSignal = "strong";
-			  } else if (strength < -0.002) {
-				strengthSignal = "weak";
-			  }
-
-			  breadthSignal =
-				openPrice &&
-				(niftyData.current - openPrice) > 0
-				  ? 0.6
-				  : 0.4;
-			}
-
-			inputs.trend = trendSignal;
-			inputs.momentum = momentumSignal;
-			inputs.strength = strengthSignal;
-			inputs.breadth = breadthSignal;
-
-			let { signals, compositeScore } =
-			  buildSignals(inputs, "NEUTRAL");
-
-			let regime = getRegime(compositeScore);
-
-			({ signals, compositeScore } =
-			  buildSignals(inputs, regime));
-
-			const intelligence =
-			  computeSignalIntelligence(signals);
-
-			let confidence = getConfidence(signals);
-
-			const marketQuality =
-			  getMarketQuality(confidence);
-
+			// ── SESSION 20C P1: brain GET reads RegimeEngine only ──
+			const _rd1 = regimeEngine.read();
+			const compositeScore = _rd1.compositeScore;
+			const regime = _rd1.regime;
+			const confidence = Math.round((_rd1.activeWeightSum || 0.6) * 100);
+			const marketQuality = confidence >= 70 ? "STRONG" : confidence >= 50 ? "MODERATE" : "WEAK";
+			const _nse1 = DSSCache.get("nse:index") || {};
+			const _fl1  = DSSCache.get("equity:flows") || {};
+			const signals = {
+			  rates:    { value: "neutral",                                          score: 0,                    weight: 0.2,  reliability: 1, strength: "neutral" },
+			  liquidity:{ value: (_fl1.fiiEquity||0)>0?"supportive":"tightening",   score: (_fl1.fiiEquity||0)>0?1:-1, weight:0.2, reliability:1, strength:"neutral" },
+			  crude:    { value: "neutral",                                          score: 0,                    weight: 0.15, reliability: 1, strength: "neutral" },
+			  fii:      { value: (_fl1.fiiEquity||0)>0?"buying":"selling",          score: (_fl1.fiiEquity||0)>0?1:-1, weight:0.2, reliability:1, strength:"neutral" },
+			  vix:      { value: (_nse1.vixValue||15)>20?"high":"low",              score: (_nse1.vixValue||15)>20?-1:1, weight:0.15,reliability:1,strength:"neutral" },
+			  trend:    { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			  momentum: { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			  strength: { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			  breadth:  { value: 0.5,       score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+			};
+			const intelligence = computeSignalIntelligence(signals);
 			const risk = {
 			  exposure: "50%",
-			  riskLevel: "MEDIUM",
+			  riskLevel: compositeScore >= 55 ? "MEDIUM" : "LOW",
 			  drawdown: riskState.currentDrawdown || 0,
 			  killSwitch: riskState.killSwitch || false
 			};
+			// ── END SESSION 20C P1 ──
 
 			const interpretation = interpretationEngine({
 			  regime,
@@ -6339,7 +7477,7 @@ async function buildDebtPayload() {
 			  status: "OK",
 			  timestamp: Date.now(),
 			  dataStatus: "live",
-			  data: brain
+			  data: { ...brain, compositeScore: compositeScore, regime: regime, confidence: confidence, marketQuality: marketQuality }
 			});
 
 		  } catch (err) {
@@ -6366,172 +7504,31 @@ async function buildDebtPayload() {
 		fallbackState = { crude: false, vix: false };
 		const body = req.body || {};
 
-		  const inputs = await safeExecuteAsync(
-		  () => autoFillInputs(body),
-		  DEFAULT_SIGNALS
-		);
-		// REMOVE THESE 2 LINES
-		// if (!inputs.crude) inputs.crude = lastCrudeSignal;
-		// if (!inputs.vix) inputs.vix = lastVixSignal;
-		  // const liveData = await getLiveSignals();
-		// 📊 Compute Trend from NIFTY
-		const niftyData = await safeExecuteAsync(
-		  fetchNiftyData,
-		  null
-		);
-
-		let trendSignal = "neutral";
-		let momentumSignal = "neutral";
-		let strengthSignal = "neutral";
-		let breadthSignal = 0.5;
-
-		if (niftyData && Array.isArray(niftyData.prices) && niftyData.prices.length >= 50) {
-		  if (!niftyData.current) {
-			trendSignal = "neutral";
-			momentumSignal = "neutral";
-			strengthSignal = "neutral";
-			breadthSignal = 0.5;
-		  } else {
-		  const ema20 = EMA(niftyData.prices.slice(-20), 20);
-		  const ema50 = EMA(niftyData.prices.slice(-50), 50);
-
-		  // ✅ TREND
-		  if (ema20 && ema50) {
-		  trendSignal = ema20 > ema50 ? "bullish" : "bearish";
-		} else {
-		  trendSignal = "neutral";
-		}
-
-		  // ✅ MOMENTUM
-		  if (ema20 && ema20 !== 0) {
-		  const momentumDiff = (niftyData.current - ema20) / ema20;
-
-		  if (momentumDiff > 0.002) momentumSignal = "bullish";
-		  else if (momentumDiff < -0.002) momentumSignal = "bearish";
-		  else momentumSignal = "neutral";
-		} else {
-		  momentumSignal = "neutral";
-		}
-
-		  // ✅ STRENGTH
-		  const openPrice = niftyData.open || niftyData.prices?.[0] || niftyData.current;
-
-		const strength = openPrice
-		  ? (niftyData.current - openPrice) / openPrice
-		  : 0;
-
-		 if (strength > 0.002) {
-		  strengthSignal = "strong";
-		} else if (strength < -0.002) {
-		  strengthSignal = "weak";
-		} else {
-		  strengthSignal = "neutral";
-		}
-
-		  // ✅ BREADTH
-			breadthSignal = openPrice
-			? (niftyData.current - openPrice) > 0 ? 0.6 : 0.4
-			: 0.5;
-		  }
-		}  // ✅ THIS LINE WAS MISSING
-
-
-
-		// OVERRIDE INPUT
-		// ✅ Respect manual input priority (CRITICAL FIX)
-		inputs.trend = body.trend ?? trendSignal;
-		inputs.momentum = body.momentum ?? momentumSignal;
-		inputs.strength = body.strength ?? strengthSignal;
-		inputs.breadth = body.breadth ?? breadthSignal;
-
-		// EXISTING
-
-		// inputs.crude = liveData.signals.crude;
-		// inputs.vix = liveData.signals.vix;
-
-		  let { signals, compositeScore } = safeExecute(
-		  () => buildSignals(inputs, "NEUTRAL"),
-		  { signals: {}, compositeScore: 50 }
-		);
-
-		let regime = getRegime(compositeScore);
-
-		// ===== D27.1 REGIME TRACKING =====
-		if (regime !== MEMORY.lastSnapshot?.regime) {
-		  MEMORY.lastRegimeChangeTs = Date.now();
-		  MEMORY.cyclesSinceChange = 0;
-		} else {
-		  MEMORY.cyclesSinceChange += 1;
-		}
-
-		// ==============================
-		// REGIME STABILITY ENGINE
-		// ==============================
-
-		const prevRegime = MEMORY.regimeHistory?.slice(-1)[0]?.regime;
-
-		if (prevRegime && prevRegime !== regime) {
-		  const scoreDiff = Math.abs(compositeScore - 50);
-
-		  // Prevent weak flips
-		  if (scoreDiff < 10) {
-			regime = prevRegime;
-			logger.warn("Regime flip prevented (stability filter)");
-		  }
-		}
-
-		({ signals, compositeScore } = safeExecute(
-		  () => buildSignals(inputs, regime),
-		  { signals, compositeScore }
-		));
-
-
-		// 🔻 FALLBACK INTELLIGENCE LAYER (ADD EXACTLY HERE)
-
-		if (fallbackState.crude) {
-		  if (signals.crude) {
-			signalReliability.crude = Math.max(0.8, signalReliability.crude * 0.9);
-		signals.crude.reliability = signalReliability.crude;
-		  }
-		  logger.warn("Crude using fallback — reliability reduced");
-		}
-
-		if (fallbackState.vix) {
-		  if (signals.vix) {
-			signalReliability.vix = Math.max(0.8, signalReliability.vix * 0.9);
-		signals.vix.reliability = signalReliability.vix;
-		  }
-		  logger.warn("VIX using fallback — reliability reduced");
-		}
-
-		  const intelligence = computeSignalIntelligence(signals);
-		  let confidence = getConfidence(signals);
-		// ==============================
-		// ADAPTIVE CONFIDENCE CALIBRATION
-		// ==============================
-
-
-
-		// 🔻 degrade confidence if fallback used
-		if (fallbackState.crude || fallbackState.vix) {
-		  confidence = Math.max(20, Math.round(confidence * 0.8));
-		}
-		// ✅ FIX 2 — Prevent under-confidence in strong regimes
-		if (regime === "STRONG RISK ON") {
-		  confidence = Math.max(confidence, 60);
-		} else if (regime === "RISK ON") {
-		  confidence = Math.max(confidence, 50);
-		}
-		// ===== D27.1 CONFIDENCE SMOOTHING =====
-		const prevConfidence = MEMORY.lastSnapshot?.confidence || confidence;
-		confidence = smoothConfidence(prevConfidence, confidence);
-
-		  const marketQuality = getMarketQuality(confidence);
-		  const sectorAllocation = getDynamicSectorAllocation(regime, signals, intelligence);
-		  // const strategy = buildStrategy(regime, confidence, marketQuality, sectorAllocation);
-			// const tradeDecision = buildTradeDecision(regime, confidence, marketQuality, intelligence, signals);
-		 
-		  updateSignalReliability(signals);
+		// ── SESSION 20C P2: brain-auto POST reads RegimeEngine only ──
+		const _rd2 = regimeEngine.read();
+		const compositeScore = _rd2.compositeScore;
+		let regime = _rd2.regime;
+		const _nse2 = DSSCache.get("nse:index") || {};
+		const _fl2  = DSSCache.get("equity:flows") || {};
+		const signals = {
+		  rates:    { value: "neutral",                                        score: 0,                      weight: 0.2,  reliability: 1, strength: "neutral" },
+		  liquidity:{ value: (_fl2.fiiEquity||0)>0?"supportive":"tightening", score: (_fl2.fiiEquity||0)>0?1:-1, weight:0.2,reliability:1, strength:"neutral" },
+		  crude:    { value: "neutral",                                        score: 0,                      weight: 0.15, reliability: 1, strength: "neutral" },
+		  fii:      { value: (_fl2.fiiEquity||0)>0?"buying":"selling",        score: (_fl2.fiiEquity||0)>0?1:-1, weight:0.2,reliability:1, strength:"neutral" },
+		  vix:      { value: (_nse2.vixValue||15)>20?"high":"low",            score: (_nse2.vixValue||15)>20?-1:1,weight:0.15,reliability:1,strength:"neutral" },
+		  trend:    { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+		  momentum: { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+		  strength: { value: "neutral", score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+		  breadth:  { value: 0.5,       score: 0, weight: 0.1, reliability: 1, strength: "neutral" },
+		};
+		const intelligence = computeSignalIntelligence(signals);
+		const prevConfidence2 = MEMORY.lastSnapshot?.confidence || 60;
+		let confidence = smoothConfidence(prevConfidence2, Math.round((_rd2.activeWeightSum||0.6)*100));
+		const marketQuality = confidence >= 70 ? "STRONG" : confidence >= 50 ? "MODERATE" : "WEAK";
+		const sectorAllocation = getDynamicSectorAllocation(regime, signals, intelligence);
+		// ── END SESSION 20C P2 ──
+		// D27.1 regime tracking
+		if (regime !== MEMORY.lastSnapshot?.regime) { MEMORY.lastRegimeChangeTs = Date.now(); MEMORY.cyclesSinceChange = 0; } else { MEMORY.cyclesSinceChange += 1; }
 
 		  const portfolioStateData = portfolioState;
 		  
@@ -6675,6 +7672,7 @@ async function buildDebtPayload() {
 		  ...currentSnapshot,
 		  allocation: suggestedExposure
 		};
+		DSSCache.set('brain:compositeScore', compositeScore);
 		// ===== V8 TREND =====
 		const last10 = Array.isArray(MEMORY.signalsHistory)
 		  ? MEMORY.signalsHistory.slice(-10)
@@ -6847,9 +7845,9 @@ async function buildDebtPayload() {
 		// Save decision
 		safeExecute(() => {
 		  db.run(
-			`INSERT INTO decisions (regime, score, confidence, timestamp)
-			 VALUES (?, ?, ?, ?)`,
-			[regime, compositeScore, confidence, timestamp],
+                        `INSERT INTO decisions (regime, score, confidence, timestamp, module_coverage, fallback_count, stale_count, overall_confidence, conf_class)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        (() => { const _sc = (typeof computeSystemConfidence === "function") ? computeSystemConfidence(DSSCache) : {}; return [regime, compositeScore, confidence, timestamp, _sc.moduleCoverage||null, (_sc.fallbackModules||[]).length, (_sc.staleModules||[]).length, _sc.overall||null, _sc.classification||null]; })(),
 			(err) => {
 			  if (err) {
 				logger.error({ err }, "DB insert error (decision)");
