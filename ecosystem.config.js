@@ -10,7 +10,10 @@ module.exports = {
       AO_CLIENT_ID: "AACH950153",
       AO_MPIN: "1979",
       AO_TOTP_SECRET: "ARANQTCYUC46R4EBCFGSB3HV4I",
-      SERVER_PUBLIC_IP: "51.21.94.67"
+      SERVER_PUBLIC_IP: "51.21.94.67",
+      LLM_PROVIDER: "groq",
+      LLM_MODEL: "llama-3.1-8b-instant",
+      GROQ_API_KEY: "YOUR_GROQ_API_KEY_HERE"
     }
   }]
 };

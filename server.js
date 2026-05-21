@@ -108,6 +108,290 @@ const NarrativeGovernanceRules = Object.freeze({
     return { valid: missing.length===0 && forbidden.length===0, missing, forbidden };
   },
 });
+
+// ════════════════════════════════════════════════════════════════════
+// SPRINT 4A: LLM NARRATIVE ADAPTER LAYER
+// Mandate: zero-cost, self-hosted-first, governed, deterministic fallback
+// Provider abstraction: MockAdapter | GroqAdapter | RuleBasedAdapter
+// LLM receives ONLY buildNarrativeContext() output — never raw feeds
+// ════════════════════════════════════════════════════════════════════
+
+const LLM_CONFIG = Object.freeze({
+  provider:    process.env.LLM_PROVIDER  || "rulebased",
+  model:       process.env.LLM_MODEL     || "llama-3.1-8b-instant",
+  groqKey:     process.env.GROQ_API_KEY  || "",
+  groqUrl:     "https://api.groq.com/openai/v1/chat/completions",
+  maxTokens:   400,
+  timeoutMs:   8000,
+  maxRetries:  1,
+  maxRespChars:1200,
+  promptVersion: "v1.0.0",
+});
+
+// Prompt version tracking
+const PROMPT_VERSION = "v1.0.0";
+
+// Forbidden language filter
+const FORBIDDEN_PHRASES = ["guaranteed","certain to","must buy","strong buy",
+  "sell immediately","risk-free","assured returns","definitely will","100%"];
+
+function sanitizeNarrativeText(text) {
+  if (!text) return text;
+  let out = text;
+  for (const phrase of FORBIDDEN_PHRASES) {
+    const rx = new RegExp(phrase, "gi");
+    out = out.replace(rx, "[assessment]");
+  }
+  return out;
+}
+
+// Structured output validator
+function validateNarrativeOutput(parsed, ctx) {
+  const violations = [];
+  if (!parsed || typeof parsed !== "object") return { valid: false, violations: ["Not a JSON object"] };
+  if (!parsed.summary)      violations.push("Missing summary field");
+  if (!parsed.marketTone)   violations.push("Missing marketTone field");
+  // Governance: LLM cannot override regime
+  if (parsed.regime && parsed.regime !== ctx.regime)
+    violations.push(`Regime override attempt: ${parsed.regime} vs ${ctx.regime}`);
+  // Governance: no hallucinated scores
+  if (parsed.compositeScore && Math.abs(parsed.compositeScore - ctx.compositeScore) > 5)
+    violations.push("Score deviation detected");
+  // Forbidden language check
+  const allText = JSON.stringify(parsed).toLowerCase();
+  for (const p of FORBIDDEN_PHRASES) {
+    if (allText.includes(p.toLowerCase())) violations.push(`Forbidden phrase: "${p}"`);
+  }
+  return { valid: violations.length === 0, violations };
+}
+
+// LLM circuit breaker
+const LLMCircuitBreaker = (() => {
+  let failures = 0, lastFailure = null, open = false;
+  const THRESHOLD = 3, COOLDOWN_MS = 300000;
+  return {
+    recordFailure() {
+      failures++;
+      lastFailure = Date.now();
+      if (failures >= THRESHOLD) {
+        open = true;
+        logger.warn({ failures, cooldownMs: COOLDOWN_MS }, "LLM circuit breaker OPEN — falling back to rule-based");
+        setTimeout(() => { open = false; failures = 0; logger.info("LLM circuit breaker CLOSED"); }, COOLDOWN_MS);
+      }
+    },
+    recordSuccess() { failures = 0; open = false; },
+    isOpen() { return open; },
+    getState() { return { open, failures, lastFailure }; },
+  };
+})();
+
+// Build narrative prompt from curated context
+function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch") {
+  const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
+  const degradedNote = ctx.fallbackModules?.length > 0
+    ? `DATA NOTE: ${ctx.fallbackModules.join(", ")} modules using fallback values. Reflect appropriate uncertainty.`
+    : "";
+  const prompt = `You are a deterministic market intelligence summariser for ADVISIQ DSS, an Indian equity decision support system.
+
+AUTHORITATIVE SYSTEM STATE (DO NOT OVERRIDE):
+- Composite Score: ${ctx.compositeScore}/100
+- Regime: ${ctx.regime} (${ctx.regimeLabel || ctx.regime})
+- Confidence: ${Math.round((ctx.confidence||0)*100)}% (${ctx.confidenceClass || "UNKNOWN"})
+- Action Bias: ${ctx.actionBias || "Balanced"}
+- Top Drivers: ${(ctx.topDrivers||[]).join(", ") || "none"}
+- Weakest Drivers: ${(ctx.weakestDrivers||[]).join(", ") || "none"}
+- Volatility: ${ctx.volatilityState || "unknown"}
+- Risk Flags: ${(ctx.riskFlags||[]).join(", ") || "none"}
+- Macro: DXY ${ctx.macroState?.dxy||"n/a"}, Brent $${ctx.macroState?.crudeBrent||"n/a"}, Repo ${ctx.macroState?.repoRate||"n/a"}%
+${degradedNote}
+
+TONE DIRECTIVE: ${tone} — ${tone==="CAUTIOUS"?"Use measured, uncertainty-disclosing language":tone==="MEASURED"?"Use balanced, analytical language":"Use clear, direct analytical language"}
+
+AUDIENCE: ${audience}
+
+GOVERNANCE RULES:
+- You may NOT override the regime, score, or action bias above
+- You may NOT infer data not provided
+- You may NOT give specific stock recommendations
+- You MUST disclose any data quality limitations
+
+Respond ONLY with valid JSON (no markdown, no preamble):
+{
+  "summary": "2-3 sentence market overview referencing the score and regime",
+  "marketTone": "one of: CAUTIOUS|MEASURED|BALANCED|CONSTRUCTIVE|CONFIDENT",
+  "keyDrivers": ["max 3 short driver strings"],
+  "riskFlags": ["max 2 short risk strings"],
+  "tacticalView": "1-2 sentence tactical positioning statement",
+  "confidenceAlignment": true
+}`;
+  return { prompt, promptVersion: PROMPT_VERSION, tone, audience };
+}
+
+// Mock Adapter — validates orchestration without real inference
+async function mockAdapter(ctx, audience) {
+  await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
+  const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
+  return {
+    summary: `[MOCK] Market is in ${ctx.regime} regime with composite score ${ctx.compositeScore}/100. Confidence is ${Math.round((ctx.confidence||0)*100)}%.`,
+    marketTone: tone === "CAUTIOUS" ? "CAUTIOUS" : tone === "MEASURED" ? "MEASURED" : "BALANCED",
+    keyDrivers: ctx.topDrivers?.slice(0,3) || ["technical", "equity"],
+    riskFlags: ctx.riskFlags?.slice(0,2) || [],
+    tacticalView: `[MOCK] ${ctx.actionBias || "Balanced allocation recommended."}`,
+    confidenceAlignment: true,
+  };
+}
+
+// Groq Adapter
+async function groqAdapter(ctx, audience) {
+  if (!LLM_CONFIG.groqKey) throw new Error("GROQ_API_KEY not configured");
+  const { prompt } = buildNarrativePrompt(ctx, audience);
+  const t0 = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_CONFIG.timeoutMs);
+  try {
+    const res = await fetch(LLM_CONFIG.groqUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${LLM_CONFIG.groqKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: LLM_CONFIG.model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: LLM_CONFIG.maxTokens,
+        temperature: 0.3,
+        response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content || "";
+    if (!raw) throw new Error("Empty Groq response");
+    const latencyMs = Date.now() - t0;
+    const parsed = JSON.parse(raw.slice(0, LLM_CONFIG.maxRespChars));
+    return { ...parsed, _latencyMs: latencyMs, _model: LLM_CONFIG.model };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Rule-based fallback adapter (always works, no external dependency)
+function ruleBasedAdapter(ctx) {
+  const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
+  const score = ctx.compositeScore || 50;
+  const regime = ctx.regime || "NEUTRAL";
+  const summaries = {
+    STRONG_RISK_ON:  `Market conditions are strongly bullish with composite score ${score}/100. Broad participation and positive momentum support risk-on positioning.`,
+    RISK_ON:         `Market posture is constructive with composite score ${score}/100. Technical and fundamental signals favour selective equity accumulation.`,
+    NEUTRAL:         `Market conditions are balanced with composite score ${score}/100. Directional conviction is limited; await regime confirmation before increasing exposure.`,
+    RISK_OFF:        `Risk-off dynamics are emerging with composite score ${score}/100. Defensiveness is warranted; reduce cyclical exposure and build liquidity.`,
+    STRONG_RISK_OFF: `Market conditions are significantly deteriorated with composite score ${score}/100. Capital preservation is the primary objective.`,
+  };
+  const regimeKey = regime.replace(/ /g,"_");
+  const summary = summaries[regimeKey] || summaries["NEUTRAL"];
+  const confidenceNote = ctx.confidence < 0.40
+    ? ` Data quality is reduced — ${(ctx.fallbackModules||[]).join(", ")} operating on fallback values.` : "";
+  return {
+    summary: summary + confidenceNote,
+    marketTone: tone === "CAUTIOUS" ? "CAUTIOUS" : score >= 60 ? "CONSTRUCTIVE" : score <= 40 ? "CAUTIOUS" : "MEASURED",
+    keyDrivers: ctx.topDrivers?.slice(0,3) || [],
+    riskFlags:  ctx.riskFlags?.slice(0,2)  || [],
+    tacticalView: ctx.actionBias || "Balanced allocation. Await regime confirmation.",
+    confidenceAlignment: true,
+  };
+}
+
+// Main narrative generator — provider abstraction layer
+async function generateNarrative(audience = "IFA Advisory Pitch") {
+  const t0 = Date.now();
+  const ctx = buildNarrativeContext(DSSCache);
+  const provider = LLM_CONFIG.provider;
+  let raw = null, fallbackUsed = false, governanceViolations = [], latencyMs = 0;
+  const promptMeta = buildNarrativePrompt(ctx, audience);
+
+  // Attempt primary provider
+  if (provider !== "rulebased" && !LLMCircuitBreaker.isOpen()) {
+    try {
+      if (provider === "mock") raw = await mockAdapter(ctx, audience);
+      else if (provider === "groq") raw = await groqAdapter(ctx, audience);
+      if (raw) {
+        const validation = validateNarrativeOutput(raw, ctx);
+        if (!validation.valid) {
+          governanceViolations = validation.violations;
+          logger.warn({ violations: validation.violations }, "LLM narrative governance violation — falling back");
+          LLMCircuitBreaker.recordFailure();
+          raw = null;
+        } else {
+          LLMCircuitBreaker.recordSuccess();
+          raw = { ...raw, summary: sanitizeNarrativeText(raw.summary), tacticalView: sanitizeNarrativeText(raw.tacticalView) };
+        }
+      }
+    } catch (err) {
+      logger.warn({ provider, err: err.message }, "LLM adapter failed — falling back to rule-based");
+      LLMCircuitBreaker.recordFailure();
+      raw = null;
+    }
+  } else if (LLMCircuitBreaker.isOpen()) {
+    logger.info("LLM circuit breaker open — using rule-based directly");
+  }
+
+  // Fallback to rule-based
+  if (!raw) {
+    raw = ruleBasedAdapter(ctx);
+    fallbackUsed = true;
+  }
+
+  latencyMs = Date.now() - t0;
+
+  const narrativeMeta = {
+    provider:            fallbackUsed ? "rulebased" : provider,
+    model:               fallbackUsed ? null : LLM_CONFIG.model,
+    promptVersion:       promptMeta.promptVersion,
+    audience,
+    tone:                promptMeta.tone,
+    latencyMs,
+    responseValid:       governanceViolations.length === 0,
+    fallbackUsed,
+    governanceViolations,
+    circuitBreakerState: LLMCircuitBreaker.getState(),
+    generatedAt:         Date.now(),
+    contextConfidence:   ctx.confidence,
+    contextRegime:       ctx.regime,
+  };
+
+  logger.info({ job: "narrative-generate", provider: narrativeMeta.provider, fallback: fallbackUsed, latencyMs }, "Narrative generated");
+
+  return {
+    ...raw,
+    narrativeMeta,
+    governanceApplied: true,
+    disclaimer: ctx.confidence < 0.40
+      ? "This narrative is generated under reduced data confidence. Some inputs use fallback values."
+      : null,
+  };
+}
+
+// Narrative cache — refreshed every 15 minutes by scheduler
+let _narrativeCache = null;
+let _narrativeCacheTs = 0;
+const NARRATIVE_CACHE_TTL = 900000; // 15 minutes
+
+async function refreshNarrativeCache(audience = "IFA Advisory Pitch") {
+  try {
+    const result = await generateNarrative(audience);
+    _narrativeCache = result;
+    _narrativeCacheTs = Date.now();
+    DSSCache.set("narrative:llm", result);
+    logger.info({ job: "narrative-cache-refresh", provider: result.narrativeMeta?.provider, fallback: result.narrativeMeta?.fallbackUsed }, "Narrative cache refreshed");
+  } catch (err) {
+    logger.error({ err: err.message }, "refreshNarrativeCache failed");
+  }
+}
+
+// On-demand narrative generation API endpoint
+// POST /api/v1/narrative/generate { audience }
 // SECTION-09 : FETCH UTILITIES (fetchWithRetry / safeFetch / safeFetchText)
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES (crude / vix)
 // SECTION-11 : MACRO PARSERS (TradingEconomics / GST / PMI / AMFI)
@@ -5153,7 +5437,15 @@ setTimeout(() => {
             }
           }, 20 * 60 * 1000);
         }, 30000);
-        // ── END debt-bootstrap job ──
+        
+        // SPRINT 4A: LLM narrative cache — initial + 15min refresh
+        setTimeout(async () => {
+          if (typeof refreshNarrativeCache === "function") {
+            await refreshNarrativeCache();
+            setInterval(() => refreshNarrativeCache().catch(()=>{}), 900000);
+          }
+        }, 90000);
+// ── END debt-bootstrap job ──
 
 
 
@@ -7245,6 +7537,28 @@ app.get("/api/v1/history", (req, res) =>
         res.json({status:"OK",timestamp:Date.now(),dataStatus:"live",data:{points:bucketed,timeline,stats,meta:{count:bucketed.length,bucket,from:bucketed[0]?.timestamp||null,to:bucketed[bucketed.length-1]?.timestamp||null}}});
         resolve();
       });
+    });
+  }, res)
+);
+
+
+// ===============================
+// SPRINT 4A: POST /api/v1/narrative/generate
+// On-demand LLM narrative — governed, circuit-broken, fallback-safe
+// ===============================
+app.post("/api/v1/narrative/generate", (req, res) =>
+  safeExecuteAsync(async () => {
+    const audience = (req.body && req.body.audience) || "IFA Advisory Pitch";
+    const VALID = ["IFA Advisory Pitch","HNI Investment Committee Memo","Retail Investor Weekly Update","Internal Research Desk Note"];
+    if (!VALID.includes(audience)) {
+      return res.status(400).json({ status: "ERROR", error: "Invalid audience. Valid: " + VALID.join(", ") });
+    }
+    const result = await generateNarrative(audience);
+    return res.json({
+      status: "OK",
+      timestamp: Date.now(),
+      dataStatus: result.narrativeMeta && result.narrativeMeta.fallbackUsed ? "fallback" : "live",
+      data: result,
     });
   }, res)
 );
