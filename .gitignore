@@ -45,3 +45,4 @@ ema50
 # Data folder runtime files
 data/
 server_D24_backup.js
+ecosystem.config.js
