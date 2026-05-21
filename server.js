@@ -741,7 +741,9 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 
 			  // Successful fetch — reset 429 counter
 			  yahoo429Count = 0;
-			  return await res.json();
+                          const _pn=url.includes("yahoo.com")?"Yahoo":url.includes("nseindia.com")?"NSE":url.includes("tradingeconomics.com")?"TradingEconomics":url.includes("angelone.in")?"AngelOne":url.includes("rbi.org")?"RBI":"Other";
+                          if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess(_pn);
+                          return await res.json();
 
 			} catch (err) {
 			  const isLast = attempt === retries - 1;
@@ -756,7 +758,9 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 				  { url, code: ERROR_ENUM.FETCH_FAILED },
 				  "fetchWithRetry — all attempts exhausted"
 				);
-				return null;
+                          const _pfn=url.includes("yahoo.com")?"Yahoo":url.includes("nseindia.com")?"NSE":url.includes("tradingeconomics.com")?"TradingEconomics":url.includes("angelone.in")?"AngelOne":url.includes("rbi.org")?"RBI":"Other";
+                          if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure(_pfn);
+                  return null;
 			  }
 
 			  // Exponential backoff + jitter per FSD Appendix D.2
@@ -838,7 +842,7 @@ async function _aoLogin() {
     const totp=_aoGenerateTotp();
     const res=await fetch(`${_AO_CONFIG.baseUrl}/rest/auth/angelbroking/user/v1/loginByPassword`,{
       method:'POST',
-      headers:{'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
+      headers:{'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':process.env.SERVER_PUBLIC_IP||'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
       body:JSON.stringify({clientcode:_AO_CONFIG.clientId,password:_AO_CONFIG.mpin,totp}),
       signal:AbortSignal.timeout(10000),
     });
@@ -860,7 +864,7 @@ async function _aoPost(path,body) {
   try {
     const res=await fetch(`${_AO_CONFIG.baseUrl}${path}`,{
       method:'POST',
-      headers:{'Authorization':'Bearer '+_aoSession.jwtToken,'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
+      headers:{'Authorization':'Bearer '+_aoSession.jwtToken,'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':process.env.SERVER_PUBLIC_IP||'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
       body:JSON.stringify(body), signal:AbortSignal.timeout(10000),
     });
     return await res.json();
@@ -7318,32 +7322,24 @@ app.get("/health", (req, res) => {
 			  }
 			}
 
-			return res.json({
-			  status: overallStatus,
-			  version: VERSION,
-			  release: RELEASE_TAG,
-			  uptime: Math.round(process.uptime()),
-			  timestamp: now,
-			  sources,
-			  metrics: (() => {
-			    const _r=DSSCache.get("regime:composite")||{};
-			    const _ms=_r.moduleScores||{};
-			    const _inc=(_r.includedModules||[]).length;
-			    const _stale=Object.values(sources).filter(s=>s.status==="STALE"||s.status==="DOWN").length;
-			    return {
-			      modulesIncluded:_inc, modulesTotal:6,
-			      modulesCoverage:Math.round((_inc/6)*100),
-			      staleSources:_stale,
-			      compositeScore:_r.compositeScore||null,
-			      regime:_r.regime||null,
-			      activeWeightSum:_r.activeWeightSum||null,
-			      uptimeMin:Math.round(process.uptime()/60),
-			      note:"Approximated — rolling counters in Phase F"
-			    };
-			  })(),
-			  deprecated_endpoints: [],
-			  alerts
-			});
+                        const _enhSrc={};
+                        for(const[_sn,_si]of Object.entries(sources)){
+                          const _sm=_si.staleFor?Math.round(_si.staleFor/60000):null;
+                          const _phr=(typeof ProviderHealthRegistry!=="undefined")?ProviderHealthRegistry.getSummary()[_sn]:null;
+                          _enhSrc[_sn]={status:_si.status,dataStatus:_si.status==="OK"?"live":_si.status==="STALE"?"stale":_si.status==="DOWN"?"disconnected":"unavailable",lastFetch:_si.lastFetch,staleFor:_si.staleFor,staleDurationMin:_sm,staleLabel:_sm===null?"Never fetched":_sm<2?"Just updated":_sm<60?`${_sm}m ago`:`${Math.round(_sm/60)}h ago`,successRate:_phr?.successRate??null,avgLatencyMs:_phr?.avgLatencyMs??null,consecutiveFailures:_phr?.failureCount??null,fallbackActive:_si.status==="DOWN"||_si.status==="STALE"};
+                        }
+                        const _sc2=(typeof computeSystemConfidence!=="undefined")?computeSystemConfidence(DSSCache):null;
+                        const _reg2=DSSCache.get("regime:composite")||{};
+                        const _inc2=(_reg2.includedModules||[]).length;
+                        const _st2=Object.values(_enhSrc).filter(s=>s.status==="STALE"||s.status==="DOWN").length;
+                        return res.json({
+                          status:overallStatus,version:VERSION,release:RELEASE_TAG,
+                          uptime:Math.round(process.uptime()),timestamp:now,
+                          sources:_enhSrc,
+                          confidence:_sc2?{overall:_sc2.overall,classification:_sc2.classification,fallbackModules:_sc2.fallbackModules,staleModules:_sc2.staleModules,drivers:_sc2.drivers}:null,
+                          metrics:{modulesIncluded:_inc2,modulesTotal:6,modulesCoverage:Math.round((_inc2/6)*100),staleSources:_st2,compositeScore:_reg2.compositeScore||null,regime:_reg2.regime||null,activeWeightSum:_reg2.activeWeightSum||null,uptimeMin:Math.round(process.uptime()/60),overallConfidence:_sc2?.overall||null,confClassification:_sc2?.classification||null},
+                          deprecated_endpoints:[],alerts
+                        });
 		  } catch (err) {
 			return res.json({ status: "DOWN", timestamp: Date.now(), error: err.message });
 		  }
