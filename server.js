@@ -2757,30 +2757,52 @@ const fiiDebtSell = Number(
 		);
 
 		// ── SESSION 18 STEP 2: score:derivatives ──
+		// P1-B: VIX-only scoring (v8 DEF-NEW-005)
+		// FSD v8 Section 8 Priority 3 — clean lookup table replaces
+		// additive-from-50 when PCR null. Conf 0.55 (directionally valid).
 		safeExecute(() => {
 		  const _pcr    = payload.pcr;
 		  const _vixVal = DSSCache.get("nse:index")?.vixValue || null;
-		  let _derivScore = 50;
-		  if (_pcr !== null && _pcr !== undefined) {
-		    if (_pcr > 1.3) _derivScore += 15; else if (_pcr > 1.1) _derivScore += 8;
-		    else if (_pcr < 0.75) _derivScore -= 15; else if (_pcr < 0.9) _derivScore -= 8;
-		  }
-		  if (_vixVal !== null) {
-		    if (_vixVal < 12) _derivScore += 10; else if (_vixVal < 16) _derivScore += 5;
-		    else if (_vixVal > 22) _derivScore -= 15; else if (_vixVal > 18) _derivScore -= 8;
-		  }
-		  _derivScore = Math.max(0, Math.min(100, _derivScore));
 		  const _pcrLive = _pcr !== null && _pcr !== undefined;
 		  const _vixLive = _vixVal !== null;
-		  const _dConf   = _pcrLive && _vixLive ? 0.78 : _vixLive ? 0.42 : 0.20;
+
+		  function computeDerivativesScoreVixOnly(vix) {
+		    if (vix === null || vix === undefined) return 50;
+		    if (vix < 13)  return 70;
+		    if (vix < 18)  return 55;
+		    if (vix <= 25) return 40;
+		    return 20;
+		  }
+
+		  let _derivScore, _dConf, _sourceOrigin;
+
+		  if (_pcrLive && _vixLive) {
+		    _derivScore = 50;
+		    if (_pcr > 1.3) _derivScore += 15; else if (_pcr > 1.1) _derivScore += 8;
+		    else if (_pcr < 0.75) _derivScore -= 15; else if (_pcr < 0.9) _derivScore -= 8;
+		    if (_vixVal < 12) _derivScore += 10; else if (_vixVal < 16) _derivScore += 5;
+		    else if (_vixVal > 22) _derivScore -= 15; else if (_vixVal > 18) _derivScore -= 8;
+		    _derivScore = Math.max(0, Math.min(100, _derivScore));
+		    _dConf = 0.78;
+		    _sourceOrigin = "nse-option-chain";
+		  } else if (_vixLive) {
+		    _derivScore = computeDerivativesScoreVixOnly(_vixVal);
+		    _dConf = 0.55;
+		    _sourceOrigin = "vix-only-fallback";
+		  } else {
+		    _derivScore = 50;
+		    _dConf = 0.20;
+		    _sourceOrigin = "bootstrap-fallback";
+		  }
+
 		  DSSCache.set("score:derivatives", {
 		    score: _derivScore, confidence: _dConf,
-		    sourceOrigin: _pcrLive ? "nse-option-chain" : "vix-only-fallback",
+		    sourceOrigin: _sourceOrigin,
 		    fallbackActive: !_pcrLive,
-		    staleReason: !_pcrLive ? "DEF-001: PCR null — NSE option chain fetch incomplete" : null,
+		    staleReason: !_pcrLive ? "DEF-001: PCR null — VIX-only scoring active" : null,
 		    fetchedAt: Date.now(), cacheAgeMin: 0
 		  });
-		  logger.info({ job: "score:derivatives-write", score: _derivScore, confidence: _dConf, pcrLive: _pcrLive, vixLive: _vixLive, pcr: _pcr, ts: Date.now() });
+		  logger.info({ job: "score:derivatives-write", score: _derivScore, confidence: _dConf, pcrLive: _pcrLive, vixLive: _vixLive, vix: _vixVal, sourceOrigin: _sourceOrigin, ts: Date.now() });
 		}, null);
 		// ── END score:derivatives ──
 
