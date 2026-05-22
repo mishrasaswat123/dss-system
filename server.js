@@ -3785,15 +3785,43 @@ class RegimeEngine {
     const MODULE_WEIGHTS = { equity:0.30, technical:0.20, global_:0.20, derivatives:0.15, debt:0.10, sector:0.05 };
     const modules = { equity, technical, global_, derivatives, debt, sector };
 
+    // P2-A: Dynamic weight redistribution (v8 DEF-NEW-002)
+    // Modules on fallback (score=50 placeholder) have their base weight
+    // redistributed proportionally to live modules so fallback gravity
+    // toward NEUTRAL does not suppress decisive directional signals.
+    // Invariant: MODULE_WEIGHTS unchanged. Redistribution is runtime-only.
+    const _isFallback = (mod) =>
+      mod.fallbackActive === true ||
+      mod.sourceOrigin === "hardcoded-fallback" ||
+      mod.sourceOrigin === "bootstrap-fallback";
+
+    // Compute live base weight sum for redistribution denominator
+    let _liveBaseWeight = 0;
+    for (const [name, mod] of Object.entries(modules)) {
+      if (mod.score === null || mod.score === undefined) continue;
+      if (_isFallback(mod)) continue;
+      _liveBaseWeight += MODULE_WEIGHTS[name];
+    }
+
     let weightedSum = 0, activeWeightSum = 0;
+    const _redistributionLog = {};
     for (const [name, mod] of Object.entries(modules)) {
       if (mod.score === null || mod.score === undefined) continue;
       const conf = mod.confidence || 0;
       const m = conf >= 0.60 ? 1.00 : conf >= 0.40 ? 0.70 : 0.00;
       if (m === 0.00) continue;
-      const ew = MODULE_WEIGHTS[name] * m;
+      // Skip fallback modules — do not contribute deadweight score=50
+      if (_isFallback(mod) && _liveBaseWeight > 0) {
+        _redistributionLog[name] = { skipped: true, reason: mod.sourceOrigin || "fallback" };
+        continue;
+      }
+      // Redistribute: scale this module weight up by 1/_liveBaseWeight
+      const baseW = MODULE_WEIGHTS[name];
+      const redistributedW = _liveBaseWeight > 0 ? baseW / _liveBaseWeight : baseW;
+      const ew = redistributedW * m;
       weightedSum += mod.score * ew;
       activeWeightSum += ew;
+      _redistributionLog[name] = { baseW: Math.round(baseW*100)/100, redistributedW: Math.round(redistributedW*1000)/1000, ew: Math.round(ew*1000)/1000 };
     }
 
     const compositeScore = activeWeightSum > 0
