@@ -2798,7 +2798,7 @@ const fiiDebtSell = Number(
 		  DSSCache.set("score:derivatives", {
 		    score: _derivScore, confidence: _dConf,
 		    sourceOrigin: _sourceOrigin,
-		    fallbackActive: !_pcrLive,
+		    fallbackActive: !_pcrLive && !_vixLive,
 		    staleReason: !_pcrLive ? "DEF-001: PCR null — VIX-only scoring active" : null,
 		    fetchedAt: Date.now(), cacheAgeMin: 0
 		  });
