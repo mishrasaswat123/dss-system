@@ -6065,7 +6065,7 @@ async function buildDebtPayload() {
 
 
 	// Trigger first debt refresh after 5min (staggered after sector job to avoid Yahoo 429 collision)
-	setTimeout(() => refreshDebtCache(), 300000);
+// refreshDebtCache 300s duplicate removed — handled in app.listen startup
 
 
 		
@@ -8525,6 +8525,15 @@ app.get("/health", (req, res) => {
                     if (typeof buildGlobalMacroPayload === "function") {
                       await buildGlobalMacroPayload();
                       logger.info("Global macro payload built at startup");
+                  // Debt cache: run at startup for immediate population
+                  try {
+                    if (typeof refreshDebtCache === "function") {
+                      await refreshDebtCache();
+                      logger.info("Debt cache built at startup");
+                    }
+                  } catch(e) {
+                    logger.warn({ err: e.message }, "Debt startup build failed");
+                  }
                     }
                   } catch(e) {
                     logger.warn({ err: e.message }, "Global macro startup build failed");
