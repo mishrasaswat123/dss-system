@@ -5417,7 +5417,7 @@ setTimeout(async () => { await runNSEIndexJob(); }, 60000);
 		}, 180000);
 		// refreshDebtCache setTimeout moved to 1-tab scope (scope fix)
 		setTimeout(async () => { await fetchAMFISIPData(); }, 600000);
-		setTimeout(async () => { await refreshEquityMacroCaches(); }, 660000);
+		setTimeout(async () => { await refreshEquityMacroCaches(); }, 45000);
 		
 		let macroRefreshRunning = false;
 		
@@ -7645,7 +7645,7 @@ app.get("/api/v1/global", (req, res) =>
     }
 
     const provenance = {
-      sourceOrigin:   scoreGlob.sourceOrigin   || (liveCount > 0 ? "yahoo-live" : "unavailable"),
+      sourceOrigin:   scoreGlob.sourceOrigin   || (_fredGR.us10YYield ? 'fred-partial' : liveCount > 0 ? 'yahoo-live' : 'unavailable'),
       fallbackActive: scoreGlob.fallbackActive != null ? scoreGlob.fallbackActive : (liveCount < 3),
       staleReason:    scoreGlob.staleReason    || null,
       fetchedAt:      scoreGlob.fetchedAt      || (raw.timestamp || null),
@@ -8520,6 +8520,15 @@ app.get("/health", (req, res) => {
                     if (typeof fetchFedRSS === "function") {
                       await fetchFedRSS();
                       logger.info("Fed RSS fetched at startup");
+                  // Global macro: run at startup to populate DXY/crude with floor values
+                  try {
+                    if (typeof buildGlobalMacroPayload === "function") {
+                      await buildGlobalMacroPayload();
+                      logger.info("Global macro payload built at startup");
+                    }
+                  } catch(e) {
+                    logger.warn({ err: e.message }, "Global macro startup build failed");
+                  }
                     }
                   } catch(e) {
                     logger.warn({ err: e.message }, "FedRSS startup fetch failed");
