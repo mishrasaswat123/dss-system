@@ -7697,7 +7697,7 @@ app.get("/api/v1/history", (req, res) =>
     const limit=Math.min(parseInt(req.query.limit||"200"),500);
     const bucket=req.query.bucket||"1h";
     return new Promise((resolve) => {
-      db.all("SELECT regime, score, confidence, timestamp FROM decisions ORDER BY timestamp DESC LIMIT ?",[limit],(err,rows)=>{
+      db.all("SELECT regime, score, confidence, timestamp, overall_confidence, conf_class FROM decisions ORDER BY timestamp DESC LIMIT ?",[limit],(err,rows)=>{
         if(err||!rows){res.status(500).json({status:"ERROR",error:err?.message});return resolve();}
         rows.reverse();
         let bucketed=rows;
@@ -7705,7 +7705,7 @@ app.get("/api/v1/history", (req, res) =>
           const ms=bucket==="1h"?3600000:86400000;
           const map=new Map();
           for(const r of rows){const key=Math.floor(r.timestamp/ms)*ms;if(!map.has(key))map.set(key,[]);map.get(key).push(r);}
-          bucketed=Array.from(map.entries()).map(([ts,g])=>({timestamp:ts,regime:g[g.length-1].regime,score:Math.round(g.reduce((s,r)=>s+r.score,0)/g.length*10)/10,confidence:Math.round(g.reduce((s,r)=>s+r.confidence,0)/g.length),count:g.length}));
+          bucketed=Array.from(map.entries()).map(([ts,g])=>({timestamp:ts,regime:g[g.length-1].regime,score:Math.round(g.reduce((s,r)=>s+r.score,0)/g.length*10)/10,confidence:Math.round(g.reduce((s,r)=>s+r.confidence,0)/g.length),overall_confidence:g.filter(r=>r.overall_confidence!=null).length?Math.round(g.filter(r=>r.overall_confidence!=null).reduce((s,r)=>s+(r.overall_confidence||0),0)/g.filter(r=>r.overall_confidence!=null).length*100)/100:null,conf_class:g[g.length-1].conf_class||null,count:g.length}));
         }
         const timeline=[];let prev=null;
         for(const r of bucketed){if(!prev||prev.regime!==r.regime){if(prev)prev.endTs=r.timestamp;timeline.push({regime:r.regime,startTs:r.timestamp,endTs:null,score:r.score});prev=timeline[timeline.length-1];}}
