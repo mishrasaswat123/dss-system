@@ -192,7 +192,7 @@ const LLMCircuitBreaker = (() => {
 })();
 
 // Build narrative prompt from curated context
-function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch") {
+function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
   const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
   const degradedNote = ctx.fallbackModules?.length > 0
     ? `DATA NOTE: ${ctx.fallbackModules.join(", ")} modules using fallback values. Reflect appropriate uncertainty.`
@@ -214,6 +214,21 @@ ${degradedNote}
 TONE DIRECTIVE: ${tone} — ${tone==="CAUTIOUS"?"Use measured, uncertainty-disclosing language":tone==="MEASURED"?"Use balanced, analytical language":"Use clear, direct analytical language"}
 
 AUDIENCE: ${audience}
+RISK PROFILE: ${riskProfile}
+RISK PROFILE CONTEXT: ${
+  riskProfile==="Conservative"?"Client has low risk tolerance. Emphasise capital preservation, downside protection, and defensive positioning. Avoid language suggesting aggressive deployment.":
+  riskProfile==="Aggressive"?"Client has high risk tolerance. Can discuss opportunistic deployment, higher equity allocation, and tactical upside capture where regime supports it.":
+  "Client has moderate risk tolerance. Balanced approach between capital preservation and growth. Staggered deployment language appropriate."
+}
+
+AUDIENCE CONTEXT: ${
+  audience==="IFA Advisory Pitch"?"Independent Financial Advisor preparing structured signal summary for client conversation. Use clear, jargon-lite language with actionable posture.":
+  audience==="Wealth Manager Synthesis"?"Wealth Manager requiring cross-asset macro and technical synthesis. Include regime context, macro transmission, and allocation implications.":
+  audience==="Family Office Risk Brief"?"Family Office investment committee needing regime-aware risk and allocation insights. Emphasise capital preservation, downside risk, and multi-asset positioning.":
+  audience==="Private Banker Advisory"?"Private Banker delivering narrative-grade advisory intelligence to UHNW clients. Institutional tone, measured language, focus on risk-adjusted positioning.":
+  audience==="Advanced Investor Dashboard"?"Advanced self-directed investor using multi-signal dashboard. Include signal drivers, regime strength, and tactical view. Analytical tone acceptable."
+  :"Financial professional requiring market intelligence synthesis."
+}
 
 GOVERNANCE RULES:
 - You may NOT override the regime, score, or action bias above
@@ -248,9 +263,9 @@ async function mockAdapter(ctx, audience) {
 }
 
 // Groq Adapter
-async function groqAdapter(ctx, audience) {
+async function groqAdapter(ctx, audience, riskProfile="Moderate") {
   if (!LLM_CONFIG.groqKey) throw new Error("GROQ_API_KEY not configured");
-  const { prompt } = buildNarrativePrompt(ctx, audience);
+  const { prompt } = buildNarrativePrompt(ctx, audience, riskProfile);
   const t0 = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_CONFIG.timeoutMs);
@@ -310,18 +325,18 @@ function ruleBasedAdapter(ctx) {
 }
 
 // Main narrative generator — provider abstraction layer
-async function generateNarrative(audience = "IFA Advisory Pitch") {
+async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
   const t0 = Date.now();
   const ctx = buildNarrativeContext(DSSCache);
   const provider = LLM_CONFIG.provider;
   let raw = null, fallbackUsed = false, governanceViolations = [], latencyMs = 0;
-  const promptMeta = buildNarrativePrompt(ctx, audience);
+  const promptMeta = buildNarrativePrompt(ctx, audience, riskProfile);
 
   // Attempt primary provider
   if (provider !== "rulebased" && !LLMCircuitBreaker.isOpen()) {
     try {
       if (provider === "mock") raw = await mockAdapter(ctx, audience);
-      else if (provider === "groq") raw = await groqAdapter(ctx, audience);
+      else if (provider === "groq") raw = await groqAdapter(ctx, audience, riskProfile);
       if (raw) {
         const validation = validateNarrativeOutput(raw, ctx);
         if (!validation.valid) {
@@ -356,6 +371,7 @@ async function generateNarrative(audience = "IFA Advisory Pitch") {
     model:               fallbackUsed ? null : LLM_CONFIG.model,
     promptVersion:       promptMeta.promptVersion,
     audience,
+    riskProfile,
     tone:                promptMeta.tone,
     latencyMs,
     responseValid:       governanceViolations.length === 0,
@@ -386,7 +402,7 @@ const NARRATIVE_CACHE_TTL = 900000; // 15 minutes
 
 async function refreshNarrativeCache(audience = "IFA Advisory Pitch") {
   try {
-    const result = await generateNarrative(audience);
+    const result = await generateNarrative(audience, riskProfile);
     _narrativeCache = result;
     _narrativeCacheTs = Date.now();
     DSSCache.set("narrative:llm", result);
@@ -7711,11 +7727,14 @@ app.get("/api/v1/history", (req, res) =>
 app.post("/api/v1/narrative/generate", (req, res) =>
   safeExecuteAsync(async () => {
     const audience = (req.body && req.body.audience) || "IFA Advisory Pitch";
-    const VALID = ["IFA Advisory Pitch","HNI Investment Committee Memo","Retail Investor Weekly Update","Internal Research Desk Note"];
+    const riskProfile = (req.body && req.body.riskProfile) || "Moderate";
+    const VALID_RISK = ["Conservative","Moderate","Aggressive"];
+    if (!VALID_RISK.includes(riskProfile)) return res.status(400).json({ status: "ERROR", error: "Invalid riskProfile" });
+    const VALID = ["IFA Advisory Pitch","Wealth Manager Synthesis","Family Office Risk Brief","Private Banker Advisory","Advanced Investor Dashboard"];
     if (!VALID.includes(audience)) {
       return res.status(400).json({ status: "ERROR", error: "Invalid audience. Valid: " + VALID.join(", ") });
     }
-    const result = await generateNarrative(audience);
+    const result = await generateNarrative(audience, riskProfile);
     return res.json({
       status: "OK",
       timestamp: Date.now(),
