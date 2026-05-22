@@ -1555,6 +1555,42 @@ async function fetchFREDMacro(){
     return result;
   }catch(err){logger.error({err:err.message},"fetchFREDMacro failed");return null;}
 }
+////////////////////////////////////////////////////////
+// SECTION-10C : BLS MACRO INGESTION MODULE
+// Monthly releases — fetch at startup + once daily only
+////////////////////////////////////////////////////////
+const BLS_SERIES={"CUUR0000SA0":"US CPI","CUUR0000SA0L1E":"US Core CPI","LNS14000000":"US Unemployment","CES0000000001":"US Nonfarm Payrolls"};
+async function fetchBLSSeries(sid){
+  try{
+    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch(`https://api.bls.gov/publicAPI/v1/timeseries/data/${sid}`,{signal:ctrl.signal});
+    clearTimeout(t);
+    if(!r.ok)throw new Error(`BLS ${r.status}`);
+    const d=await r.json();
+    if(d.status!=="REQUEST_SUCCEEDED")throw new Error(`BLS:${d.status}`);
+    const latest=d.Results?.series?.[0]?.data?.[0];
+    if(!latest)return null;
+    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess("BLS");
+    return{seriesId:sid,value:parseFloat(latest.value),year:latest.year,period:latest.period,periodName:latest.periodName,source:"BLS",fetchedAt:Date.now()};
+  }catch(e){
+    logger.warn({seriesId:sid,err:e.message},"fetchBLSSeries failed");
+    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure("BLS");
+    return null;
+  }
+}
+async function fetchBLSMacro(){
+  try{
+    const[cpi,coreCpi,unemp,payrolls]=await Promise.all([fetchBLSSeries("CUUR0000SA0"),fetchBLSSeries("CUUR0000SA0L1E"),fetchBLSSeries("LNS14000000"),fetchBLSSeries("CES0000000001")]);
+    const usUnemployment=unemp?.value??null,usPayrolls=payrolls?.value??null;
+    const laborSignal=usUnemployment===null?"UNKNOWN":usUnemployment<=4.0?"STRONG":usUnemployment<=4.5?"MODERATE":usUnemployment<=5.5?"WEAKENING":"WEAK";
+    const payrollSignal=usPayrolls===null?"UNKNOWN":usPayrolls>150?"STRONG":usPayrolls>50?"MODERATE":"WEAK";
+    const result={usCpiIndex:cpi?.value??null,usCoreCpi:coreCpi?.value??null,usUnemployment,usPayrolls,laborSignal,payrollSignal,dates:{cpi:cpi?`${cpi.year}-${cpi.period}`:null,unemployment:unemp?`${unemp.year}-${unemp.period}`:null,payrolls:payrolls?`${payrolls.year}-${payrolls.period}`:null},source:"BLS",fetchedAt:Date.now(),fallbackActive:false};
+    DSSCache.set("macro:bls",result);
+    logger.info({job:"fetchBLSMacro",cpi:result.usCpiIndex,unemployment:usUnemployment,payrolls:usPayrolls,laborSignal,payrollSignal},"BLS macro refreshed");
+    return result;
+  }catch(e){logger.error({err:e.message},"fetchBLSMacro failed");return null;}
+}
+
 // SECTION-11 : MACRO PARSERS
 // fetchTradingEconomicsIndicator / fetchGSTCollections
 // fetchManufacturingPMI / fetchAMFISIPData
@@ -5299,6 +5335,8 @@ value:
 
 		// ✅ START SCHEDULER (ONLY ONCE)
 		setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
+          // BLS scheduler — daily refresh (monthly data, no need for frequent polling)
+          setInterval(async () => { try { await fetchBLSMacro(); } catch(e) {} }, 86400000);
 		          // FRED scheduler — first run 30s, then every 4h
           setTimeout(async () => {
             try { await fetchFREDMacro(); } catch(e) { logger.warn({err:e.message},"FRED initial fetch failed"); }
@@ -7649,7 +7687,9 @@ app.get("/health", (req, res) => {
 			  NSE: { keys: ["nse:index", "nse:optionchain", "equity:flows", "nse:sector"], ttl: 30000 },
 			  RBI: { keys: ["equity:macro"], ttl: 3600000 },
 			  Yahoo: { keys: ["equity:global", "nse:debt"], ttl: 120000 },
-			  MOSPI: { keys: ["equity:fundamental"], ttl: 21600000 }
+			  MOSPI: { keys: ["equity:fundamental"], ttl: 21600000 },
+			  FRED: { keys: ["macro:fred"], ttl: 14400000 },
+			  BLS:  { keys: ["macro:bls"],  ttl: 86400000 }
 			};
 
 			const sources = {};
@@ -8339,6 +8379,15 @@ app.get("/health", (req, res) => {
                     if (typeof fetchFREDMacro === "function") {
                       await fetchFREDMacro();
                       logger.info("FRED macro fetched at startup");
+                  // BLS: fetch at startup, then daily (monthly data)
+                  try {
+                    if (typeof fetchBLSMacro === "function") {
+                      await fetchBLSMacro();
+                      logger.info("BLS macro fetched at startup");
+                    }
+                  } catch(e) {
+                    logger.warn({ err: e.message }, "BLS startup fetch failed");
+                  }
                     }
                   } catch(e) {
                     logger.warn({ err: e.message }, "FRED startup fetch failed");
