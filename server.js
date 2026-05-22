@@ -33,6 +33,7 @@ function buildNarrativeContext(cache){
     const nseIdx=cache.get("nse:index")||{};
     const globalRaw=cache.get("equity:global")||{};
     const fredMacro=cache.get("macro:fred")||{};
+    const blsMacro=cache.get("macro:bls")||{};
     const debtCache=cache.get("nse:debt")||{};
     const moduleList=Object.entries(ms).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>({key:k,score:v,weight:MOD_CONF_WEIGHTS[k]||0})).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
     const topDrivers=moduleList.filter(m=>m.score>=55).map(m=>m.key);
@@ -55,7 +56,7 @@ function buildNarrativeContext(cache){
       moduleCoverage:sysConf.moduleCoverage,
       volatilityState:vix===null?null:vix<15?"LOW":vix<22?"MODERATE":"HIGH",
       liquidityState:null,
-      macroState:{dxy:globalRaw.dxy??null,crudeBrent:globalRaw.crudeOil??null,repoRate:debtCache.overview?.repoRate??null,realRate:debtCache.overview?.realRate??null,us10Y:fredMacro.us10YYield??null,us2Y:fredMacro.us2YYield??null,yieldSpread:fredMacro.yieldSpread10_2??null,yieldCurve:fredMacro.yieldCurveSignal??null,fedFundsRate:fredMacro.fedFundsRate??null,fedStance:fredMacro.fedStance??null,usUnemployment:fredMacro.usUnemployment??null,fredSource:fredMacro.fetchedAt?"FRED":"fallback"},
+      macroState:{dxy:globalRaw.dxy??null,crudeBrent:globalRaw.crudeOil??null,repoRate:debtCache.overview?.repoRate??null,realRate:debtCache.overview?.realRate??null,us10Y:fredMacro.us10YYield??null,us2Y:fredMacro.us2YYield??null,yieldSpread:fredMacro.yieldSpread10_2??null,yieldCurve:fredMacro.yieldCurveSignal??null,fedFundsRate:fredMacro.fedFundsRate??null,fedStance:fredMacro.fedStance??null,usUnemployment:fredMacro.usUnemployment??null,fredSource:fredMacro.fetchedAt?"FRED":"fallback",usUnemploymentBLS:blsMacro.usUnemployment??null,laborSignal:blsMacro.laborSignal??null,usPayrolls:blsMacro.usPayrolls??null,payrollSignal:blsMacro.payrollSignal??null,usCpiIndex:blsMacro.usCpiIndex??null,blsSource:blsMacro.fetchedAt?"BLS":"fallback"},
       riskFlags:[
         ...(sysConf.fallbackModules.length>2?["HIGH_FALLBACK_COUNT"]:[]),
         ...(sysConf.overall<0.40?["LOW_SYSTEM_CONFIDENCE"]:[]),
@@ -7660,6 +7661,62 @@ app.post("/api/v1/narrative/generate", (req, res) =>
       timestamp: Date.now(),
       dataStatus: result.narrativeMeta && result.narrativeMeta.fallbackUsed ? "fallback" : "live",
       data: result,
+    });
+  }, res)
+);
+
+
+// ===============================
+// GET /api/v1/macro
+// Unified macro intelligence endpoint — FRED + BLS
+// ===============================
+app.get("/api/v1/macro", (req, res) =>
+  safeExecuteAsync(async () => {
+    const fred = DSSCache.get("macro:fred") || {};
+    const bls  = DSSCache.get("macro:bls")  || {};
+    const hasData = fred.fetchedAt || bls.fetchedAt;
+    return res.json({
+      status:    "OK",
+      timestamp: Date.now(),
+      dataStatus: hasData ? "live" : "unavailable",
+      data: {
+        fred: fred.fetchedAt ? {
+          us10YYield:       fred.us10YYield,
+          us2YYield:        fred.us2YYield,
+          yieldSpread10_2:  fred.yieldSpread10_2,
+          yieldCurveSignal: fred.yieldCurveSignal,
+          fedFundsRate:     fred.fedFundsRate,
+          fedStance:        fred.fedStance,
+          usUnemployment:   fred.usUnemployment,
+          usCpiIndex:       fred.usCpiIndex,
+          dates:            fred.dates,
+          source:           "FRED",
+          fetchedAt:        fred.fetchedAt,
+          staleDurationMin: Math.round((Date.now()-fred.fetchedAt)/60000),
+        } : null,
+        bls: bls.fetchedAt ? {
+          usCpiIndex:       bls.usCpiIndex,
+          usCoreCpi:        bls.usCoreCpi,
+          usUnemployment:   bls.usUnemployment,
+          usPayrolls:       bls.usPayrolls,
+          usWages:          bls.usWages,
+          laborSignal:      bls.laborSignal,
+          payrollSignal:    bls.payrollSignal,
+          dates:            bls.dates,
+          source:           "BLS",
+          fetchedAt:        bls.fetchedAt,
+          staleDurationMin: Math.round((Date.now()-bls.fetchedAt)/60000),
+        } : null,
+        synthesis: {
+          us10Y:        fred.us10YYield        || null,
+          fedStance:    fred.fedStance         || null,
+          yieldCurve:   fred.yieldCurveSignal  || null,
+          unemployment: bls.usUnemployment     || fred.usUnemployment || null,
+          laborSignal:  bls.laborSignal        || null,
+          payrollSignal:bls.payrollSignal      || null,
+          cpi:          bls.usCpiIndex         || fred.usCpiIndex || null,
+        },
+      },
     });
   }, res)
 );
