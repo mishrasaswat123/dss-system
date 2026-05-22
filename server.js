@@ -32,6 +32,7 @@ function buildNarrativeContext(cache){
     const ms=regime.moduleScores||{};
     const nseIdx=cache.get("nse:index")||{};
     const globalRaw=cache.get("equity:global")||{};
+    const fredMacro=cache.get("macro:fred")||{};
     const debtCache=cache.get("nse:debt")||{};
     const moduleList=Object.entries(ms).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>({key:k,score:v,weight:MOD_CONF_WEIGHTS[k]||0})).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
     const topDrivers=moduleList.filter(m=>m.score>=55).map(m=>m.key);
@@ -54,13 +55,15 @@ function buildNarrativeContext(cache){
       moduleCoverage:sysConf.moduleCoverage,
       volatilityState:vix===null?null:vix<15?"LOW":vix<22?"MODERATE":"HIGH",
       liquidityState:null,
-      macroState:{dxy:globalRaw.dxy??null,crudeBrent:globalRaw.crudeOil??null,repoRate:debtCache.overview?.repoRate??null,realRate:debtCache.overview?.realRate??null},
+      macroState:{dxy:globalRaw.dxy??null,crudeBrent:globalRaw.crudeOil??null,repoRate:debtCache.overview?.repoRate??null,realRate:debtCache.overview?.realRate??null,us10Y:fredMacro.us10YYield??null,us2Y:fredMacro.us2YYield??null,yieldSpread:fredMacro.yieldSpread10_2??null,yieldCurve:fredMacro.yieldCurveSignal??null,fedFundsRate:fredMacro.fedFundsRate??null,fedStance:fredMacro.fedStance??null,usUnemployment:fredMacro.usUnemployment??null,fredSource:fredMacro.fetchedAt?"FRED":"fallback"},
       riskFlags:[
         ...(sysConf.fallbackModules.length>2?["HIGH_FALLBACK_COUNT"]:[]),
         ...(sysConf.overall<0.40?["LOW_SYSTEM_CONFIDENCE"]:[]),
         ...(vix>22?["ELEVATED_VOLATILITY"]:[]),
         ...((regime.compositeScore||50)<=30?["EXTREME_RISK_OFF"]:[]),
         ...((regime.compositeScore||50)>=75?["EXTREME_RISK_ON"]:[]),
+        ...(fredMacro.yieldCurveSignal==="INVERTED"?["YIELD_CURVE_INVERTED"]:[]),
+        ...(fredMacro.fedStance==="RESTRICTIVE"?["FED_RESTRICTIVE"]:[]),
       ],
       governance:{
         llmMayOverrideRegime:false,llmMayOverrideScore:false,
@@ -202,7 +205,7 @@ AUTHORITATIVE SYSTEM STATE (DO NOT OVERRIDE):
 - Weakest Drivers: ${(ctx.weakestDrivers||[]).join(", ") || "none"}
 - Volatility: ${ctx.volatilityState || "unknown"}
 - Risk Flags: ${(ctx.riskFlags||[]).join(", ") || "none"}
-- Macro: DXY ${ctx.macroState?.dxy||"n/a"}, Brent $${ctx.macroState?.crudeBrent||"n/a"}, Repo ${ctx.macroState?.repoRate||"n/a"}%
+- Macro: DXY ${ctx.macroState?.dxy||"n/a"}, Brent $${ctx.macroState?.crudeBrent||"n/a"}, Repo ${ctx.macroState?.repoRate||"n/a"}%\n- US Rates: 10Y ${ctx.macroState?.us10Y||"n/a"}%, Fed Funds ${ctx.macroState?.fedFundsRate||"n/a"}%, Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}\n- Fed Stance: ${ctx.macroState?.fedStance||"n/a"}, US Unemployment ${ctx.macroState?.usUnemployment||"n/a"}%
 ${degradedNote}
 
 TONE DIRECTIVE: ${tone} — ${tone==="CAUTIOUS"?"Use measured, uncertainty-disclosing language":tone==="MEASURED"?"Use balanced, analytical language":"Use clear, direct analytical language"}
@@ -5890,8 +5893,10 @@ async function buildDebtPayload() {
 		// ── SESSION 18 STEP 2: score:debt + signals:debt ──
 		safeExecute(() => {
 		  const _ov       = payload.overview || {};
+                  const _fredD    = DSSCache.get("macro:fred") || {};
+                  // FRED: prefer DGS10 over Yahoo for US10Y in debt scoring
 		  const _realRate = _ov.realRate || null;
-		  const _us10Y    = _ov.us10Y    || null;
+                  const _us10Y    = _fredD.us10YYield || _ov.us10Y || null;
 		  const _dxy      = _ov.dxy      || null;
 		  const _gsecLive = payload.gsecLive === true;
 
@@ -5903,11 +5908,11 @@ async function buildDebtPayload() {
 		  if (_dxy   !== null) { if (_dxy < 102)   _dScore += 5;  else if (_dxy > 106)   _dScore -= 5;  }
 		  _dScore = Math.max(0, Math.min(100, _dScore));
 
-		  const _dConf = _gsecLive ? 0.75 : 0.45;
+                  const _dConf = _gsecLive ? 0.75 : _fredD.us10YYield ? 0.60 : 0.45;
 
 		  DSSCache.set("score:debt", {
 		    score: _dScore, confidence: _dConf,
-		    sourceOrigin: _gsecLive ? "te-live" : "hardcoded-fallback",
+                    sourceOrigin: _gsecLive ? "te-live" : _fredD.us10YYield ? "fred-partial" : "hardcoded-fallback",
 		    fallbackActive: !_gsecLive,
 		    staleReason: !_gsecLive ? "DEF-004: G-Sec yields hardcoded — confidence penalised" : null,
 		    fetchedAt: Date.now(), cacheAgeMin: 0
