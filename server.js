@@ -324,9 +324,52 @@ function ruleBasedAdapter(ctx) {
   };
 }
 
+
+// P1-A: isRegimeReady() — cold start guard (v8 DEF-NEW-001)
+// Prevents generateNarrative() from running before RegimeEngine
+// completes first compute. Eliminates null/100 in narrative output.
+function isRegimeReady(cache) {
+  const r = cache.get('regime:composite');
+  return r !== null &&
+         r !== undefined &&
+         r.compositeScore !== null &&
+         r.compositeScore !== undefined &&
+         ['STRONG_RISK_ON', 'RISK_ON', 'NEUTRAL', 'RISK_OFF', 'STRONG_RISK_OFF']
+           .includes(r.regime);
+}
+
 // Main narrative generator — provider abstraction layer
 async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
   const t0 = Date.now();
+
+  // P1-A: cold start guard — return COLD_START fallback if regime not ready
+  if (!isRegimeReady(DSSCache)) {
+    const _coldCtx = buildNarrativeContext(DSSCache);
+    logger.warn({ job: "narrative-generate", reason: "COLD_START" }, "isRegimeReady false — returning cold start fallback");
+    return {
+      ...ruleBasedAdapter(_coldCtx),
+      narrativeMeta: {
+        provider:             "rulebased",
+        model:                null,
+        promptVersion:        "cold-start-guard",
+        audience,
+        riskProfile,
+        tone:                 "CAUTIOUS",
+        latencyMs:            Date.now() - t0,
+        responseValid:        false,
+        fallbackUsed:         true,
+        fallbackReason:       "COLD_START",
+        governanceViolations: [],
+        circuitBreakerState:  LLMCircuitBreaker.getState(),
+        generatedAt:          Date.now(),
+        contextConfidence:    _coldCtx.confidence,
+        contextRegime:        _coldCtx.regime,
+      },
+      governanceApplied: true,
+      disclaimer: "System warming up — RegimeEngine has not completed first compute. Retry in 30 seconds.",
+    };
+  }
+
   const ctx = buildNarrativeContext(DSSCache);
   const provider = LLM_CONFIG.provider;
   let raw = null, fallbackUsed = false, governanceViolations = [], latencyMs = 0;
