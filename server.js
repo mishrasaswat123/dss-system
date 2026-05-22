@@ -1511,6 +1511,47 @@ async function _aoFetchIndia10Y() {
 	}
 	
 	////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////
+// SECTION-10B : FRED MACRO INGESTION MODULE
+////////////////////////////////////////////////////////
+const FRED_CONFIG = Object.freeze({
+  apiKey:  process.env.FRED_API_KEY || "",
+  baseUrl: "https://api.stlouisfed.org/fred/series/observations",
+  timeout: 8000,
+  series:  { DGS10:{label:"US 10Y Yield",unit:"%"}, DGS2:{label:"US 2Y Yield",unit:"%"}, T10Y2Y:{label:"Yield Curve Spread",unit:"%"}, FEDFUNDS:{label:"Fed Funds Rate",unit:"%"}, CPIAUCSL:{label:"US CPI",unit:"index"}, CPILFESL:{label:"US Core CPI",unit:"index"}, UNRATE:{label:"US Unemployment",unit:"%"} },
+});
+async function fetchFREDSeries(seriesId,limit=2){
+  if(!FRED_CONFIG.apiKey){return null;}
+  try{
+    const url=`${FRED_CONFIG.baseUrl}?series_id=${seriesId}&api_key=${FRED_CONFIG.apiKey}&limit=${limit}&sort_order=desc&file_type=json`;
+    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),FRED_CONFIG.timeout);
+    const res=await fetch(url,{signal:controller.signal});clearTimeout(timer);
+    if(!res.ok)throw new Error(`FRED HTTP ${res.status}`);
+    const data=await res.json();const obs=data.observations||[];
+    const latest=obs.find(o=>o.value!=="."&&o.value!=="");if(!latest)return null;
+    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess("FRED");
+    return{seriesId,value:parseFloat(latest.value),date:latest.date,source:"FRED",fetchedAt:Date.now()};
+  }catch(err){
+    logger.warn({seriesId,err:err.message},"fetchFREDSeries failed");
+    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure("FRED");
+    return null;
+  }
+}
+async function fetchFREDMacro(){
+  if(!FRED_CONFIG.apiKey)return null;
+  try{
+    const[dgs10,dgs2,t10y2y,fedfunds,cpi,unrate]=await Promise.all([fetchFREDSeries("DGS10",1),fetchFREDSeries("DGS2",1),fetchFREDSeries("T10Y2Y",1),fetchFREDSeries("FEDFUNDS",1),fetchFREDSeries("CPIAUCSL",2),fetchFREDSeries("UNRATE",1)]);
+    const spreadVal=t10y2y?.value??null;
+    const yieldCurveSignal=spreadVal===null?"UNKNOWN":spreadVal<-0.20?"INVERTED":spreadVal<0.10?"FLAT":spreadVal<0.50?"NORMAL":"STEEP";
+    const fedRate=fedfunds?.value??null;
+    const fedStance=fedRate===null?"UNKNOWN":fedRate>=5.00?"RESTRICTIVE":fedRate>=3.50?"MODERATELY_RESTRICTIVE":fedRate>=2.00?"NEUTRAL":"ACCOMMODATIVE";
+    const result={us10YYield:dgs10?.value??null,us2YYield:dgs2?.value??null,yieldSpread10_2:spreadVal,yieldCurveSignal,fedFundsRate:fedRate,fedStance,usUnemployment:unrate?.value??null,usCpiIndex:cpi?.value??null,dates:{dgs10:dgs10?.date||null,fedfunds:fedfunds?.date||null,t10y2y:t10y2y?.date||null,unrate:unrate?.date||null},source:"FRED",fetchedAt:Date.now(),fallbackActive:false,staleReason:null};
+    DSSCache.set("macro:fred",result);
+    logger.info({job:"fetchFREDMacro",us10Y:result.us10YYield,fedRate:result.fedFundsRate,spread:result.yieldSpread10_2,yieldCurve:result.yieldCurveSignal,fedStance:result.fedStance},"FRED macro refreshed");
+    return result;
+  }catch(err){logger.error({err:err.message},"fetchFREDMacro failed");return null;}
+}
 // SECTION-11 : MACRO PARSERS
 // fetchTradingEconomicsIndicator / fetchGSTCollections
 // fetchManufacturingPMI / fetchAMFISIPData
@@ -2930,9 +2971,12 @@ const fiiDebtSell = Number(
 
 		const _us10YVal=us10Y?.current||null,_dxyVal=dxy?.current||null,_crudeVal=crude||null;
 		const _prevG=DSSCache.get("equity:global")||{};
+		// FRED: primary source for US10Y
+		const _fredG=DSSCache.get("macro:fred")||{};
+		const _fredUs10Y=_fredG.us10YYield||null;
 		const dxyFinal=_dxyVal||_prevG.dxy||104.50;
 		const crudeFinal=_crudeVal||_prevG.crudeOil||83.00;
-		const us10YFinal=_us10YVal||_prevG.us10Y||null;
+		const us10YFinal=_fredUs10Y||_us10YVal||_prevG.us10Y||null;
 		const payload = {
 
 		  us10Y: us10YFinal,
@@ -5252,7 +5296,19 @@ value:
 
 		// ✅ START SCHEDULER (ONLY ONCE)
 		setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
-		setTimeout(async () => { await runNSEIndexJob(); }, 60000);
+		          // FRED scheduler — first run 30s, then every 4h
+          setTimeout(async () => {
+            try { await fetchFREDMacro(); } catch(e) { logger.warn({err:e.message},"FRED initial fetch failed"); }
+            setInterval(async () => { try { await fetchFREDMacro(); } catch(e) {} }, 14400000);
+          }, 30000);
+          // LLM narrative scheduler — 90s first run, then every 15min
+          setTimeout(async () => {
+            if(typeof refreshNarrativeCache==="function"){
+              await refreshNarrativeCache();
+              setInterval(()=>refreshNarrativeCache().catch(()=>{}),900000);
+            }
+          }, 90000);
+setTimeout(async () => { await runNSEIndexJob(); }, 60000);
 		setTimeout(() => {
 		  refreshSectorCache();
 		  setInterval(() => refreshSectorCache(), 600000);
@@ -7460,9 +7516,10 @@ app.get("/api/v1/global", (req, res) =>
     const raw        = DSSCache.get("equity:global")   || {};
     const scoreGlob  = DSSCache.get("score:global")    || { score: null, confidence: 0 };
     const sigGlob    = DSSCache.get("signals:global")  || {};
+    const _fredGR    = DSSCache.get("macro:fred")      || {};
 
     const dxy      = raw.dxy      != null ? raw.dxy      : (sigGlob.dxyProxy    != null ? sigGlob.dxyProxy    : null);
-    const us10Y    = raw.us10Y    != null ? raw.us10Y    : (sigGlob.us10YYield  != null ? sigGlob.us10YYield  : null);
+    const us10Y    = _fredGR.us10YYield != null ? _fredGR.us10YYield : raw.us10Y    != null ? raw.us10Y    : (sigGlob.us10YYield  != null ? sigGlob.us10YYield  : null);
     const crude    = raw.crudeOil != null ? raw.crudeOil : (sigGlob.crudeBrent  != null ? sigGlob.crudeBrent  : null);
     const fedPolicy = raw.fedPolicy || sigGlob.fedPolicy || null;
 
@@ -7502,6 +7559,7 @@ app.get("/api/v1/global", (req, res) =>
         transmission,
         globalScore:  scoreGlob.score != null ? scoreGlob.score : null,
         provenance,
+      fredEnriched: _fredGR.us10YYield ? { us10Y:_fredGR.us10YYield, us2Y:_fredGR.us2YYield||null, yieldSpread:_fredGR.yieldSpread10_2||null, yieldCurve:_fredGR.yieldCurveSignal||null, fedFundsRate:_fredGR.fedFundsRate||null, fedStance:_fredGR.fedStance||null, unemployment:_fredGR.usUnemployment||null, source:"FRED", fetchedAt:_fredGR.fetchedAt||null } : null,
         dataStatus,
         timestamp:    Date.now(),
       },
@@ -8271,6 +8329,15 @@ app.get("/health", (req, res) => {
 		  try {
 			await getYahooCookie();
 			logger.info("Yahoo session cookie pre-established at startup");
+                  // FRED: fetch immediately at startup
+                  try {
+                    if (typeof fetchFREDMacro === "function") {
+                      await fetchFREDMacro();
+                      logger.info("FRED macro fetched at startup");
+                    }
+                  } catch(e) {
+                    logger.warn({ err: e.message }, "FRED startup fetch failed");
+                  }
 			// Small warm-up delay — let Yahoo session settle before data requests
 			await new Promise(r => setTimeout(r, 10000));
 			// Candle cache now restored from disk (candles-cache.json) — startup Yahoo fetch removed
