@@ -34,6 +34,7 @@ function buildNarrativeContext(cache){
     const globalRaw=cache.get("equity:global")||{};
     const fredMacro=cache.get("macro:fred")||{};
     const blsMacro=cache.get("macro:bls")||{};
+    const fedRSS=cache.get("macro:fedrss")||{};
     const debtCache=cache.get("nse:debt")||{};
     const moduleList=Object.entries(ms).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>({key:k,score:v,weight:MOD_CONF_WEIGHTS[k]||0})).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
     const topDrivers=moduleList.filter(m=>m.score>=55).map(m=>m.key);
@@ -65,6 +66,7 @@ function buildNarrativeContext(cache){
         ...((regime.compositeScore||50)>=75?["EXTREME_RISK_ON"]:[]),
         ...(fredMacro.yieldCurveSignal==="INVERTED"?["YIELD_CURVE_INVERTED"]:[]),
         ...(fredMacro.fedStance==="RESTRICTIVE"?["FED_RESTRICTIVE"]:[]),
+        ...(fedRSS.overallTone==="HAWKISH"?["FED_HAWKISH_SIGNAL"]:[]),
       ],
       governance:{
         llmMayOverrideRegime:false,llmMayOverrideScore:false,
@@ -1590,6 +1592,62 @@ async function fetchBLSMacro(){
     logger.info({job:"fetchBLSMacro",cpi:result.usCpiIndex,unemployment:usUnemployment,payrolls:usPayrolls,laborSignal,payrollSignal},"BLS macro refreshed");
     return result;
   }catch(e){logger.error({err:e.message},"fetchBLSMacro failed");return null;}
+}
+
+////////////////////////////////////////////////////////
+// SECTION-10D : FEDERAL RESERVE RSS INGESTION MODULE
+// Zero-cost, EC2-compatible, event-driven signals
+// Fetches FOMC minutes, policy statements, press releases
+// Cadence: every 4 hours (Fed releases are infrequent)
+////////////////////////////////////////////////////////
+const FED_RSS_URL="https://www.federalreserve.gov/feeds/press_all.xml";
+const FED_KEYWORDS={hawkish:["rate hike","tighten","restrictive","inflation concern","above target","price stability"],dovish:["rate cut","easing","accommodative","below target","support growth","labor market"],neutral:["hold","pause","unchanged","monitor","assess","data dependent"],fomc:["fomc","federal open market","meeting","minutes","statement"],policy:["policy","interest rate","federal funds","reserve requirement"]};
+async function fetchFedRSS(){
+  try{
+    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),8000);
+    const r=await fetch(FED_RSS_URL,{signal:ctrl.signal,headers:{"User-Agent":"ADVISIQ-DSS/1.0 (market intelligence research)"}});
+    clearTimeout(t);
+    if(!r.ok)throw new Error(`FedRSS HTTP ${r.status}`);
+    const xml=await r.text();
+    // Parse items from RSS XML
+    const items=[];
+    const itemRx=/<item>([\s\S]*?)<\/item>/g;
+    let m;
+    while((m=itemRx.exec(xml))!==null&&items.length<10){
+      const block=m[1];
+      const title=(/<title><!\[CDATA\[([^\]]+)\]\]><\/title>/.exec(block)||/<title>([^<]+)<\/title>/.exec(block))?.[1]||"";
+      const link=(/<link><!\[CDATA\[([^\]]+)\]\]><\/link>/.exec(block)||/<link>([^<]+)<\/link>/.exec(block))?.[1]||"";
+      const pubDate=/<pubDate>([^<]+)<\/pubDate>/.exec(block)?.[1]||"";
+      if(title)items.push({title:title.replace(/&quot;/g,'"').replace(/&amp;/g,"&").trim(),link:link.trim(),pubDate:pubDate.trim()});
+    }
+    // Classify each item
+    const classified=items.map(item=>{
+      const txt=item.title.toLowerCase();
+      let sentiment="NEUTRAL",isFOMC=false,isPolicy=false;
+      const hawkScore=FED_KEYWORDS.hawkish.filter(k=>txt.includes(k)).length;
+      const doveScore=FED_KEYWORDS.dovish.filter(k=>txt.includes(k)).length;
+      if(FED_KEYWORDS.fomc.some(k=>txt.includes(k)))isFOMC=true;
+      if(FED_KEYWORDS.policy.some(k=>txt.includes(k)))isPolicy=true;
+      if(hawkScore>doveScore)sentiment="HAWKISH";
+      else if(doveScore>hawkScore)sentiment="DOVISH";
+      return{...item,sentiment,isFOMC,isPolicy,relevanceScore:hawkScore+doveScore+(isFOMC?2:0)+(isPolicy?1:0)};
+    }).sort((a,b)=>b.relevanceScore-a.relevanceScore);
+    // Overall Fed tone from top 3 items
+    const top3=classified.slice(0,3);
+    const hawkCount=top3.filter(i=>i.sentiment==="HAWKISH").length;
+    const doveCount=top3.filter(i=>i.sentiment==="DOVISH").length;
+    const overallTone=hawkCount>doveCount?"HAWKISH":doveCount>hawkCount?"DOVISH":"NEUTRAL";
+    const fomcItems=classified.filter(i=>i.isFOMC);
+    const result={items:classified.slice(0,8),overallTone,fomcItems:fomcItems.slice(0,3),latestTitle:classified[0]?.title||null,latestDate:classified[0]?.pubDate||null,source:"FedRSS",fetchedAt:Date.now(),fallbackActive:false};
+    DSSCache.set("macro:fedrss",result);
+    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess("FedRSS");
+    logger.info({job:"fetchFedRSS",items:classified.length,tone:overallTone,fomcItems:fomcItems.length},"Fed RSS refreshed");
+    return result;
+  }catch(e){
+    logger.warn({err:e.message},"fetchFedRSS failed");
+    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure("FedRSS");
+    return null;
+  }
 }
 
 // SECTION-11 : MACRO PARSERS
@@ -5336,6 +5394,8 @@ value:
 
 		// ✅ START SCHEDULER (ONLY ONCE)
 		setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
+          // FedRSS scheduler — every 4h (infrequent Fed releases)
+          setInterval(async () => { try { await fetchFedRSS(); } catch(e) {} }, 14400000);
           // BLS scheduler — daily refresh (monthly data, no need for frequent polling)
           setInterval(async () => { try { await fetchBLSMacro(); } catch(e) {} }, 86400000);
 		          // FRED scheduler — first run 30s, then every 4h
@@ -7672,8 +7732,9 @@ app.post("/api/v1/narrative/generate", (req, res) =>
 // ===============================
 app.get("/api/v1/macro", (req, res) =>
   safeExecuteAsync(async () => {
-    const fred = DSSCache.get("macro:fred") || {};
-    const bls  = DSSCache.get("macro:bls")  || {};
+    const fred   = DSSCache.get("macro:fred")   || {};
+    const bls    = DSSCache.get("macro:bls")    || {};
+    const fedrss = DSSCache.get("macro:fedrss") || {};
     const hasData = fred.fetchedAt || bls.fetchedAt;
     return res.json({
       status:    "OK",
@@ -7707,6 +7768,16 @@ app.get("/api/v1/macro", (req, res) =>
           fetchedAt:        bls.fetchedAt,
           staleDurationMin: Math.round((Date.now()-bls.fetchedAt)/60000),
         } : null,
+        fedrss: fedrss.fetchedAt ? {
+          overallTone:  fedrss.overallTone,
+          latestTitle:  fedrss.latestTitle,
+          latestDate:   fedrss.latestDate,
+          fomcItems:    fedrss.fomcItems,
+          topItems:     fedrss.items?.slice(0,3),
+          source:       "FedRSS",
+          fetchedAt:    fedrss.fetchedAt,
+          staleDurationMin: Math.round((Date.now()-fedrss.fetchedAt)/60000),
+        } : null,
         synthesis: {
           us10Y:        fred.us10YYield        || null,
           fedStance:    fred.fedStance         || null,
@@ -7715,6 +7786,8 @@ app.get("/api/v1/macro", (req, res) =>
           laborSignal:  bls.laborSignal        || null,
           payrollSignal:bls.payrollSignal      || null,
           cpi:          bls.usCpiIndex         || fred.usCpiIndex || null,
+          fedTone:      fedrss.overallTone     || null,
+          latestFedNews:fedrss.latestTitle     || null,
         },
       },
     });
@@ -7746,7 +7819,8 @@ app.get("/health", (req, res) => {
 			  Yahoo: { keys: ["equity:global", "nse:debt"], ttl: 120000 },
 			  MOSPI: { keys: ["equity:fundamental"], ttl: 21600000 },
 			  FRED: { keys: ["macro:fred"], ttl: 14400000 },
-			  BLS:  { keys: ["macro:bls"],  ttl: 86400000 }
+			  BLS:  { keys: ["macro:bls"],  ttl: 86400000 },
+			  FedRSS:{ keys: ["macro:fedrss"],ttl: 14400000 }
 			};
 
 			const sources = {};
@@ -8441,6 +8515,15 @@ app.get("/health", (req, res) => {
                     if (typeof fetchBLSMacro === "function") {
                       await fetchBLSMacro();
                       logger.info("BLS macro fetched at startup");
+                  // FedRSS: fetch at startup
+                  try {
+                    if (typeof fetchFedRSS === "function") {
+                      await fetchFedRSS();
+                      logger.info("Fed RSS fetched at startup");
+                    }
+                  } catch(e) {
+                    logger.warn({ err: e.message }, "FedRSS startup fetch failed");
+                  }
                     }
                   } catch(e) {
                     logger.warn({ err: e.message }, "BLS startup fetch failed");
