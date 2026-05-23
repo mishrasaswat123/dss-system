@@ -456,7 +456,7 @@ MARKET STATE:
 - Macro: Repo ${ctx.macroState?.repoRate||"n/a"}% | US 10Y ${ctx.macroState?.us10Y||"n/a"}% | DXY ${ctx.macroState?.dxy||"n/a"} | Brent $${ctx.macroState?.crudeBrent||"n/a"} | Fed ${ctx.macroState?.fedStance||"n/a"} | Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}
 ${degradedNote}
 
-REGIME FRAME: ${regimeFrame}
+REGIME FRAME: ${regimeFrame}${ctx.stabilityHint || ""}
 RISK PROFILE: ${riskCtx}
 
 AUDIENCE CONTRACT — ${audience}:
@@ -626,7 +626,22 @@ async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = 
   };
   const provider = LLM_CONFIG.provider;
   let raw = null, fallbackUsed = false, governanceViolations = [], latencyMs = 0;
-  const promptMeta = buildNarrativePrompt(ctx, audience, riskProfile);
+  // FSD 10.5: Narrative stability — prevent tone oscillation during stable regimes
+  // If regime unchanged AND score delta < 5pts AND prev narrative exists → inject tone hint
+  const _prevNarrative = DSSCache.get("narrative:llm") || null;
+  const _prevTone = _prevNarrative?.marketTone || null;
+  const _prevRegime = _prevNarrative?.narrativeMeta?.contextRegime || null;
+  const _prevScore = _prevNarrative?.narrativeMeta?.contextConfidence || null;
+  const _scoreDelta = (ctx.compositeScore !== null && _prevNarrative?.narrativeMeta?.contextRegime)
+    ? Math.abs((ctx.compositeScore || 50) - (_prevNarrative?.compositeScore || 50))
+    : 99;
+  const _stableRegime = _prevRegime === ctx.regime && _scoreDelta < 5 && _prevTone;
+  const _stabilityHint = _stableRegime
+    ? `
+STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} in the previous narrative. Score has moved less than 5 points. Maintain consistent ${_prevTone} tone unless signals strongly justify a change.`
+    : "";
+  const _stableCtx = { ...ctx, stabilityHint: _stabilityHint, prevMarketTone: _stableRegime ? _prevTone : null };
+  const promptMeta = buildNarrativePrompt(_stableCtx, audience, riskProfile);
 
   // Attempt primary provider
   if (provider !== "rulebased" && !LLMCircuitBreaker.isOpen()) {
