@@ -8839,35 +8839,59 @@ app.get("/health", (req, res) => {
 
 		app.listen(PORT, async () => {
 		  logger.info(`DSS running on port ${PORT} (${VERSION})`);
+
+		  // P3-4: STARTUP_STATUS — tracks each startup step for observability
+		  const STARTUP_STATUS = {
+		    startedAt:   Date.now(),
+		    version:     VERSION,
+		    yahoo:       'pending',
+		    fred:        'pending',
+		    bls:         'pending',
+		    fedrss:      'pending',
+		    globalMacro: 'pending',
+		    debt:        'pending',
+		    regime:      'pending',
+		    overview:    'pending',
+		    narrative:   'pending',
+		  };
+		  DSSCache.set('startup:status', STARTUP_STATUS);
+		  logger.info({ job: 'startup' }, 'STARTUP_STATUS initialised');
+
 		  // Pre-establish Yahoo session cookie before scheduler jobs fire
 		  try {
 			await getYahooCookie();
 			logger.info("Yahoo session cookie pre-established at startup");
+		  STARTUP_STATUS.yahoo = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'yahoo' }, 'STARTUP_STATUS: yahoo complete');
                   // FRED: fetch immediately at startup
                   try {
                     if (typeof fetchFREDMacro === "function") {
                       await fetchFREDMacro();
                       logger.info("FRED macro fetched at startup");
+		  STARTUP_STATUS.fred = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'fred' }, 'STARTUP_STATUS: fred complete');
                   // BLS: fetch at startup, then daily (monthly data)
                   try {
                     if (typeof fetchBLSMacro === "function") {
                       await fetchBLSMacro();
                       logger.info("BLS macro fetched at startup");
+		  STARTUP_STATUS.bls = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'bls' }, 'STARTUP_STATUS: bls complete');
                   // FedRSS: fetch at startup
                   try {
                     if (typeof fetchFedRSS === "function") {
                       await fetchFedRSS();
                       logger.info("Fed RSS fetched at startup");
+		  STARTUP_STATUS.fedrss = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'fedrss' }, 'STARTUP_STATUS: fedrss complete');
                   // Global macro: run at startup to populate DXY/crude with floor values
                   try {
                     if (typeof buildGlobalMacroPayload === "function") {
                       await buildGlobalMacroPayload();
                       logger.info("Global macro payload built at startup");
+		  STARTUP_STATUS.globalMacro = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'globalMacro' }, 'STARTUP_STATUS: globalMacro complete');
                   // Debt cache: run at startup for immediate population
                   try {
                     if (typeof refreshDebtCache === "function") {
                       await refreshDebtCache();
                       logger.info("Debt cache built at startup");
+		  STARTUP_STATUS.debt = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'debt' }, 'STARTUP_STATUS: debt complete');
                     }
                   } catch(e) {
                     logger.warn({ err: e.message }, "Debt startup build failed");
