@@ -40,6 +40,38 @@ function buildNarrativeContext(cache){
     const topDrivers=moduleList.filter(m=>m.score>=55).map(m=>m.key);
     const weakestDrivers=moduleList.filter(m=>m.score<=40).map(m=>m.key);
     const vix=nseIdx.vixValue??null;
+    // P3-1: buildReasoningChain — FSD v8 Section 10.1
+    // Reads already-populated caches. Read-only. Zero compute risk.
+    // Produces factual signal chain for LLM context and narrative keyDrivers.
+    const _techSignals = cache.get("signals:technical") || {};
+    const _sigList = _techSignals.signals || [];
+    const _rsiSig  = _sigList.find(s => s.name && s.name.includes("RSI"));
+    const _macdSig = _sigList.find(s => s.name && s.name.includes("MACD"));
+    const _sma50Sig = _sigList.find(s => s.name && s.name.includes("50"));
+    const _sma200Sig = _sigList.find(s => s.name && s.name.includes("200"));
+    const _reasoningParts = [];
+    if (_rsiSig?.value !== undefined)  _reasoningParts.push(`RSI ${_rsiSig.value} (${_rsiSig.sentiment})`);
+    if (_macdSig)                      _reasoningParts.push(`MACD ${_macdSig.signal}`);
+    if (_sma50Sig)                     _reasoningParts.push(`50DMA ${_sma50Sig.signal}`);
+    if (_sma200Sig)                    _reasoningParts.push(`200DMA ${_sma200Sig.signal}`);
+    if (vix !== null)                  _reasoningParts.push(`India VIX ${vix}`);
+    if (fredMacro.us10YYield)          _reasoningParts.push(`US 10Y ${fredMacro.us10YYield}%`);
+    if (fredMacro.fedFundsRate)        _reasoningParts.push(`Fed Funds ${fredMacro.fedFundsRate}%`);
+    if (fredMacro.yieldCurveSignal)    _reasoningParts.push(`Yield curve ${fredMacro.yieldCurveSignal}`);
+    if (fredMacro.fedStance)           _reasoningParts.push(`Fed ${fredMacro.fedStance}`);
+    if (blsMacro.usUnemployment)       _reasoningParts.push(`US unemployment ${blsMacro.usUnemployment}%`);
+    if (fedRSS.overallTone)            _reasoningParts.push(`Fed tone ${fedRSS.overallTone}`);
+    const reasoningChain = _reasoningParts.length > 0
+      ? _reasoningParts.join(" | ")
+      : "Signal basis: live data insufficient for explicit chain";
+    const topSignalDrivers = [
+      _rsiSig  ? `RSI ${_rsiSig.value} — ${_rsiSig.sentiment}` : null,
+      _macdSig ? `MACD ${_macdSig.signal}` : null,
+      vix      ? `India VIX ${vix} — ${vix < 15 ? "calm" : vix < 22 ? "elevated" : "fear"}` : null,
+      fredMacro.us10YYield ? `US 10Y at ${fredMacro.us10YYield}% (${fredMacro.fedStance || "n/a"})` : null,
+      blsMacro.usUnemployment ? `US unemployment ${blsMacro.usUnemployment}%` : null,
+    ].filter(Boolean).slice(0, 4);
+
     return {
       compositeScore:regime.compositeScore??null,
       regime:regime.regime??null,
@@ -53,6 +85,7 @@ function buildNarrativeContext(cache){
       fallbackModules:sysConf.fallbackModules,
       staleModules:sysConf.staleModules,
       topDrivers,weakestDrivers,
+      reasoningChain, topSignalDrivers,
       includedModules:regime.includedModules||[],
       moduleCoverage:sysConf.moduleCoverage,
       volatilityState:vix===null?null:vix<15?"LOW":vix<22?"MODERATE":"HIGH",
@@ -208,6 +241,8 @@ AUTHORITATIVE SYSTEM STATE (DO NOT OVERRIDE):
 - Weakest Drivers: ${(ctx.weakestDrivers||[]).join(", ") || "none"}
 - Volatility: ${ctx.volatilityState || "unknown"}
 - Risk Flags: ${(ctx.riskFlags||[]).join(", ") || "none"}
+- Signal Basis: ${ctx.reasoningChain || "insufficient live data"}
+- Key Signal Drivers: ${(ctx.topSignalDrivers||[]).join(" | ") || "none"}
 - Macro: DXY ${ctx.macroState?.dxy||"n/a"}, Brent $${ctx.macroState?.crudeBrent||"n/a"}, Repo ${ctx.macroState?.repoRate||"n/a"}%\n- US Rates: 10Y ${ctx.macroState?.us10Y||"n/a"}%, Fed Funds ${ctx.macroState?.fedFundsRate||"n/a"}%, Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}\n- Fed Stance: ${ctx.macroState?.fedStance||"n/a"}, US Unemployment ${ctx.macroState?.usUnemployment||"n/a"}%
 ${degradedNote}
 
@@ -235,12 +270,13 @@ GOVERNANCE RULES:
 - You may NOT infer data not provided
 - You may NOT give specific stock recommendations
 - You MUST disclose any data quality limitations
+- keyDrivers MUST quote actual signal values from "Signal Basis" and "Key Signal Drivers" above — generic statements are not acceptable
 
 Respond ONLY with valid JSON (no markdown, no preamble):
 {
   "summary": "2-3 sentence market overview referencing the score and regime",
   "marketTone": "one of: CAUTIOUS|MEASURED|BALANCED|CONSTRUCTIVE|CONFIDENT",
-  "keyDrivers": ["max 3 short driver strings"],
+  "keyDrivers": ["max 3 short strings — MUST reference actual values from Signal Basis above e.g. RSI 42 bearish, VIX 17.9 elevated, US 10Y 4.57%"],
   "riskFlags": ["max 2 short risk strings"],
   "tacticalView": "1-2 sentence tactical positioning statement",
   "confidenceAlignment": true
