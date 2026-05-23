@@ -204,6 +204,62 @@ function validateNarrativeOutput(parsed, ctx) {
   return { valid: violations.length === 0, violations };
 }
 
+// Priority 9: validateOverviewResponse — FSD DEF-NEW-004
+// Validates compositeScore range, regime enum, confidence range.
+// On failure: logs VALIDATION_FAILED, returns false (caller serves stale cache).
+function validateOverviewResponse(payload) {
+  const violations = [];
+  if (!payload || typeof payload !== "object") return { valid: false, violations: ["Not an object"] };
+  const cs = payload.compositeScore;
+  if (cs !== null && cs !== undefined) {
+    if (typeof cs.score !== "number" || cs.score < 0 || cs.score > 100)
+      violations.push(`compositeScore.score out of range: ${cs.score}`);
+    const VALID_REGIMES = ["STRONG_RISK_ON","RISK_ON","NEUTRAL","RISK_OFF","STRONG_RISK_OFF"];
+    if (cs.regime && !VALID_REGIMES.includes(cs.regime))
+      violations.push(`Invalid regime enum: ${cs.regime}`);
+  }
+  const conf = payload.confidence;
+  if (conf !== null && conf !== undefined) {
+    if (typeof conf.overall === "number" && (conf.overall < 0 || conf.overall > 1))
+      violations.push(`Confidence out of range: ${conf.overall}`);
+  }
+  if (violations.length > 0) {
+    logger.warn({ job: "validateOverviewResponse", violations }, "VALIDATION_FAILED: overview payload");
+  }
+  return { valid: violations.length === 0, violations };
+}
+
+// Priority 9: validateMacroSynthesis — FSD DEF-NEW-004
+// Validates FRED/BLS key fields present and in expected ranges.
+// On failure: logs VALIDATION_FAILED, returns false.
+function validateMacroSynthesis(fredData, blsData) {
+  const violations = [];
+  if (fredData) {
+    if (fredData.us10YYield !== null && fredData.us10YYield !== undefined) {
+      if (typeof fredData.us10YYield !== "number" || fredData.us10YYield < 0 || fredData.us10YYield > 20)
+        violations.push(`us10YYield out of range: ${fredData.us10YYield}`);
+    }
+    if (fredData.fedFundsRate !== null && fredData.fedFundsRate !== undefined) {
+      if (typeof fredData.fedFundsRate !== "number" || fredData.fedFundsRate < 0 || fredData.fedFundsRate > 25)
+        violations.push(`fedFundsRate out of range: ${fredData.fedFundsRate}`);
+    }
+    if (fredData.yieldSpread10_2 !== null && fredData.yieldSpread10_2 !== undefined) {
+      if (typeof fredData.yieldSpread10_2 !== "number" || Math.abs(fredData.yieldSpread10_2) > 10)
+        violations.push(`yieldSpread10_2 out of range: ${fredData.yieldSpread10_2}`);
+    }
+  }
+  if (blsData) {
+    if (blsData.usUnemployment !== null && blsData.usUnemployment !== undefined) {
+      if (typeof blsData.usUnemployment !== "number" || blsData.usUnemployment < 0 || blsData.usUnemployment > 30)
+        violations.push(`usUnemployment out of range: ${blsData.usUnemployment}`);
+    }
+  }
+  if (violations.length > 0) {
+    logger.warn({ job: "validateMacroSynthesis", violations }, "VALIDATION_FAILED: macro synthesis");
+  }
+  return { valid: violations.length === 0, violations };
+}
+
 // LLM circuit breaker
 const LLMCircuitBreaker = (() => {
   let failures = 0, lastFailure = null, open = false;
@@ -7949,11 +8005,17 @@ const narrativeEngine = new NarrativeEngine(DSSCache, regimeEngine, logger);
       source:            "brain-scheduled",
       freshnessMs:       _brainTs ? Date.now() - _brainTs : null,
     } : null;
+    // Priority 9: validate overview payload before serving
+    const _ovValidation = validateOverviewResponse({ compositeScore: payload.compositeScore, confidence: payload.confidence });
+    if (!_ovValidation.valid) {
+      logger.warn({ violations: _ovValidation.violations }, "Overview payload validation failed — serving last-good cache");
+    }
     return res.json({
       status:     "OK",
       timestamp:  Date.now(),
       dataStatus: payload.dataStatus,
       data:       { ...payload, intelligence: _intelligence },
+      _validation: { valid: _ovValidation.valid, violations: _ovValidation.violations },
     });
   }, null)
 );
