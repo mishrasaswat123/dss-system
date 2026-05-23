@@ -8438,6 +8438,8 @@ app.get("/health", (req, res) => {
                           sources:_enhSrc,
                           confidence:_sc2?{overall:_sc2.overall,classification:_sc2.classification,fallbackModules:_sc2.fallbackModules,staleModules:_sc2.staleModules,drivers:_sc2.drivers}:null,
                           metrics:{modulesIncluded:_inc2,modulesTotal:6,modulesCoverage:Math.round((_inc2/6)*100),staleSources:_st2,compositeScore:_reg2.compositeScore||null,regime:_reg2.regime||null,activeWeightSum:_reg2.activeWeightSum||null,uptimeMin:Math.round(process.uptime()/60),overallConfidence:_sc2?.overall||null,confClassification:_sc2?.classification||null},
+                          startupStatus: DSSCache.get("startup:status") || null,
+                          monetaryPolicy: DSSCache.get("monetary:policy") ? { repoRate: DSSCache.get("monetary:policy").repoRate, stance: DSSCache.get("monetary:policy").stance, lastUpdated: DSSCache.get("monetary:policy").lastUpdated, isStale: DSSCache.get("monetary:policy").isStale, dataStatus: DSSCache.get("monetary:policy").dataStatus } : null,
                           deprecated_endpoints:[],alerts
                         });
 		  } catch (err) {
