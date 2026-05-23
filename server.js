@@ -3828,20 +3828,56 @@ class RegimeEngine {
       ? Math.round((weightedSum / activeWeightSum) * 10) / 10
       : 50;
 
-    const regime = compositeScore >= 70 ? "STRONG_RISK_ON"
-                 : compositeScore >= 55 ? "RISK_ON"
-                 : compositeScore >= 45 ? "NEUTRAL"
-                 : compositeScore >= 30 ? "RISK_OFF"
+    // P2-B: FRED/BLS/FedRSS macro modifier (v8 FSD Section 8 Priority 2c)
+    // Bounded ±8pt adjustment applied after weighted module average.
+    // Prevents US macro layer from dominating India-specific signals.
+    const _fred = this._cache.get("macro:fred") || {};
+    const _bls  = this._cache.get("macro:bls")  || {};
+    const _rss  = this._cache.get("macro:fedrss") || {};
+    let _macroMod = 0;
+    const _macroModLog = [];
+    // Yield curve signal (FRED T10Y2Y)
+    const _spread = _fred.yieldSpread10_2 ?? null;
+    if (_spread !== null) {
+      if (_spread < -0.20) { _macroMod -= 5; _macroModLog.push("YIELD_INVERTED:-5"); }
+      else if (_spread > 0.50) { _macroMod += 3; _macroModLog.push("YIELD_STEEP:+3"); }
+    }
+    // Fed funds rate (FRED FEDFUNDS)
+    const _fedRate = _fred.fedFundsRate ?? null;
+    if (_fedRate !== null) {
+      if (_fedRate >= 5.00) { _macroMod -= 3; _macroModLog.push("FED_RESTRICTIVE:-3"); }
+      else if (_fedRate < 2.00) { _macroMod += 3; _macroModLog.push("FED_ACCOMMODATIVE:+3"); }
+    }
+    // Labor signal (BLS UNRATE — prefer BLS, fallback to FRED)
+    const _unemp = _bls.usUnemployment ?? _fred.usUnemployment ?? null;
+    if (_unemp !== null) {
+      if (_unemp <= 4.0) { _macroMod += 2; _macroModLog.push("LABOR_STRONG:+2"); }
+      else if (_unemp > 5.5) { _macroMod -= 3; _macroModLog.push("LABOR_WEAK:-3"); }
+    }
+    // Fed tone (FedRSS)
+    const _fedTone = _rss.overallTone ?? null;
+    if (_fedTone === "HAWKISH") { _macroMod -= 2; _macroModLog.push("FED_HAWKISH:-2"); }
+    else if (_fedTone === "DOVISH") { _macroMod += 2; _macroModLog.push("FED_DOVISH:+2"); }
+    // Hard cap ±8 — macro cannot dominate India signals
+    _macroMod = Math.max(-8, Math.min(8, _macroMod));
+    const compositeScoreRaw = compositeScore;
+    const compositeScoreFinal = Math.round((compositeScore + _macroMod) * 10) / 10;
+
+
+    const regime = compositeScoreFinal >= 70 ? "STRONG_RISK_ON"
+                 : compositeScoreFinal >= 55 ? "RISK_ON"
+                 : compositeScoreFinal >= 45 ? "NEUTRAL"
+                 : compositeScoreFinal >= 30 ? "RISK_OFF"
                  : "STRONG_RISK_OFF";
 
-    const regimeLabel = compositeScore >= 70 ? "STRONGLY BULLISH"
-                      : compositeScore >= 55 ? "BULLISH"
-                      : compositeScore >= 45 ? "CAUTIOUSLY NEUTRAL"
-                      : compositeScore >= 30 ? "BEARISH"
+    const regimeLabel = compositeScoreFinal >= 70 ? "STRONGLY BULLISH"
+                      : compositeScoreFinal >= 55 ? "BULLISH"
+                      : compositeScoreFinal >= 45 ? "CAUTIOUSLY NEUTRAL"
+                      : compositeScoreFinal >= 30 ? "BEARISH"
                       : "STRONGLY BEARISH";
 
-    const actionBias = compositeScore >= 55 ? "Overweight equities; reduce cash"
-                     : compositeScore >= 45 ? "Balanced; await confirmation"
+    const actionBias = compositeScoreFinal >= 55 ? "Overweight equities; reduce cash"
+                     : compositeScoreFinal >= 45 ? "Balanced; await confirmation"
                      : "Tilt toward debt and gold; reduce equity";
 
     const includedModules = Object.entries(modules)
@@ -3849,7 +3885,8 @@ class RegimeEngine {
       .map(([name]) => name.replace("global_", "global"));
 
     const result = {
-      compositeScore, regime, regimeLabel, actionBias, includedModules,
+      compositeScore: compositeScoreFinal, regime, regimeLabel, actionBias, includedModules,
+      compositeScoreRaw, macroModifier: _macroMod, macroModifierLog: _macroModLog,
       activeWeightSum: Math.round(activeWeightSum * 1000) / 1000,
       moduleScores: {
         equity: equity.score, technical: technical.score, global: global_.score,
