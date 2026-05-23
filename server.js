@@ -556,7 +556,18 @@ async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = 
     };
   }
 
-  const ctx = buildNarrativeContext(DSSCache);
+  // FSD 11.3: Phase 7 — supplement narrative context with brain:latest
+  const _brainSupplement = DSSCache.get("brain:latest") || null;
+  const ctx = {
+    ...buildNarrativeContext(DSSCache),
+    // brain:latest enrichment — adds intelligence fields not in base context
+    brainIntelligence: _brainSupplement ? {
+      macroModifier:    _brainSupplement.macroModifier    ?? null,
+      macroModifierLog: _brainSupplement.macroModifierLog ?? [],
+      activeWeightSum:  _brainSupplement.activeWeightSum  ?? null,
+      scheduledAt:      _brainSupplement.scheduledAt      ?? null,
+    } : null,
+  };
   const provider = LLM_CONFIG.provider;
   let raw = null, fallbackUsed = false, governanceViolations = [], latencyMs = 0;
   const promptMeta = buildNarrativePrompt(ctx, audience, riskProfile);
@@ -7896,13 +7907,29 @@ const narrativeEngine = new NarrativeEngine(DSSCache, regimeEngine, logger);
 
 		app.get("/api/v1/overview", (req, res) =>
   safeExecuteAsync(async () => {
+    // FSD 11.3: Phase 7 — overview reads brain:latest for intelligence layer
     const cached = DSSCache.get("overview:compiled");
     const payload = cached || overviewEngine.build();
+    const _brainLatest = DSSCache.get("brain:latest") || null;
+    const _brainTs     = DSSCache.get("brain:ts")     || null;
+    const _intelligence = _brainLatest ? {
+      compositeScore:    _brainLatest.compositeScore,
+      regime:            _brainLatest.regime,
+      regimeLabel:       _brainLatest.regimeLabel,
+      actionBias:        _brainLatest.actionBias,
+      macroModifier:     _brainLatest.macroModifier     ?? null,
+      compositeScoreRaw: _brainLatest.compositeScoreRaw ?? null,
+      macroModifierLog:  _brainLatest.macroModifierLog  ?? [],
+      activeWeightSum:   _brainLatest.activeWeightSum   ?? null,
+      scheduledAt:       _brainLatest.scheduledAt       ?? null,
+      source:            "brain-scheduled",
+      freshnessMs:       _brainTs ? Date.now() - _brainTs : null,
+    } : null;
     return res.json({
       status:     "OK",
       timestamp:  Date.now(),
       dataStatus: payload.dataStatus,
-      data:       payload,
+      data:       { ...payload, intelligence: _intelligence },
     });
   }, null)
 );
