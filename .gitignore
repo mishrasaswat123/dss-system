@@ -46,3 +46,5 @@ ema50
 data/
 server_D24_backup.js
 ecosystem.config.js
+
+!data/monetary-policy.json
