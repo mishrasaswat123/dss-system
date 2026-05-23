@@ -426,6 +426,8 @@ Respond ONLY with valid JSON — no markdown, no preamble:
   "keyDrivers": ["driver 1", "driver 2", "driver 3"],
   "riskFlags": ["risk 1", "risk 2"],
   "tacticalView": "1-2 sentence positioning statement in this audience's language",
+  "macroContext": "1 sentence — most relevant US/global macro factor and its India transmission implication. Include only if FRED/BLS data available.",
+  "confidenceNote": "1 sentence — limiting factor on confidence. Include ONLY if system confidence below 0.60. Omit entirely if confidence >= 0.60.",
   "confidenceAlignment": true
 }`;
 
@@ -593,6 +595,53 @@ async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = 
 
   latencyMs = Date.now() - t0;
 
+  // FSD 10.2: deterministic confidenceNote — present only when confidence < 0.60
+  const _confNote = ctx.confidence < 0.60
+    ? (() => {
+        const _fb = (ctx.fallbackModules||[]);
+        if (ctx.confidence < 0.40) return `Signal confidence is limited — ${_fb.length > 0 ? _fb.join(", ") + " using estimated values" : "multiple data sources degraded"}. Exercise additional caution in advisory use.`;
+        return `Signal confidence is moderate — ${_fb.length > 0 ? _fb.join(", ") + " using estimated values" : "some inputs are estimated"}. Full confirmation pending additional live data.`;
+      })()
+    : null;
+
+  // FSD 10.2: deterministic macroContext — strongest active US→India transmission signal
+  const _macroCtx = (() => {
+    const _fred = DSSCache.get("macro:fred") || {};
+    const _bls  = DSSCache.get("macro:bls")  || {};
+    const _rss  = DSSCache.get("macro:fedrss") || {};
+    const _glob = DSSCache.get("equity:global") || {};
+    if (!_fred.us10YYield && !_glob.dxy && !_glob.crudeOil) return null;
+    // Select the strongest transmission signal
+    const _spread = _fred.yieldSpread10_2 ?? null;
+    const _us10Y  = _fred.us10YYield ?? null;
+    const _dxy    = _glob.dxy ?? null;
+    const _crude  = _glob.crudeOil ?? null;
+    const _tone   = _rss.overallTone ?? null;
+    if (_spread !== null && _spread < -0.20)
+      return `US yield curve is inverted (spread ${_spread.toFixed(2)}%) — historically a recession warning signal that typically dampens EM risk appetite and FII flows into India.`;
+    if (_us10Y !== null && _us10Y > 4.5)
+      return `Elevated US 10-year yield at ${_us10Y}% raises the global risk-free rate benchmark, compressing India equity valuations and increasing the hurdle rate for FII allocations.`;
+    if (_tone === "HAWKISH")
+      return `US Federal Reserve communications reflect a hawkish policy stance, signalling tighter liquidity conditions that typically reduce appetite for emerging market risk assets including India.`;
+    if (_dxy !== null && _dxy > 106)
+      return `A strong US Dollar (DXY ${_dxy}) typically triggers FII outflows from India as emerging market assets become less attractive in dollar terms.`;
+    if (_crude !== null && _crude > 90)
+      return `Elevated Brent crude at $${_crude}/bbl pressures India's current account deficit, adding macro headwind to equity market performance.`;
+    if (_dxy !== null && _dxy < 102)
+      return `A weaker US Dollar (DXY ${_dxy}) is supportive for India — typically associated with FII inflows and improved EM risk appetite.`;
+    if (_crude !== null && _crude < 75)
+      return `Declining Brent crude at $${_crude}/bbl relieves pressure on India's current account deficit, providing a positive macro tailwind for equity markets.`;
+    if (_us10Y !== null)
+      return `US 10-year yield at ${_us10Y}% is within a range that provides moderate support for EM valuations, with no acute pressure on India equity risk premium currently.`;
+    return null;
+  })();
+
+  // Inject deterministic fields into raw if not already provided by LLM
+  if (raw) {
+    if (!raw.confidenceNote && _confNote) raw = { ...raw, confidenceNote: _confNote };
+    if (!raw.macroContext   && _macroCtx) raw = { ...raw, macroContext:   _macroCtx };
+  }
+
   const narrativeMeta = {
     provider:            fallbackUsed ? "rulebased" : provider,
     model:               fallbackUsed ? null : LLM_CONFIG.model,
@@ -608,6 +657,8 @@ async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = 
     generatedAt:         Date.now(),
     contextConfidence:   ctx.confidence,
     contextRegime:       ctx.regime,
+    confidenceNotePresent: !!_confNote,
+    macroContextPresent:   !!_macroCtx,
   };
 
   logger.info({ job: "narrative-generate", provider: narrativeMeta.provider, fallback: fallbackUsed, latencyMs }, "Narrative generated");
