@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "description": "ADVISIQ DSS — Governed Monetary Policy Configuration Layer",
+    "version": "1.0",
+    "purpose": "Authoritative source for India monetary policy parameters. Updated manually on each RBI MPC announcement. No reliable zero-cost programmatic source exists for India repo rate from EC2.",
+    "updateInstructions": "Update repoRate, stances, and lastUpdated on each RBI MPC announcement. Typical frequency: every 6-8 weeks.",
+    "nextMPCExpected": "2026-08-06",
+    "dataStatus": "governed-config"
+  },
+  "india": {
+    "repoRate": 6.0,
+    "reverseRepoRate": 3.35,
+    "crr": 4.0,
+    "slr": 18.0,
+    "stance": "ACCOMMODATIVE",
+    "lastChanged": "2026-04-09",
+    "lastUpdated": "2026-05-23",
+    "changeFromPrevious": -0.25,
+    "rateDirection": "CUTTING",
+    "policyNote": "RBI cut repo rate by 25bps to 6.00% in April 2026 MPC. Stance changed to accommodative.",
+    "source": "RBI MPC April 2026",
+    "confidence": 0.95,
+    "staleAfterDays": 60
+  },
+  "cpi": {
+    "latest": 3.34,
+    "target": 4.0,
+    "band": [2.0, 6.0],
+    "lastUpdated": "2026-05-12",
+    "source": "MoSPI April 2026",
+    "confidence": 0.90,
+    "staleAfterDays": 35
+  }
+}

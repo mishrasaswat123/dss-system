@@ -3590,6 +3590,30 @@ const fiiDebtSell = Number(
 	  try {
 
 		// Fetch live G-Sec yields from Trading Economics
+		// FSD Priority 7: RBI RSS G-Sec attempt (before TE fetch)
+		let _rbiYieldData = null;
+		try {
+		  const _rbiRss = await fetch("https://rbi.org.in/scripts/rss.aspx?Id=316", {
+		    headers: { "User-Agent": "Mozilla/5.0 (compatible; ADVISIQ/1.0)" },
+		    signal: AbortSignal.timeout(8000)
+		  });
+		  if (_rbiRss.ok) {
+		    const _rbiText = await _rbiRss.text();
+		    const _repoPattern = /repo\s+rate[^0-9]*([0-9]+\.?[0-9]*)\s*(?:per\s*cent|%)/i;
+		    const _repoMatch = _rbiText.match(_repoPattern);
+		    if (_repoMatch && _repoMatch[1]) {
+		      const _parsedRate = parseFloat(_repoMatch[1]);
+		      if (_parsedRate >= 4.0 && _parsedRate <= 10.0) {
+		        _rbiYieldData = { repoRate: _parsedRate, source: "rbi-rss-live" };
+		        logger.info({ repoRate: _parsedRate }, "P7: RBI RSS repo rate parsed");
+		      }
+		    }
+		    if (!_rbiYieldData) logger.info("P7: RBI RSS fetched — no parseable rate — TE fallback active");
+		  }
+		} catch(e) {
+		  logger.warn({ err: e.message }, "P7: RBI RSS failed — TE fallback active");
+		}
+
 		const [gsec10Y, gsec5Y, gsec2Y] = await Promise.all([
 		  fetchTEYield("https://tradingeconomics.com/india/government-bond-yield", "10Y"),
 		  fetchTEYield("https://tradingeconomics.com/india/5-year-note-yield", "5Y"),
@@ -3610,8 +3634,8 @@ const fiiDebtSell = Number(
 		}
 
 		return {
-		  repoRate: 6.5,
-		  repoRateSource: "hardcoded",
+		  repoRate: _rbiYieldData?.repoRate ?? (DSSCache.get("monetary:policy")?.repoRate ?? 6.0),
+		  repoRateSource: _rbiYieldData ? "rbi-rss-live" : (DSSCache.get("monetary:policy")?.dataStatus ?? "governed-config"),
 		  cpi: 4.75,
 		  cpiSource: "hardcoded",
 		  gsec10Y: gsec10YResolved,
@@ -8952,6 +8976,39 @@ app.get("/health", (req, res) => {
 
 		app.listen(PORT, async () => {
 		  logger.info(`DSS running on port ${PORT} (${VERSION})`);
+
+		  // P7: Governed Monetary Policy Configuration Layer
+		  // Loads monetary-policy.json at startup — authoritative source for India repo rate.
+		  // No reliable zero-cost programmatic source exists from EC2 — governed config is correct architectural choice.
+		  try {
+		    const _mpRaw = require("fs").readFileSync("/home/ubuntu/dss-system/data/monetary-policy.json", "utf8");
+		    const _mpParsed = JSON.parse(_mpRaw);
+		    const _mpIndia = _mpParsed.india || {};
+		    const _mpAgeDays = (Date.now() - new Date(_mpIndia.lastUpdated || "2026-01-01").getTime()) / 86400000;
+		    const _mpIsStale = _mpAgeDays > (_mpIndia.staleAfterDays || 60);
+		    const _mpConf = _mpIsStale ? 0.65 : (_mpIndia.confidence || 0.95);
+		    const _mpPayload = {
+		      repoRate:        _mpIndia.repoRate        || 6.0,
+		      reverseRepoRate: _mpIndia.reverseRepoRate || 3.35,
+		      crr:             _mpIndia.crr             || 4.0,
+		      stance:          _mpIndia.stance          || "NEUTRAL",
+		      rateDirection:   _mpIndia.rateDirection   || "UNKNOWN",
+		      lastChanged:     _mpIndia.lastChanged     || null,
+		      lastUpdated:     _mpIndia.lastUpdated     || null,
+		      policyNote:      _mpIndia.policyNote      || null,
+		      source:          _mpIndia.source          || "governed-config",
+		      ageDays:         Math.round(_mpAgeDays),
+		      isStale:         _mpIsStale,
+		      confidence:      _mpConf,
+		      dataStatus:      _mpIsStale ? "governed-config-stale" : "governed-config",
+		    };
+		    DSSCache.set("monetary:policy", _mpPayload);
+		    logger.info({ repoRate: _mpPayload.repoRate, stance: _mpPayload.stance, ageDays: Math.round(_mpAgeDays), isStale: _mpIsStale }, "Monetary policy config loaded from governed-config");
+		  } catch(e) {
+		    logger.warn({ err: e.message }, "Monetary policy config load failed — hardcoded fallback 6.0");
+		    DSSCache.set("monetary:policy", { repoRate: 6.0, stance: "NEUTRAL", confidence: 0.70, dataStatus: "hardcoded", source: "hardcoded-fallback" });
+		  }
+
 
 		  // P3-4: STARTUP_STATUS — tracks each startup step for observability
 		  const STARTUP_STATUS = {
