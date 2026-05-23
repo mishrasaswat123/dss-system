@@ -228,93 +228,207 @@ const LLMCircuitBreaker = (() => {
 function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
   const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
   const degradedNote = ctx.fallbackModules?.length > 0
-    ? `DATA NOTE: ${ctx.fallbackModules.join(", ")} modules using fallback values. Reflect appropriate uncertainty.`
+    ? `DATA NOTE: ${ctx.fallbackModules.join(", ")} modules on fallback — reflect uncertainty.`
     : "";
-  const prompt = `You are a deterministic market intelligence summariser for ADVISIQ DSS, an Indian equity decision support system.
 
-AUTHORITATIVE SYSTEM STATE (DO NOT OVERRIDE):
-- Composite Score: ${ctx.compositeScore}/100
-- Regime: ${ctx.regime} (${ctx.regimeLabel || ctx.regime})
-- Confidence: ${Math.round((ctx.confidence||0)*100)}% (${ctx.confidenceClass || "UNKNOWN"})
-- Action Bias: ${ctx.actionBias || "Balanced"}
-- Top Drivers: ${(ctx.topDrivers||[]).join(", ") || "none"}
-- Weakest Drivers: ${(ctx.weakestDrivers||[]).join(", ") || "none"}
-- Volatility: ${ctx.volatilityState || "unknown"}
-- Risk Flags: ${(ctx.riskFlags||[]).join(", ") || "none"}
-- Signal Basis: ${ctx.reasoningChain || "insufficient live data"}
-- Key Signal Drivers: ${(ctx.topSignalDrivers||[]).join(" | ") || "none"}
-- Macro: DXY ${ctx.macroState?.dxy||"n/a"}, Brent $${ctx.macroState?.crudeBrent||"n/a"}, Repo ${ctx.macroState?.repoRate||"n/a"}%\n- US Rates: 10Y ${ctx.macroState?.us10Y||"n/a"}%, Fed Funds ${ctx.macroState?.fedFundsRate||"n/a"}%, Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}\n- Fed Stance: ${ctx.macroState?.fedStance||"n/a"}, US Unemployment ${ctx.macroState?.usUnemployment||"n/a"}%
+  // Audience communication contracts — 10-point behavioral spec per segment
+  const AUDIENCE_CONTRACTS = {
+    "IFA Advisory Pitch": {
+      who: "Independent Financial Advisor briefing retail clients today",
+      objective: "Give the IFA a clear, confident posture they can relay verbatim to a client",
+      language: "Plain English. No jargon. Short sentences. Think: trusted advisor on a phone call.",
+      forbidden: "RSI, MACD, DMA, EMA, Bollinger, basis points, yield spread, technical indicator names or raw values",
+      translate: "Momentum weakening not RSI 39. Market anxious not VIX 17.9. US rates a headwind not 10Y at 4.57%.",
+      keyDrivers: "3 plain-English reasons why the market feels the way it does. Client-ready.",
+      tacticalView: "One actionable allocation posture the IFA can recommend. Concrete and simple.",
+      tone: "Warm, confident, reassuring or cautionary as regime warrants. No hedging every sentence.",
+    },
+    "Retail Investor": {
+      who: "Individual retail investor making their own decisions",
+      objective: "Help them understand what the market is doing and what to do with their SIP/portfolio",
+      language: "Everyday language. Relatable analogies. Avoid all financial jargon.",
+      forbidden: "All technical indicators, macro acronyms, institutional terminology",
+      translate: "Market is cautious not NEUTRAL regime. Good time to keep investing steadily not staggered deployment.",
+      keyDrivers: "3 simple reasons in everyday language. Why should a regular person care?",
+      tacticalView: "Stay invested / reduce / accumulate — in plain words with a simple reason.",
+      tone: "Encouraging, honest, calm. Never alarmist. Never condescending.",
+    },
+    "HNI Investor": {
+      who: "High Net Worth Individual with financial literacy, managing significant personal wealth",
+      objective: "Regime-aware positioning advice with tax and concentration awareness",
+      language: "Semi-professional. Can use allocation terms (equity/debt/gold). Avoid deep quant jargon.",
+      forbidden: "Raw technical indicator values, quant terminology, derivative Greeks",
+      translate: "Selling pressure building not MACD bearish. Elevated nervousness not VIX 17.9.",
+      keyDrivers: "3 market dynamics relevant to portfolio allocation decisions.",
+      tacticalView: "Portfolio posture — equity tilt, cash level, defensive allocation. Wealth-aware language.",
+      tone: "Confident, sophisticated but accessible. Peer-to-peer advisory feel.",
+    },
+    "Family Office Risk Brief": {
+      who: "Family Office CIO or investment committee reviewing portfolio risk",
+      objective: "Regime-aware risk budget assessment — what is the downside, what needs protecting",
+      language: "Formal, institutional, risk-first. Committee memo style.",
+      forbidden: "Technical indicator names and raw values, speculative language, retail framing",
+      translate: "Downside momentum building not MACD sell. Investor nervousness elevated not VIX 17.9. Rates a valuation headwind not US 10Y 4.57%.",
+      keyDrivers: "3 specific risk signals framed as portfolio risk factors. What threatens capital preservation?",
+      tacticalView: "Risk budget recommendation — reduce/maintain/deploy. Asset class tilts. Capital protection first.",
+      tone: "Sober, measured, accountable. Every sentence defensible in a committee meeting.",
+    },
+    "Private Banker Advisory": {
+      who: "Private Banker serving UHNW clients with multi-asset portfolios",
+      objective: "Institutional-grade narrative suitable for client advisory conversations",
+      language: "Goldman Sachs weekly note style. Precise, authoritative, narrative-grade.",
+      forbidden: "Retail framing, raw technical values, generic phrases like await confirmation",
+      translate: "Short-term trend has reversed not MACD sell. Elevated market risk premium not VIX 17.9. Monetary tightening cycle constraining multiples not Fed restrictive.",
+      keyDrivers: "3 macro and market dynamics at institutional communication level. Name the mechanism not just the indicator.",
+      tacticalView: "Risk-adjusted positioning with nuance. Opportunity vs risk framing. Sophisticated.",
+      tone: "Authoritative, measured, institutional. Conveys expertise and judgment.",
+    },
+    "Advanced Investor Dashboard": {
+      who: "Sophisticated self-directed investor who reads raw signals directly",
+      objective: "Signal-level synthesis — what do the indicators say together that they don't say alone",
+      language: "Direct, analytical, quantitative. Name indicators explicitly with values.",
+      forbidden: "Generic summaries, vague language, anything a retail investor would need explained",
+      translate: "Do NOT translate. RSI 39.13 is correct. VIX 17.91 is correct. US 10Y 4.57% is correct.",
+      keyDrivers: "3 specific signal readings with values and directional implications. Name the tension if signals conflict.",
+      tacticalView: "Tactical entry/exit posture based on regime + technical confluence. Specific.",
+      tone: "Terse, precise, signal-first. Respect the reader's expertise.",
+    },
+    "Institutional Strategy Desk": {
+      who: "Buy-side or sell-side strategist building market views for internal distribution",
+      objective: "Regime characterisation with macro transmission and factor-level signal synthesis",
+      language: "Full institutional vocabulary. Cross-asset, factor-aware, regime-framed.",
+      forbidden: "Retail language, vague posture statements, generic recommendations",
+      translate: "Do NOT translate. Use precise institutional language throughout.",
+      keyDrivers: "3 factor-level or macro-level signals with directional regime implication.",
+      tacticalView: "Factor tilt recommendation — growth/value/defensive, duration, EM positioning.",
+      tone: "Analytical, precise, internally consistent. Research-note quality.",
+    },
+    "Conservative Retiree": {
+      who: "Retired individual focused on capital preservation and income, low risk tolerance",
+      objective: "Reassure or caution — is the market safe enough for their savings?",
+      language: "Simple, warm, reassuring. No jargon whatsoever. Income and safety framing.",
+      forbidden: "All technical terms, macro jargon, aggressive deployment language",
+      translate: "Markets are calm and relatively stable not LOW volatility. Your investments are likely stable not NEUTRAL regime.",
+      keyDrivers: "3 simple observations about market safety and stability. Income-preservation lens.",
+      tacticalView: "Stay in safe assets / modest equity exposure / income focus. Preservation-first.",
+      tone: "Calm, reassuring, protective. Never alarming. Never pushes risk-taking.",
+    },
+    "Aggressive Growth Investor": {
+      who: "High-conviction growth investor willing to take concentrated positions for upside",
+      objective: "Where is the opportunity? What signals support or undermine a bullish thesis?",
+      language: "Direct, opportunity-focused, willing to name upside and downside explicitly.",
+      forbidden: "Overly cautious hedging, capital preservation framing, defensive language unless regime demands",
+      translate: "Momentum fading is fine to say. Buying pressure building is fine. Be direct about signal direction.",
+      keyDrivers: "3 signals that either support or challenge the growth thesis. Honest about conflicts.",
+      tacticalView: "Tactical allocation — where to add, where to trim, what the regime supports.",
+      tone: "Energetic, direct, conviction-driven. Honest about risk but focused on opportunity.",
+    },
+  };
+
+  const contract = AUDIENCE_CONTRACTS[audience] || AUDIENCE_CONTRACTS["IFA Advisory Pitch"];
+
+  const regimeFrame =
+    (ctx.compositeScore||50) >= 65 ? "BULLISH: Strong momentum. Story is about measured participation before conviction builds further." :
+    (ctx.compositeScore||50) >= 55 ? "MILD BULLISH: Leaning positive, not decisively. Story is selective deployment — quality over quantity." :
+    (ctx.compositeScore||50) >= 48 ? "BALANCED: Range-bound, no directional conviction. Story is patience — preserve optionality, watch for regime break." :
+    (ctx.compositeScore||50) >= 38 ? "MILD DEFENSIVE: Early stress signals. Story is gradual reduction — tilt to quality, keep powder dry." :
+    "DEFENSIVE: Clear pressure. Story is capital preservation — reduce equity, increase defensive allocation.";
+
+  // 15-combination audience x risk profile behavioral matrix
+  const RISK_PROFILE_BY_AUDIENCE = {
+    "IFA Advisory Pitch": {
+      Conservative: "Client is risk-averse. IFA must reassure — emphasise stability, SIP continuity, avoid any language suggesting volatility or loss. No aggressive deployment.",
+      Moderate:     "Client wants steady growth. IFA recommends staggered deployment, balanced equity-debt mix. Avoid extremes in either direction.",
+      Aggressive:   "Client wants growth. IFA can recommend overweight equity, tactical deployment on dips. Upside language appropriate if regime supports.",
+    },
+    "Retail Investor": {
+      Conservative: "Investor is nervous about losing money. Keep it simple and reassuring. SIP is safe. No dramatic language.",
+      Moderate:     "Investor wants their money to grow steadily. Stay invested message. Calm, encouraging.",
+      Aggressive:   "Investor wants maximum growth. Can discuss adding to equity, buying on dips. Enthusiastic but honest about risk.",
+    },
+    "HNI Investor": {
+      Conservative: "HNI prioritises capital protection over returns. Recommend quality large-caps, sovereign bonds, gold allocation. Avoid concentrated bets.",
+      Moderate:     "HNI wants growth with protection. Balanced tilt — quality equity, some debt, tactical gold. Staggered deployment.",
+      Aggressive:   "HNI is comfortable with concentration and risk. Can discuss tactical themes, mid-cap exposure, sector tilts where regime supports.",
+    },
+    "Family Office Risk Brief": {
+      Conservative: "Committee is in capital preservation mode. Every recommendation must have downside protection rationale. Risk budget is tight.",
+      Moderate:     "Committee is balancing preservation and growth. Selective deployment, quality bias, diversified across asset classes.",
+      Aggressive:   "Committee is in growth deployment mode. Can discuss equity overweight, thematic exposure, tactical leverage where regime supports.",
+    },
+    "Private Banker Advisory": {
+      Conservative: "UHNW client wants wealth protection. Emphasise downside risk management, alternatives, capital preservation structures. Measured language.",
+      Moderate:     "UHNW client wants risk-adjusted growth. Balanced multi-asset approach. Institutional quality language throughout.",
+      Aggressive:   "UHNW client is seeking alpha. Can discuss concentrated equity, thematic bets, tactical deployment. Sophisticated upside framing.",
+    },
+    "Advanced Investor Dashboard": {
+      Conservative: "Sophisticated investor is in risk-off mode personally. Show signal conflicts. Flag downside risks explicitly. Technical precision.",
+      Moderate:     "Sophisticated investor wants balanced signal read. Show both bull and bear case from signals. Let them decide.",
+      Aggressive:   "Sophisticated investor is hunting for entries. Highlight bullish signals, name where momentum could build. Direct and conviction-driven.",
+    },
+    "Institutional Strategy Desk": {
+      Conservative: "Desk is in defensive positioning mode. Factor tilts toward quality, low-vol, short duration. EM underweight rationale.",
+      Moderate:     "Desk is benchmark-aware. Balanced factor exposure. Duration neutral. EM positioning per regime signal.",
+      Aggressive:   "Desk is risk-on. Growth over value, long duration if yield curve supports, EM overweight if global signals constructive.",
+    },
+    "Conservative Retiree": {
+      Conservative: "Retiree is extremely risk-averse. Income and capital safety only. Any volatility mention must be immediately reassured.",
+      Moderate:     "Retiree wants modest growth without sleepless nights. Steady income focus, small equity exposure for inflation protection.",
+      Aggressive:   "Retiree willing to take some risk for better returns. Can suggest modest equity tilt but always with capital safety as anchor.",
+    },
+    "Aggressive Growth Investor": {
+      Conservative: "Growth investor is temporarily cautious. Acknowledge the pullback, identify re-entry signals, maintain growth thesis but protect capital short-term.",
+      Moderate:     "Growth investor wants selective deployment. Quality growth names, staggered entry, watch for momentum confirmation.",
+      Aggressive:   "Growth investor is fully risk-on. Maximum equity deployment where regime supports. Name the opportunity directly. Conviction language.",
+    },
+    "Wealth Manager Synthesis": {
+      Conservative: "Wealth manager's book is in defensive mode. Cross-asset tilt toward debt and gold. Equity underweight with quality bias.",
+      Moderate:     "Wealth manager running balanced book. Equity-debt-gold allocation with regime-aware tilts. Staggered rebalancing.",
+      Aggressive:   "Wealth manager is deploying aggressively. Equity overweight, reduce debt, tactical gold. Cross-asset momentum framing.",
+    },
+  };
+  const _audienceRiskMap = RISK_PROFILE_BY_AUDIENCE[audience] || RISK_PROFILE_BY_AUDIENCE["IFA Advisory Pitch"];
+  const riskCtx = _audienceRiskMap[riskProfile] || _audienceRiskMap["Moderate"];
+
+  const prompt = `You are ADVISIQ DSS — a deterministic Indian equity market intelligence system. Generate a narrative for the audience below. Follow all contracts exactly.
+
+MARKET STATE:
+- Score: ${ctx.compositeScore}/100 | Regime: ${ctx.regime} (${ctx.regimeLabel||ctx.regime}) | Confidence: ${Math.round((ctx.confidence||0)*100)}%
+- Action Bias: ${ctx.actionBias||"Balanced"} | Volatility: ${ctx.volatilityState||"unknown"}
+- Signal Basis: ${ctx.reasoningChain||"insufficient data"}
+- Risk Flags: ${(ctx.riskFlags||[]).join(", ")||"none"}
+- Macro: Repo ${ctx.macroState?.repoRate||"n/a"}% | US 10Y ${ctx.macroState?.us10Y||"n/a"}% | DXY ${ctx.macroState?.dxy||"n/a"} | Brent $${ctx.macroState?.crudeBrent||"n/a"} | Fed ${ctx.macroState?.fedStance||"n/a"} | Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}
 ${degradedNote}
 
-TONE DIRECTIVE: ${tone} — ${tone==="CAUTIOUS"?"Use measured, uncertainty-disclosing language":tone==="MEASURED"?"Use balanced, analytical language":"Use clear, direct analytical language"}
+REGIME FRAME: ${regimeFrame}
+RISK PROFILE: ${riskCtx}
 
-AUDIENCE: ${audience}
-RISK PROFILE: ${riskProfile}
-RISK PROFILE CONTEXT: ${
-  riskProfile==="Conservative"?"Client has low risk tolerance. Emphasise capital preservation, downside protection, and defensive positioning. Avoid language suggesting aggressive deployment.":
-  riskProfile==="Aggressive"?"Client has high risk tolerance. Can discuss opportunistic deployment, higher equity allocation, and tactical upside capture where regime supports it.":
-  "Client has moderate risk tolerance. Balanced approach between capital preservation and growth. Staggered deployment language appropriate."
-}
+AUDIENCE CONTRACT — ${audience}:
+- WHO: ${contract.who}
+- OBJECTIVE: ${contract.objective}
+- LANGUAGE: ${contract.language}
+- FORBIDDEN IN OUTPUT: ${contract.forbidden}
+- SIGNAL TRANSLATION: ${contract.translate}
+- keyDrivers FORMAT: ${contract.keyDrivers}
+- tacticalView FORMAT: ${contract.tacticalView}
+- TONE: ${contract.tone}
 
-AUDIENCE CONTEXT AND STORYTELLING DIRECTIVE: ${
-  audience==="IFA Advisory Pitch"?`You are briefing an Independent Financial Advisor who will relay this to clients today.
-STORY: Open with the market posture in plain English. Name the regime and what it means in client-friendly terms. Give one concrete action the IFA can recommend. Close with a reassurance or caution appropriate to the regime.
-STYLE: No jargon. Short sentences. Confident but not reckless. Think: what would a trusted advisor say over the phone?
-STRUCTURE: summary=client-ready posture statement. keyDrivers=plain-English signal reasons. tacticalView=specific allocation posture the IFA can act on.`:
-  audience==="Wealth Manager Synthesis"?`You are briefing a Wealth Manager who needs cross-asset synthesis for portfolio rebalancing decisions.
-STORY: Lead with regime and macro transmission — how US rates and global signals are feeding into Indian equity. Connect technical signals to the regime. Give allocation implications across equity, debt, and gold.
-STYLE: Analytical, precise, cross-asset aware. Reference actual macro values (US 10Y, Fed stance, yield curve). Think: a Bloomberg terminal summary written by a senior analyst.
-STRUCTURE: summary=regime + macro transmission in 2 sentences. keyDrivers=signal values with directional implication. tacticalView=asset allocation posture with rationale.`:
-  audience==="Family Office Risk Brief"?`You are preparing a risk brief for a Family Office investment committee meeting.
-STORY: Lead with downside risk and capital preservation implications. What does the current regime mean for the portfolio's risk budget? Name specific risks (VIX, yield curve, Fed stance). Close with a defensive or opportunistic posture appropriate to the regime.
-STYLE: Formal, risk-first, committee-appropriate. No speculation. Every claim grounded in a named signal. Think: a CIO memo to a board.
-STRUCTURE: summary=risk posture and capital preservation implications. keyDrivers=specific risk signals with values. tacticalView=portfolio protection or deployment recommendation.`:
-  audience==="Private Banker Advisory"?`You are preparing advisory intelligence for a Private Banker serving UHNW clients.
-STORY: Institutional quality, narrative-grade. Open with a crisp regime characterisation. Layer in macro context (Fed, rates, global) and technical posture. Close with a sophisticated positioning statement that reflects both opportunity and risk.
-STYLE: Measured, authoritative, institutional. Avoid hyperbole. Every sentence earns its place. Think: Goldman Sachs Investment Management weekly note.
-STRUCTURE: summary=crisp regime + macro framing. keyDrivers=institutional-grade signal interpretation. tacticalView=risk-adjusted positioning with nuance.`:
-  audience==="Advanced Investor Dashboard"?`You are writing for a sophisticated self-directed investor who reads the raw signals themselves.
-STORY: Skip the preamble. Go straight to signal interpretation. What do RSI, MACD, VIX, and US 10Y say together? What is the regime telling us that the individual signals might miss? Name the tension if signals conflict.
-STYLE: Direct, analytical, signal-first. Use actual numbers. Name indicators. Think: a quant-aware trader reading a morning note.
-STRUCTURE: summary=signal synthesis with composite score interpretation. keyDrivers=specific indicator values and what they mean in combination. tacticalView=tactical entry/exit posture based on regime and technical state.`
-  :`You are a financial market intelligence analyst. Provide a balanced, factual synthesis of the current market regime and signal state. Reference actual signal values where available.`
-}
+GOVERNANCE (non-negotiable):
+- Do NOT override score, regime, or action bias
+- Do NOT infer data not provided above
+- Do NOT recommend specific stocks
+- Do NOT use forbidden language for this audience
 
-SIGNAL TRANSLATION RULES (CRITICAL — follow per audience):
-${audience==="IFA Advisory Pitch" || audience==="Wealth Manager Synthesis" || audience==="Family Office Risk Brief" || audience==="Private Banker Advisory" ? `
-- NEVER use technical indicator names: RSI, MACD, SMA, DMA, EMA, Bollinger are FORBIDDEN in output
-- NEVER use raw numbers from technical indicators (e.g. "RSI 39.13" is forbidden)
-- TRANSLATE signals into plain market language:
-  * RSI below 40 → "momentum is weakening" or "selling pressure is building"
-  * MACD sell → "short-term trend has turned negative"
-  * VIX elevated (15-22) → "market anxiety is moderate" or "investors are cautious"
-  * VIX high (>22) → "fear is elevated in the market"
-  * US 10Y above 4.5% → "US borrowing costs remain elevated, pressuring valuations"
-  * Fed moderately restrictive → "US monetary policy remains a headwind"
-  * Yield curve normal → "bond markets are not signaling recession risk"
-  * Unemployment below 4% → "US labor market remains resilient"
-- keyDrivers must be client-ready sentences, not indicator readings` : `
-- You ARE writing for a sophisticated investor who reads raw signals
-- INCLUDE actual indicator values: RSI value, MACD direction, VIX level, US 10Y yield
-- Name the indicators explicitly — this audience expects technical precision
-- keyDrivers should be signal-level with values and directional implication`}
-
-GOVERNANCE RULES:
-- You may NOT override the regime, score, or action bias above
-- You may NOT infer data not provided
-- You may NOT give specific stock recommendations
-- You MUST disclose any data quality limitations
-- keyDrivers MUST be grounded in the Signal Basis data above — do not invent signals
-
-Respond ONLY with valid JSON (no markdown, no preamble):
+Respond ONLY with valid JSON — no markdown, no preamble:
 {
-  "summary": "2-3 sentence market overview referencing the score and regime",
-  "marketTone": "one of: CAUTIOUS|MEASURED|BALANCED|CONSTRUCTIVE|CONFIDENT",
-  "keyDrivers": ["max 3 short strings — MUST reference actual values from Signal Basis above e.g. RSI 42 bearish, VIX 17.9 elevated, US 10Y 4.57%"],
-  "riskFlags": ["max 2 short risk strings"],
-  "tacticalView": "1-2 sentence tactical positioning statement",
+  "summary": "2-3 sentences — market posture in this audience's language",
+  "marketTone": "CAUTIOUS|MEASURED|BALANCED|CONSTRUCTIVE|CONFIDENT",
+  "keyDrivers": ["driver 1", "driver 2", "driver 3"],
+  "riskFlags": ["risk 1", "risk 2"],
+  "tacticalView": "1-2 sentence positioning statement in this audience's language",
   "confidenceAlignment": true
 }`;
+
   return { prompt, promptVersion: PROMPT_VERSION, tone, audience };
 }
 
@@ -7930,7 +8044,7 @@ app.post("/api/v1/narrative/generate", (req, res) =>
     const riskProfile = (req.body && req.body.riskProfile) || "Moderate";
     const VALID_RISK = ["Conservative","Moderate","Aggressive"];
     if (!VALID_RISK.includes(riskProfile)) return res.status(400).json({ status: "ERROR", error: "Invalid riskProfile" });
-    const VALID = ["IFA Advisory Pitch","Wealth Manager Synthesis","Family Office Risk Brief","Private Banker Advisory","Advanced Investor Dashboard"];
+    const VALID = ["IFA Advisory Pitch","Wealth Manager Synthesis","Family Office Risk Brief","Private Banker Advisory","Advanced Investor Dashboard","Retail Investor","HNI Investor","Conservative Retiree","Aggressive Growth Investor","Institutional Strategy Desk"];
     if (!VALID.includes(audience)) {
       return res.status(400).json({ status: "ERROR", error: "Invalid audience. Valid: " + VALID.join(", ") });
     }
