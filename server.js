@@ -256,21 +256,55 @@ RISK PROFILE CONTEXT: ${
   "Client has moderate risk tolerance. Balanced approach between capital preservation and growth. Staggered deployment language appropriate."
 }
 
-AUDIENCE CONTEXT: ${
-  audience==="IFA Advisory Pitch"?"Independent Financial Advisor preparing structured signal summary for client conversation. Use clear, jargon-lite language with actionable posture.":
-  audience==="Wealth Manager Synthesis"?"Wealth Manager requiring cross-asset macro and technical synthesis. Include regime context, macro transmission, and allocation implications.":
-  audience==="Family Office Risk Brief"?"Family Office investment committee needing regime-aware risk and allocation insights. Emphasise capital preservation, downside risk, and multi-asset positioning.":
-  audience==="Private Banker Advisory"?"Private Banker delivering narrative-grade advisory intelligence to UHNW clients. Institutional tone, measured language, focus on risk-adjusted positioning.":
-  audience==="Advanced Investor Dashboard"?"Advanced self-directed investor using multi-signal dashboard. Include signal drivers, regime strength, and tactical view. Analytical tone acceptable."
-  :"Financial professional requiring market intelligence synthesis."
+AUDIENCE CONTEXT AND STORYTELLING DIRECTIVE: ${
+  audience==="IFA Advisory Pitch"?`You are briefing an Independent Financial Advisor who will relay this to clients today.
+STORY: Open with the market posture in plain English. Name the regime and what it means in client-friendly terms. Give one concrete action the IFA can recommend. Close with a reassurance or caution appropriate to the regime.
+STYLE: No jargon. Short sentences. Confident but not reckless. Think: what would a trusted advisor say over the phone?
+STRUCTURE: summary=client-ready posture statement. keyDrivers=plain-English signal reasons. tacticalView=specific allocation posture the IFA can act on.`:
+  audience==="Wealth Manager Synthesis"?`You are briefing a Wealth Manager who needs cross-asset synthesis for portfolio rebalancing decisions.
+STORY: Lead with regime and macro transmission — how US rates and global signals are feeding into Indian equity. Connect technical signals to the regime. Give allocation implications across equity, debt, and gold.
+STYLE: Analytical, precise, cross-asset aware. Reference actual macro values (US 10Y, Fed stance, yield curve). Think: a Bloomberg terminal summary written by a senior analyst.
+STRUCTURE: summary=regime + macro transmission in 2 sentences. keyDrivers=signal values with directional implication. tacticalView=asset allocation posture with rationale.`:
+  audience==="Family Office Risk Brief"?`You are preparing a risk brief for a Family Office investment committee meeting.
+STORY: Lead with downside risk and capital preservation implications. What does the current regime mean for the portfolio's risk budget? Name specific risks (VIX, yield curve, Fed stance). Close with a defensive or opportunistic posture appropriate to the regime.
+STYLE: Formal, risk-first, committee-appropriate. No speculation. Every claim grounded in a named signal. Think: a CIO memo to a board.
+STRUCTURE: summary=risk posture and capital preservation implications. keyDrivers=specific risk signals with values. tacticalView=portfolio protection or deployment recommendation.`:
+  audience==="Private Banker Advisory"?`You are preparing advisory intelligence for a Private Banker serving UHNW clients.
+STORY: Institutional quality, narrative-grade. Open with a crisp regime characterisation. Layer in macro context (Fed, rates, global) and technical posture. Close with a sophisticated positioning statement that reflects both opportunity and risk.
+STYLE: Measured, authoritative, institutional. Avoid hyperbole. Every sentence earns its place. Think: Goldman Sachs Investment Management weekly note.
+STRUCTURE: summary=crisp regime + macro framing. keyDrivers=institutional-grade signal interpretation. tacticalView=risk-adjusted positioning with nuance.`:
+  audience==="Advanced Investor Dashboard"?`You are writing for a sophisticated self-directed investor who reads the raw signals themselves.
+STORY: Skip the preamble. Go straight to signal interpretation. What do RSI, MACD, VIX, and US 10Y say together? What is the regime telling us that the individual signals might miss? Name the tension if signals conflict.
+STYLE: Direct, analytical, signal-first. Use actual numbers. Name indicators. Think: a quant-aware trader reading a morning note.
+STRUCTURE: summary=signal synthesis with composite score interpretation. keyDrivers=specific indicator values and what they mean in combination. tacticalView=tactical entry/exit posture based on regime and technical state.`
+  :`You are a financial market intelligence analyst. Provide a balanced, factual synthesis of the current market regime and signal state. Reference actual signal values where available.`
 }
+
+SIGNAL TRANSLATION RULES (CRITICAL — follow per audience):
+${audience==="IFA Advisory Pitch" || audience==="Wealth Manager Synthesis" || audience==="Family Office Risk Brief" || audience==="Private Banker Advisory" ? `
+- NEVER use technical indicator names: RSI, MACD, SMA, DMA, EMA, Bollinger are FORBIDDEN in output
+- NEVER use raw numbers from technical indicators (e.g. "RSI 39.13" is forbidden)
+- TRANSLATE signals into plain market language:
+  * RSI below 40 → "momentum is weakening" or "selling pressure is building"
+  * MACD sell → "short-term trend has turned negative"
+  * VIX elevated (15-22) → "market anxiety is moderate" or "investors are cautious"
+  * VIX high (>22) → "fear is elevated in the market"
+  * US 10Y above 4.5% → "US borrowing costs remain elevated, pressuring valuations"
+  * Fed moderately restrictive → "US monetary policy remains a headwind"
+  * Yield curve normal → "bond markets are not signaling recession risk"
+  * Unemployment below 4% → "US labor market remains resilient"
+- keyDrivers must be client-ready sentences, not indicator readings` : `
+- You ARE writing for a sophisticated investor who reads raw signals
+- INCLUDE actual indicator values: RSI value, MACD direction, VIX level, US 10Y yield
+- Name the indicators explicitly — this audience expects technical precision
+- keyDrivers should be signal-level with values and directional implication`}
 
 GOVERNANCE RULES:
 - You may NOT override the regime, score, or action bias above
 - You may NOT infer data not provided
 - You may NOT give specific stock recommendations
 - You MUST disclose any data quality limitations
-- keyDrivers MUST quote actual signal values from "Signal Basis" and "Key Signal Drivers" above — generic statements are not acceptable
+- keyDrivers MUST be grounded in the Signal Basis data above — do not invent signals
 
 Respond ONLY with valid JSON (no markdown, no preamble):
 {
