@@ -5865,6 +5865,41 @@ setTimeout(() => {
 }, 60000);
 // ── END narrative-gen job ──
 
+// ── brain-auto scheduler (v8 P3-5) ──
+// Populates brain:latest every 60s from RegimeEngine read()
+// Phase 7 Step 1: cache population only — no route rewiring
+setTimeout(() => {
+  const runScheduledBrain = () => {
+    try {
+      const _brainRegime = regimeEngine.read();
+      if (!_brainRegime || _brainRegime.compositeScore === null) return;
+      const _brainPayload = {
+        compositeScore:    _brainRegime.compositeScore,
+        regime:            _brainRegime.regime,
+        regimeLabel:       _brainRegime.regimeLabel,
+        actionBias:        _brainRegime.actionBias,
+        moduleScores:      _brainRegime.moduleScores,
+        macroModifier:     _brainRegime.macroModifier     ?? null,
+        compositeScoreRaw: _brainRegime.compositeScoreRaw ?? null,
+        macroModifierLog:  _brainRegime.macroModifierLog  ?? [],
+        activeWeightSum:   _brainRegime.activeWeightSum   ?? null,
+        confidence:        (DSSCache.get('score:equity')?.confidence ?? null),
+        scheduledAt:       Date.now(),
+        source:            'brain-scheduled',
+      };
+      DSSCache.set('brain:latest', _brainPayload);
+      DSSCache.set('brain:ts', Date.now());
+      logger.info({ job: 'brain-scheduled', score: _brainPayload.compositeScore, regime: _brainPayload.regime }, 'brain:latest updated');
+    } catch(e) {
+      logger.warn({ err: e.message }, 'scheduled brain failed');
+    }
+  };
+  runScheduledBrain();
+  setInterval(runScheduledBrain, 60000);
+}, 90000); // 30s after RegimeEngine first run (45s)
+// ── END brain-auto scheduler ──
+
+
         // ── equity/global/derivatives bootstrap (Session 20I) ──
         DSSCache.set("score:equity", {
           score: 50, confidence: 0.45,
