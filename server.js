@@ -6686,14 +6686,19 @@ class OverviewEngine {
 
     // --- Composite score block ---
     const compositeScore = {
-      score:           regime.compositeScore,
-      label:           regime.regimeLabel,
-      actionBias:      regime.actionBias,
-      regime:          regime.regime,
-      includedModules: regime.includedModules,
-      moduleScores:    regime.moduleScores,
-      dataStatus:      regime.dataStatus,
-      computedAt:      regime.computedAt,
+      score:              regime.compositeScore,
+      label:              regime.regimeLabel,
+      actionBias:         regime.actionBias,
+      regime:             regime.regime,
+      includedModules:    regime.includedModules,
+      moduleScores:       regime.moduleScores,
+      dataStatus:         regime.dataStatus,
+      computedAt:         regime.computedAt,
+      // P3-3: macro modifier observability passthrough
+      compositeScoreRaw:  regime.compositeScoreRaw  ?? null,
+      macroModifier:      regime.macroModifier       ?? null,
+      macroModifierLog:   regime.macroModifierLog    ?? [],
+      activeWeightSum:    regime.activeWeightSum      ?? null,
     };
 
     // --- Fear & Greed (Appendix B.6) ---
