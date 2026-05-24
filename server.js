@@ -8954,6 +8954,152 @@ app.post("/api/v1/advisory/posture", (req, res) =>
 
 
 // ===============================
+// SPRINT 6: POST /api/v1/advisory/brief
+// Full v9 pipeline: isRegimeReady → PCE → ACL → Conviction → Narrative → FGS
+// Degrades cleanly to v8-equivalent when no portfolio context provided
+// Constitutional: session-only portfolio context, never persisted
+// ===============================
+const ADVISORY_BRIEF_AUDIENCES = [
+  'IFA Advisory Pitch','Wealth Manager Synthesis','Family Office Risk Brief',
+  'Private Banker Advisory','Advanced Investor Dashboard','Retail Investor',
+  'HNI Investor','Conservative Retiree','Aggressive Growth Investor','Institutional Strategy Desk'
+];
+
+app.post("/api/v1/advisory/brief", (req, res) =>
+  safeExecuteAsync(async () => {
+    const t0 = Date.now();
+    const { audience, riskProfile, equityPct, debtPct, goldPct, sessionId } = req.body || {};
+
+    // Input validation
+    if (!audience || !ADVISORY_BRIEF_AUDIENCES.includes(audience)) {
+      return res.status(400).json({ status: 'ERROR', error: 'INVALID_AUDIENCE',
+        message: 'Valid audiences: ' + ADVISORY_BRIEF_AUDIENCES.join(', ') });
+    }
+    const VALID_PROFILES = ['Conservative','Moderate','Aggressive'];
+    if (!riskProfile || !VALID_PROFILES.includes(riskProfile)) {
+      return res.status(400).json({ status: 'ERROR', error: 'INVALID_RISK_PROFILE' });
+    }
+    const _hasPortfolio = typeof equityPct === 'number' && typeof debtPct === 'number';
+    if (_hasPortfolio && (!isFinite(equityPct) || !isFinite(debtPct))) {
+      return res.status(400).json({ status: 'ERROR', error: 'PCE_INVALID_INPUT', aclEligibility: false });
+    }
+
+    // Cold start guard
+    if (!isRegimeReady(DSSCache)) {
+      const _coldNarrative = await generateNarrative(audience, riskProfile);
+      return res.json({ status: 'OK', timestamp: Date.now(),
+        dataStatus: 'cold-start', data: { ..._coldNarrative,
+          portfolioContext: null, advisoryPosture: null, conviction: null,
+          marketContext: null, degradationStatus: { advisoryCognition: 'SKIPPED', portfolioContext: 'NOT_PROVIDED', reason: 'COLD_START' }
+        }
+      });
+    }
+
+    const _bl = DSSCache.get('brain:latest') || {};
+    const _regime      = _bl.regime         || 'NEUTRAL';
+    const _durClass    = _bl.durabilityClass || 'EMERGING';
+    const _durScore    = _bl.durabilityScore || 0.15;
+    const _conf        = _bl.confidence      || 0.50;
+    const _convScore   = _bl.convictionScore  || null;
+    const _convClass   = _bl.convictionClass  || null;
+
+    // PCE — portfolio context (optional)
+    let _pce = null;
+    let _pceError = null;
+    if (_hasPortfolio) {
+      try {
+        _pce = pceComputePortfolioContext(equityPct, debtPct, goldPct ?? null, riskProfile, _regime, _durClass);
+        if (!_pce.valid) { _pceError = _pce.error; _pce = null; }
+      } catch(e) { _pceError = 'PCE_ERROR'; _pce = null; }
+    }
+
+    // ACL — advisory posture (only if PCE valid)
+    let _acl = null;
+    let _aclError = null;
+    if (_pce && _pce.valid) {
+      try {
+        const _marketState = { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf };
+        _acl = aclComputeAdvisoryPosture(_marketState, _pce, _convScore, _convClass);
+        if (!_acl.valid) { _aclError = _acl.error; _acl = null; }
+      } catch(e) { _aclError = 'ACL_ERROR'; _acl = null; }
+    }
+
+    // Conviction — recomputed with portfolio alignment if available
+    let _convFull = null;
+    try {
+      const _alignScore = _pce ? _pce.portfolioAlignmentScore : 0.50;
+      const _cv = computeConviction(_conf, _durScore, _alignScore);
+      _convFull = { convictionScore: _cv.convictionScore, convictionClass: _cv.convictionClass,
+        convictionComponents: _cv.convictionComponents, convictionDataQuality: _cv.convictionDataQuality };
+    } catch(e) { _convFull = null; }
+
+    // Generate narrative (existing v8-compatible path)
+    const _narrative = await generateNarrative(audience, riskProfile);
+
+    // degradationStatus
+    const _degradation = {
+      marketIntelligence: _bl.compositeScore ? 'OK' : 'FALLBACK',
+      portfolioContext:   _hasPortfolio ? (_pce ? 'OK' : 'INVALID_INPUT') : 'NOT_PROVIDED',
+      advisoryCognition: _acl ? 'OK' : (_hasPortfolio && _pce ? 'ERROR' : 'SKIPPED'),
+      convictionEngine:  _convFull ? 'OK' : 'FALLBACK',
+      durabilityEngine:  _durScore > 0.15 ? 'OK' : 'FALLBACK'
+    };
+
+    // Privacy: log mismatchClass only, never allocation values
+    logger.info({ job: 'advisory-brief', audience, riskProfile,
+      regime: _regime, durabilityClass: _durClass,
+      portfolioProvided: _hasPortfolio,
+      mismatchClass: _pce ? _pce.mismatchClass : null,
+      scenario: _acl ? _acl.scenarioType : null,
+      latencyMs: Date.now() - t0
+    }, 'Advisory brief generated');
+
+    return res.json({
+      status: 'OK',
+      timestamp: Date.now(),
+      dataStatus: _narrative.narrativeMeta && _narrative.narrativeMeta.fallbackUsed ? 'fallback' : 'live',
+      data: {
+        // Narrative (v8-compatible fields)
+        summary:            _narrative.summary,
+        marketTone:         _narrative.marketTone,
+        keyDrivers:         _narrative.keyDrivers,
+        riskFlags:          _narrative.riskFlags,
+        tacticalView:       _narrative.tacticalView,
+        macroContext:       _narrative.macroContext        || null,
+        confidenceNote:     _narrative.confidenceNote     || null,
+        // v9 portfolio fields
+        portfolioPostureNote: _acl ? _acl.postureStatement : null,
+        durabilityNote:     _durClass ? 'Regime durability: ' + _durClass + ' (' + (_bl.cyclesSinceChange || 0) + ' cycles)' : null,
+        convictionQualifier: _convFull ? 'Advisory conviction: ' + _convFull.convictionClass + ' (' + _convFull.convictionScore + ')' : null,
+        deploymentPacingNote: _acl && _acl.deploymentPacing ? _acl.deploymentPacing.tranches + ' tranches over ' + _acl.deploymentPacing.periodWeeks + ' weeks' : null,
+        stressAwarenessNote: _acl ? _acl.stressAwarenessNote : null,
+        advisoryIntensity:  _acl ? _acl.cappedIntensity : null,
+        // Context objects
+        portfolioContext:   _pce,
+        advisoryPosture:    _acl,
+        conviction:         _convFull,
+        marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf },
+        degradationStatus:  _degradation,
+        // Full observability
+        narrativeMeta: {
+          ..._narrative.narrativeMeta,
+          portfolioContextProvided: _hasPortfolio,
+          mismatchClass:     _pce ? _pce.mismatchClass     : null,
+          mismatchDirection: _pce ? _pce.mismatchDirection : null,
+          adjustmentIntensity: _acl ? _acl.cappedIntensity : null,
+          scenarioType:      _acl ? _acl.scenarioType      : null,
+          advisoryBasisTrace: _acl ? _acl.advisoryBasisTrace : null,
+          degradationStatus: _degradation,
+          sessionId:         sessionId || null
+        },
+        governanceApplied: true
+      }
+    });
+  }, res)
+);
+
+
+// ===============================
 // GET /api/v1/macro
 // Unified macro intelligence endpoint — FRED + BLS
 // ===============================
