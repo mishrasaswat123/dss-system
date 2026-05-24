@@ -744,6 +744,11 @@ STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} i
     durabilityScore:       _brainSupplement ? (_brainSupplement.durabilityScore  ?? null) : null,
     durabilityClass:       _brainSupplement ? (_brainSupplement.durabilityClass  ?? null) : null,
     cyclesSinceChange:     _brainSupplement ? (_brainSupplement.cyclesSinceChange ?? null) : null,
+    // v9 Sprint 2: Conviction
+    convictionScore:       _brainSupplement ? (_brainSupplement.convictionScore      ?? null) : null,
+    convictionClass:       _brainSupplement ? (_brainSupplement.convictionClass      ?? null) : null,
+    convictionComponents:  _brainSupplement ? (_brainSupplement.convictionComponents ?? null) : null,
+    convictionTrajectory:  _brainSupplement ? (_brainSupplement.convictionTrajectory ?? null) : null,
   };
 
   logger.info({ job: "narrative-generate", provider: narrativeMeta.provider, fallback: fallbackUsed, latencyMs }, "Narrative generated");
@@ -4152,6 +4157,58 @@ function computeRegimeDurability(memory, moduleScores) {
 }
 
 ////////////////////////////////////////////////////////
+// SECTION-19B-V9 : CONVICTION ENGINE (Sprint 2)
+// computeConviction(confidence, durabilityScore, portfolioAlignmentScore)
+// Formula: (0.40 x confidence) + (0.35 x durabilityScore) + (0.25 x portfolioAlignmentScore)
+// portfolioAlignmentScore defaults to 0.50 (neutral) when no portfolio context
+////////////////////////////////////////////////////////
+
+function computeConviction(confidence, durabilityScore, portfolioAlignmentScore) {
+  // Input normalisation and fallback
+  const _conf  = (typeof confidence         === 'number' && isFinite(confidence))         ? Math.min(1, Math.max(0, confidence))         : 0.50;
+  const _dur   = (typeof durabilityScore    === 'number' && isFinite(durabilityScore))    ? Math.min(1, Math.max(0, durabilityScore))    : 0.15;
+  const _align = (typeof portfolioAlignmentScore === 'number' && isFinite(portfolioAlignmentScore)) ? Math.min(1, Math.max(0, portfolioAlignmentScore)) : 0.50;
+
+  const raw = (0.40 * _conf) + (0.35 * _dur) + (0.25 * _align);
+  const convictionScore = Math.round(raw * 1000) / 1000;
+
+  let convictionClass;
+  if (convictionScore >= 0.75)      convictionClass = 'STRONG';
+  else if (convictionScore >= 0.55) convictionClass = 'HIGH';
+  else if (convictionScore >= 0.30) convictionClass = 'MODERATE';
+  else                              convictionClass = 'LOW';
+
+  return {
+    convictionScore,
+    convictionClass,
+    convictionComponents: { confidence: _conf, durabilityScore: _dur, portfolioAlignmentScore: _align }
+  };
+}
+
+// Conviction smoothing — Brain.Auto CONFIDENCE_SMOOTHING = 0.70
+// Prevents single-cycle spikes. Applied in brain scheduler.
+let _lastConvictionScore = null;
+const CONVICTION_SMOOTHING = 0.70;
+
+function smoothConviction(prev, next) {
+  if (prev === null || prev === undefined) return next;
+  return Math.round(((CONVICTION_SMOOTHING * prev) + ((1 - CONVICTION_SMOOTHING) * next)) * 1000) / 1000;
+}
+
+// Conviction trajectory detection — 5-cycle declining trend
+const _convictionHistory = [];
+function updateConvictionTrajectory(score) {
+  _convictionHistory.push(score);
+  if (_convictionHistory.length > 5) _convictionHistory.shift();
+  if (_convictionHistory.length < 5) return 'INSUFFICIENT_DATA';
+  const declining = _convictionHistory.every((v, i) => i === 0 || v <= _convictionHistory[i - 1]);
+  const rising    = _convictionHistory.every((v, i) => i === 0 || v >= _convictionHistory[i - 1]);
+  if (declining) return 'DECLINING';
+  if (rising)    return 'RISING';
+  return 'STABLE';
+}
+
+////////////////////////////////////////////////////////
 // SECTION-19B : REGIME ENGINE (AUTHORITATIVE)
 ////////////////////////////////////////////////////////
 
@@ -6094,6 +6151,15 @@ setTimeout(() => {
           const _d = computeRegimeDurability(MEMORY, _brainRegime.moduleScores);
           return { durabilityScore: _d.durabilityScore, durabilityClass: _d.durabilityClass, cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0 };
         } catch(e) { return { durabilityScore: 0.15, durabilityClass: 'EMERGING', cyclesSinceChange: 0 }; } })(),
+        // v9 Sprint 2: Conviction Engine
+        ...(() => { try {
+          const _durScore  = (() => { try { return computeRegimeDurability(MEMORY, _brainRegime.moduleScores).durabilityScore; } catch(e) { return 0.15; } })();
+          const _rawConv   = computeConviction(_brainRegime.confidence ?? (DSSCache.get('score:equity')?.confidence ?? 0.50), _durScore, 0.50);
+          const _smoothed  = smoothConviction(_lastConvictionScore, _rawConv.convictionScore);
+          _lastConvictionScore = _smoothed;
+          const _trajectory = updateConvictionTrajectory(_smoothed);
+          return { convictionScore: _smoothed, convictionClass: _rawConv.convictionClass, convictionComponents: _rawConv.convictionComponents, convictionTrajectory: _trajectory };
+        } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null, convictionTrajectory: null }; } })(),
       };
       DSSCache.set('brain:latest', _brainPayload);
       DSSCache.set('brain:ts', Date.now());
@@ -8073,6 +8139,11 @@ const narrativeEngine = new NarrativeEngine(DSSCache, regimeEngine, logger);
       durabilityScore:   _brainLatest.durabilityScore   ?? null,
       durabilityClass:   _brainLatest.durabilityClass   ?? null,
       cyclesSinceChange: _brainLatest.cyclesSinceChange ?? null,
+      // v9 Sprint 2: Conviction
+      convictionScore:      _brainLatest.convictionScore      ?? null,
+      convictionClass:      _brainLatest.convictionClass      ?? null,
+      convictionComponents: _brainLatest.convictionComponents ?? null,
+      convictionTrajectory: _brainLatest.convictionTrajectory ?? null,
     } : null;
     // Priority 9: validate overview payload before serving
     const _ovValidation = validateOverviewResponse({ compositeScore: payload.compositeScore, confidence: payload.confidence });
@@ -8981,10 +9052,14 @@ app.get("/health", (req, res) => {
 		  // v9 Sprint 1 fix: push fresh durability into brain:latest from POST cycle
 		  try {
 		    const _bl = DSSCache.get('brain:latest') || {};
+		    const _cv = (() => { try { const _d = MEMORY._lastDurability ? MEMORY._lastDurability.durabilityScore : 0.15; const _c = computeConviction(_bl.confidence ?? 0.50, _d, 0.50); const _s = smoothConviction(_lastConvictionScore, _c.convictionScore); _lastConvictionScore = _s; const _t = updateConvictionTrajectory(_s); return { convictionScore: _s, convictionClass: _c.convictionClass, convictionTrajectory: _t }; } catch(e) { return { convictionScore: null, convictionClass: null, convictionTrajectory: null }; } })();
 		    DSSCache.set('brain:latest', { ..._bl,
 		      durabilityScore:   MEMORY._lastDurability?.durabilityScore   ?? 0.15,
 		      durabilityClass:   MEMORY._lastDurability?.durabilityClass   ?? 'EMERGING',
-		      cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0
+		      cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0,
+		      convictionScore:   _cv.convictionScore,
+		      convictionClass:   _cv.convictionClass,
+		      convictionTrajectory: _cv.convictionTrajectory
 		    });
 		  } catch(e) { /* non-fatal */ }
 		} catch (err) {
