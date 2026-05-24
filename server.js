@@ -741,6 +741,9 @@ STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} i
     contextRegime:       ctx.regime,
     confidenceNotePresent: !!_confNote,
     macroContextPresent:   !!_macroCtx,
+    durabilityScore:       _brainSupplement ? (_brainSupplement.durabilityScore  ?? null) : null,
+    durabilityClass:       _brainSupplement ? (_brainSupplement.durabilityClass  ?? null) : null,
+    cyclesSinceChange:     _brainSupplement ? (_brainSupplement.cyclesSinceChange ?? null) : null,
   };
 
   logger.info({ job: "narrative-generate", provider: narrativeMeta.provider, fallback: fallbackUsed, latencyMs }, "Narrative generated");
@@ -4105,6 +4108,50 @@ function deriveMacroCompositeScore({
 
 
 ////////////////////////////////////////////////////////
+// SECTION-19A-V9 : REGIME DURABILITY ENGINE (Sprint 1)
+// computeRegimeDurability(memory, moduleScores) -> { durabilityScore, durabilityClass }
+// Formula: 0.40*ageScore + 0.35*stabilityScore + 0.25*signalConsensus
+////////////////////////////////////////////////////////
+
+function computeRegimeDurability(memory, moduleScores) {
+  if (!memory || !Array.isArray(memory.signalsHistory) || memory.signalsHistory.length < 3) {
+    return { durabilityScore: 0.15, durabilityClass: 'EMERGING' };
+  }
+  const cycles = typeof memory.cyclesSinceChange === 'number' ? memory.cyclesSinceChange : 0;
+  const ageScore = Math.min(1.0, cycles / 20);
+  const last10 = memory.signalsHistory.slice(-10);
+  let stabilityScore = 1.0;
+  if (last10.length >= 2) {
+    const scores = last10.map(e => (typeof e.compositeScore === 'number' ? e.compositeScore : 50));
+    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const variance = scores.reduce((acc, s) => acc + Math.pow(s - mean, 2), 0) / scores.length;
+    stabilityScore = Math.max(0, 1 - (variance / 25));
+  }
+  let signalConsensus = 0.5;
+  const regime = memory.lastSnapshot && memory.lastSnapshot.regime ? memory.lastSnapshot.regime : null;
+  if (regime && moduleScores && typeof moduleScores === 'object') {
+    const modArr = Object.values(moduleScores).filter(m => m && typeof m.score === 'number' && m.score !== null);
+    if (modArr.length > 0) {
+      let agreeing = 0;
+      for (const m of modArr) {
+        const s = m.score;
+        if ((regime === 'RISK_ON' || regime === 'STRONG_RISK_ON') && s >= 55) agreeing++;
+        else if ((regime === 'RISK_OFF' || regime === 'STRONG_RISK_OFF') && s <= 45) agreeing++;
+        else if (regime === 'NEUTRAL' && s >= 43 && s <= 57) agreeing++;
+      }
+      signalConsensus = agreeing / modArr.length;
+    }
+  }
+  const durabilityScore = Math.round(((0.40 * ageScore) + (0.35 * stabilityScore) + (0.25 * signalConsensus)) * 1000) / 1000;
+  let durabilityClass;
+  if (durabilityScore >= 0.75)      durabilityClass = 'MATURE';
+  else if (durabilityScore >= 0.50) durabilityClass = 'ESTABLISHED';
+  else if (durabilityScore >= 0.25) durabilityClass = 'CONFIRMING';
+  else                              durabilityClass = 'EMERGING';
+  return { durabilityScore, durabilityClass };
+}
+
+////////////////////////////////////////////////////////
 // SECTION-19B : REGIME ENGINE (AUTHORITATIVE)
 ////////////////////////////////////////////////////////
 
@@ -6043,6 +6090,10 @@ setTimeout(() => {
         confidence:        (DSSCache.get('score:equity')?.confidence ?? null),
         scheduledAt:       Date.now(),
         source:            'brain-scheduled',
+        ...(() => { try {
+          const _d = computeRegimeDurability(MEMORY, _brainRegime.moduleScores);
+          return { durabilityScore: _d.durabilityScore, durabilityClass: _d.durabilityClass, cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0 };
+        } catch(e) { return { durabilityScore: 0.15, durabilityClass: 'EMERGING', cyclesSinceChange: 0 }; } })(),
       };
       DSSCache.set('brain:latest', _brainPayload);
       DSSCache.set('brain:ts', Date.now());
@@ -8019,6 +8070,9 @@ const narrativeEngine = new NarrativeEngine(DSSCache, regimeEngine, logger);
       scheduledAt:       _brainLatest.scheduledAt       ?? null,
       source:            "brain-scheduled",
       freshnessMs:       _brainTs ? Date.now() - _brainTs : null,
+      durabilityScore:   _brainLatest.durabilityScore   ?? null,
+      durabilityClass:   _brainLatest.durabilityClass   ?? null,
+      cyclesSinceChange: _brainLatest.cyclesSinceChange ?? null,
     } : null;
     // Priority 9: validate overview payload before serving
     const _ovValidation = validateOverviewResponse({ compositeScore: payload.compositeScore, confidence: payload.confidence });
@@ -8627,6 +8681,9 @@ app.get("/health", (req, res) => {
 		// ── END SESSION 20C P2 ──
 		// D27.1 regime tracking
 		if (regime !== MEMORY.lastSnapshot?.regime) { MEMORY.lastRegimeChangeTs = Date.now(); MEMORY.cyclesSinceChange = 0; } else { MEMORY.cyclesSinceChange += 1; }
+		// v9 Sprint 1 fix: compute durability here where cyclesSinceChange is live
+		const _durabilityResult = (() => { try { return computeRegimeDurability(MEMORY, _rd2.moduleScores); } catch(e) { return { durabilityScore: 0.15, durabilityClass: 'EMERGING' }; } })();
+		MEMORY._lastDurability = _durabilityResult;
 
 		  const portfolioStateData = portfolioState;
 		  
@@ -8921,6 +8978,15 @@ app.get("/health", (req, res) => {
 
 		try {
 		  saveMemory(MEMORY);
+		  // v9 Sprint 1 fix: push fresh durability into brain:latest from POST cycle
+		  try {
+		    const _bl = DSSCache.get('brain:latest') || {};
+		    DSSCache.set('brain:latest', { ..._bl,
+		      durabilityScore:   MEMORY._lastDurability?.durabilityScore   ?? 0.15,
+		      durabilityClass:   MEMORY._lastDurability?.durabilityClass   ?? 'EMERGING',
+		      cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0
+		    });
+		  } catch(e) { /* non-fatal */ }
 		} catch (err) {
 		  logger.error({ err }, "Memory save failed");
 		}
