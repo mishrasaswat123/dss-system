@@ -741,6 +741,7 @@ STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} i
     contextRegime:       ctx.regime,
     confidenceNotePresent: !!_confNote,
     macroContextPresent:   !!_macroCtx,
+    warmupActive:          !_brainSupplement,
     durabilityScore:       _brainSupplement ? (_brainSupplement.durabilityScore  ?? null) : null,
     durabilityClass:       _brainSupplement ? (_brainSupplement.durabilityClass  ?? null) : null,
     cyclesSinceChange:     _brainSupplement ? (_brainSupplement.cyclesSinceChange ?? null) : null,
@@ -4178,16 +4179,19 @@ function computeConviction(confidence, durabilityScore, portfolioAlignmentScore)
   else if (convictionScore >= 0.30) convictionClass = 'MODERATE';
   else                              convictionClass = 'LOW';
 
+  const _isDurabilityFallback = (_dur === 0.15);
   return {
     convictionScore,
     convictionClass,
-    convictionComponents: { confidence: _conf, durabilityScore: _dur, portfolioAlignmentScore: _align }
+    convictionComponents: { confidence: _conf, durabilityScore: _dur, portfolioAlignmentScore: _align },
+    convictionDataQuality: _isDurabilityFallback ? 'FALLBACK_DURABILITY' : 'LIVE'
   };
 }
 
 // Conviction smoothing — Brain.Auto CONFIDENCE_SMOOTHING = 0.70
 // Prevents single-cycle spikes. Applied in brain scheduler.
 let _lastConvictionScore = null;
+let _lastConvictionTs = null;
 const CONVICTION_SMOOTHING = 0.70;
 
 function smoothConviction(prev, next) {
@@ -4295,6 +4299,8 @@ function pceComputePortfolioContext(equityPct, debtPct, goldPct, riskProfile, re
     provided: true,
     valid: true,
     riskProfile,
+    goldPctDerived: (typeof goldPct !== 'number'),
+    goldPctAssumed: (typeof goldPct !== 'number') ? _gold : null,
     mismatchDirection,
     mismatchMagnitude: Math.round(_gap * 10) / 10,
     mismatchClass,
@@ -4303,6 +4309,151 @@ function pceComputePortfolioContext(equityPct, debtPct, goldPct, riskProfile, re
     targetRange: { lower: _lower, upper: _upper },
     portfolioAlignmentScore,
     computedAt: Date.now()
+  };
+}
+
+////////////////////////////////////////////////////////
+// SECTION-19D-V9 : ADVISORY COGNITION LAYER (Sprint 4)
+// aclComputeAdvisoryPosture() -- convergence of Market State + Portfolio State
+// Constitutional: no securities, no amounts, no suitability, deterministic
+////////////////////////////////////////////////////////
+
+function aclClassifyScenario(regime, durabilityClass, mismatchDirection, mismatchClass, confidence) {
+  const _bullish  = ['RISK_ON','STRONG_RISK_ON'].includes(regime);
+  const _bearish  = ['RISK_OFF','STRONG_RISK_OFF'].includes(regime);
+  const _neutral  = regime === 'NEUTRAL';
+  const _confirmed = ['ESTABLISHED','MATURE'].includes(durabilityClass);
+  const _fresh     = ['EMERGING','CONFIRMING'].includes(durabilityClass);
+  const _lowConf   = confidence < 0.40;
+  const _over      = mismatchDirection === 'OVERWEIGHT';
+  const _under     = mismatchDirection === 'UNDERWEIGHT';
+  const _appropriate = mismatchDirection === 'APPROPRIATELY_POSITIONED';
+  const _substantial = mismatchClass === 'SUBSTANTIAL';
+  const _mature    = durabilityClass === 'MATURE';
+
+  // H: ANY_REGIME + SUBSTANTIAL_MISMATCH + LOW_CONFIDENCE (check first — highest priority)
+  if (_substantial && _lowConf) return 'H';
+  // I: LATE_CYCLE_WARNING — MATURE RISK_ON (simplified: no horizonAlignment in v9 Sprint 4)
+  if (_mature && _bullish && _over) return 'I';
+  // A: CONFIRMED_BULLISH + OVERWEIGHT
+  if (_bullish && _confirmed && _over) return 'A';
+  // B: CONFIRMED_BULLISH + UNDERWEIGHT
+  if (_bullish && _confirmed && _under) return 'B';
+  // C: FRESH_BULLISH + ANY
+  if (_bullish && _fresh) return 'C';
+  // F: CONFIRMED_BEARISH + OVERWEIGHT
+  if (_bearish && _confirmed && _over) return 'F';
+  // G: CONFIRMED_BEARISH + APPROPRIATE/UNDERWEIGHT
+  if (_bearish && _confirmed && (_appropriate || _under)) return 'G';
+  // D: NEUTRAL + OVERWEIGHT SIGNIFICANT+
+  if (_neutral && _over && ['SIGNIFICANT','SUBSTANTIAL'].includes(mismatchClass)) return 'D';
+  // E: NEUTRAL + APPROPRIATELY_POSITIONED (or any remaining neutral)
+  return 'E';
+}
+
+function aclGetIntensityAndPacing(scenario, durabilityClass) {
+  const _mature = durabilityClass === 'MATURE';
+  const _established = durabilityClass === 'ESTABLISHED';
+  switch (scenario) {
+    case 'A': return { intensity: 'MAINTAIN',             pacing: null };
+    case 'B': return { intensity: _established||_mature ? 'ACT' : 'CONSIDER',
+                       pacing: _mature ? { tranches:2, periodWeeks:3 } : _established ? { tranches:4, periodWeeks:4 } : { tranches:7, periodWeeks:7 } };
+    case 'C': return { intensity: 'OBSERVE',              pacing: null };
+    case 'D': return { intensity: 'CONSIDER',             pacing: { tranches:7, periodWeeks:7 } };
+    case 'E': return { intensity: 'MAINTAIN',             pacing: null };
+    case 'F': return { intensity: 'PRIORITISE_REDUCTION', pacing: { tranches:2, periodWeeks:3 } };
+    case 'G': return { intensity: 'MAINTAIN',             pacing: null };
+    case 'H': return { intensity: 'OBSERVE',              pacing: null };
+    case 'I': return { intensity: 'ACT',                  pacing: { tranches:2, periodWeeks:3 } };
+    default:  return { intensity: 'OBSERVE',              pacing: null };
+  }
+}
+
+const ACL_POSTURE_TEMPLATES = {
+  A: 'Regime supports equity positioning. Portfolio is well-deployed. Maintain current allocation and monitor for late-cycle signals.',
+  B: 'Confirmed regime supports increased equity allocation. Gradual deployment appropriate given conviction level.',
+  C: 'Regime signal is present but unconfirmed. Await durability confirmation before adjusting allocation.',
+  D: 'Market regime is neutral. Elevated equity exposure creates unnecessary risk. Gradual reduction towards target range is appropriate.',
+  E: 'Market regime is neutral and portfolio is appropriately positioned. Maintain current allocation.',
+  F: 'Defensive regime confirmed. Portfolio is over-exposed to equity risk. Prioritise reduction towards target range.',
+  G: 'Defensive regime confirmed. Portfolio is appropriately positioned or defensively oriented. Maintain defensive posture.',
+  H: 'Significant positioning gap detected under low confidence conditions. Validate data quality before acting.',
+  I: 'Regime is mature and portfolio is over-positioned. Late-cycle discipline suggests selective and measured approach.'
+};
+
+const ACL_STRESS_TABLE = {
+  Conservative: '3-7% historical drawdown range observed in similar conditions.',
+  Moderate:     '7-15% historical drawdown range observed in similar conditions.',
+  Aggressive:   '12-22% historical drawdown range observed in similar conditions.'
+};
+
+function aclComputeAdvisoryPosture(marketState, portfolioState, convictionScore, convictionClass) {
+  // Input validation
+  if (!marketState || !marketState.regime) { return { valid: false, error: 'ACL_MARKET_STATE_UNAVAILABLE', aclEligibility: false, degradationStatus: 'MARKET_STATE_UNAVAILABLE' }; }
+  if (!portfolioState || !portfolioState.provided) { return { valid: false, error: 'ACL_NO_PORTFOLIO_CONTEXT', aclEligibility: false, degradationStatus: 'NO_PORTFOLIO_CONTEXT' }; }
+  if (!portfolioState.valid) { return { valid: false, error: 'ACL_INVALID_PORTFOLIO_INPUT', aclEligibility: false, degradationStatus: 'INVALID_PORTFOLIO_INPUT' }; }
+
+  const { regime, durabilityClass, confidence } = marketState;
+  const { mismatchDirection, mismatchClass, riskProfile } = portfolioState;
+
+  const scenario    = aclClassifyScenario(regime, durabilityClass, mismatchDirection, mismatchClass, confidence || 0.50);
+  const { intensity, pacing } = aclGetIntensityAndPacing(scenario, durabilityClass);
+  const postureStatement = ACL_POSTURE_TEMPLATES[scenario] || ACL_POSTURE_TEMPLATES['E'];
+
+  // portfolioPostureValidation — constitutional safety check
+  const _violations = [];
+  if (/[0-9]+%/.test(postureStatement))      _violations.push('AMOUNT_IN_STATEMENT');
+  if (/fund|scheme|stock|bond/i.test(postureStatement)) _violations.push('SECURITY_NAMED');
+  if (/suitable|appropriate for you/i.test(postureStatement)) _violations.push('SUITABILITY_CLAIM');
+  if (_violations.length > 0) {
+    return { valid: false, error: 'ACL_GOVERNANCE_VIOLATION', violations: _violations };
+  }
+
+  // stressAwarenessNote — RISK_OFF ESTABLISHED/MATURE only
+  let stressAwarenessNote = null;
+  const _bearishConfirmed = ['RISK_OFF','STRONG_RISK_OFF'].includes(regime) && ['ESTABLISHED','MATURE'].includes(durabilityClass);
+  if (_bearishConfirmed && riskProfile && ACL_STRESS_TABLE[riskProfile]) {
+    stressAwarenessNote = 'Historical analogue (not a projection): ' + ACL_STRESS_TABLE[riskProfile];
+  }
+
+  const _govDowngrades = [];
+  let _cappedIntensity = intensity;
+  const _capsApplied = [];
+  const _convScore = (typeof convictionScore === 'number') ? convictionScore : 0.50;
+  if (_convScore < 0.30 && ['ACT','CONSIDER','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'OBSERVE'; _capsApplied.push('LOW_CONVICTION_CAP'); _govDowngrades.push('conviction<0.30->OBSERVE'); }
+  if (durabilityClass === 'EMERGING' && ['ACT','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'CONSIDER'; _capsApplied.push('EMERGING_DURABILITY_CAP'); _govDowngrades.push('EMERGING->CONSIDER'); }
+  if ((confidence || 0) < 0.40 && ['ACT','CONSIDER','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'OBSERVE'; _capsApplied.push('LOW_CONFIDENCE_CAP'); _govDowngrades.push('conf<0.40->OBSERVE'); }
+  // RF-1: fallback durability governance cap
+  const _durScore_acl = (marketState && typeof marketState.durabilityScore === 'number') ? marketState.durabilityScore : 0.15;
+  const _durIsFallback = (_durScore_acl === 0.15);
+  if (_durIsFallback && ['ACT','CONSIDER','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'OBSERVE'; _capsApplied.push('FALLBACK_DURABILITY_CAP'); _govDowngrades.push('fallback_durability->OBSERVE'); }
+  return {
+    valid: true,
+    scenarioType:        scenario,
+    adjustmentIntensity: _cappedIntensity,
+    mismatchDirection,
+    mismatchClass,
+    deploymentPacing:    pacing,
+    postureStatement,
+    stressAwarenessNote,
+    horizonQualification: null,
+    advisoryBasisTrace: {
+      regimeInput:             regime,
+      durabilityInput:         durabilityClass,
+      mismatchInput:           mismatchDirection + '_' + mismatchClass,
+      convictionInput:         convictionClass || null,
+      convictionScoreInput:    typeof convictionScore === 'number' ? convictionScore : null,
+      scenarioResolution:      scenario,
+      scenarioResolutionMethod: ['A','B','C','D','F','G','H','I'].indexOf(scenario) >= 0 ? 'EXPLICIT' : 'FALLTHROUGH'
+    },
+    computedAt:              Date.now(),
+    portfolioContextProvided: true,
+    requestedIntensity:   intensity,
+    cappedIntensity:      _cappedIntensity,
+    capsApplied:          _capsApplied,
+    governanceDowngrades: _govDowngrades,
+    aclEligibility:       true,
+    degradationStatus:    _capsApplied.length > 0 ? 'GOVERNANCE_CAPPED' : 'CLEAN'
   };
 }
 
@@ -6253,8 +6404,11 @@ setTimeout(() => {
         ...(() => { try {
           const _durScore  = (() => { try { return computeRegimeDurability(MEMORY, _brainRegime.moduleScores).durabilityScore; } catch(e) { return 0.15; } })();
           const _rawConv   = computeConviction(_brainRegime.confidence ?? (DSSCache.get('score:equity')?.confidence ?? 0.50), _durScore, 0.50);
+          const _nowTs = Date.now();
+          if (_lastConvictionTs && (_nowTs - _lastConvictionTs) > 300000) { _lastConvictionScore = null; }
           const _smoothed  = smoothConviction(_lastConvictionScore, _rawConv.convictionScore);
           _lastConvictionScore = _smoothed;
+          _lastConvictionTs = _nowTs;
           const _trajectory = updateConvictionTrajectory(_smoothed);
           return { convictionScore: _smoothed, convictionClass: _rawConv.convictionClass, convictionComponents: _rawConv.convictionComponents, convictionTrajectory: _trajectory };
         } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null, convictionTrajectory: null }; } })(),
@@ -8542,6 +8696,54 @@ app.post("/api/v1/portfolio/context", (req, res) =>
 
 
 // ===============================
+// SPRINT 4: POST /api/v1/advisory/posture
+// ACL endpoint — requires portfolio context in request body
+// Constitutional: no securities, no amounts, deterministic
+// ===============================
+app.post("/api/v1/advisory/posture", (req, res) =>
+  safeExecuteAsync(async () => {
+    const { equityPct, debtPct, goldPct, riskProfile } = req.body || {};
+    if (typeof equityPct !== 'number' || typeof debtPct !== 'number' || !riskProfile) {
+      return res.status(400).json({ status: 'ERROR', error: 'ACL_NO_PORTFOLIO_CONTEXT', aclEligibility: false, degradationStatus: 'NO_PORTFOLIO_CONTEXT' });
+    }
+    const _bl = DSSCache.get('brain:latest') || {};
+    const _regime      = _bl.regime         || 'NEUTRAL';
+    const _durClass    = _bl.durabilityClass || 'EMERGING';
+    const _durScore    = _bl.durabilityScore || 0.15;
+    const _conf        = _bl.confidence      || 0.50;
+    const _convScore   = _bl.convictionScore  || null;
+    const _convClass   = _bl.convictionClass  || null;
+    const pce = pceComputePortfolioContext(equityPct, debtPct, goldPct ?? null, riskProfile, _regime, _durClass);
+    if (!pce.valid) {
+      return res.status(400).json({ status: 'ERROR', error: pce.error, reason: pce.reason || null });
+    }
+    const marketState = { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf };
+    const acl = aclComputeAdvisoryPosture(marketState, pce, _convScore, _convClass);
+    if (!acl.valid) {
+      return res.status(400).json({ status: 'ERROR', error: acl.error, violations: acl.violations || null });
+    }
+    // Recompute conviction with portfolio alignment
+    const _convFull = (() => { try {
+      const _c = computeConviction(_conf, _durScore, pce.portfolioAlignmentScore);
+      return { convictionScore: _c.convictionScore, convictionClass: _c.convictionClass, convictionComponents: _c.convictionComponents };
+    } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null }; } })();
+    // Privacy: log mismatchClass only
+    logger.info({ job: 'acl', regime: _regime, durabilityClass: _durClass, scenario: acl.scenarioType, intensity: acl.adjustmentIntensity, mismatchClass: pce.mismatchClass }, 'ACL posture computed');
+    return res.json({
+      status: 'OK',
+      timestamp: Date.now(),
+      data: {
+        advisoryPosture: acl,
+        portfolioContext: pce,
+        conviction: _convFull,
+        marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf }
+      }
+    });
+  }, res)
+);
+
+
+// ===============================
 // GET /api/v1/macro
 // Unified macro intelligence endpoint — FRED + BLS
 // ===============================
@@ -9190,7 +9392,7 @@ app.get("/health", (req, res) => {
 		  // v9 Sprint 1 fix: push fresh durability into brain:latest from POST cycle
 		  try {
 		    const _bl = DSSCache.get('brain:latest') || {};
-		    const _cv = (() => { try { const _d = MEMORY._lastDurability ? MEMORY._lastDurability.durabilityScore : 0.15; const _c = computeConviction(_bl.confidence ?? 0.50, _d, 0.50); const _s = smoothConviction(_lastConvictionScore, _c.convictionScore); _lastConvictionScore = _s; const _t = updateConvictionTrajectory(_s); return { convictionScore: _s, convictionClass: _c.convictionClass, convictionTrajectory: _t }; } catch(e) { return { convictionScore: null, convictionClass: null, convictionTrajectory: null }; } })();
+		    const _cv = (() => { try { const _d = MEMORY._lastDurability ? MEMORY._lastDurability.durabilityScore : 0.15; const _c = computeConviction(_bl.confidence ?? 0.50, _d, 0.50); const _nowTs2 = Date.now(); if (_lastConvictionTs && (_nowTs2 - _lastConvictionTs) > 300000) { _lastConvictionScore = null; } const _s = smoothConviction(_lastConvictionScore, _c.convictionScore); _lastConvictionScore = _s; _lastConvictionTs = _nowTs2; const _t = updateConvictionTrajectory(_s); return { convictionScore: _s, convictionClass: _c.convictionClass, convictionTrajectory: _t }; } catch(e) { return { convictionScore: null, convictionClass: null, convictionTrajectory: null }; } })();
 		    DSSCache.set('brain:latest', { ..._bl,
 		      durabilityScore:   MEMORY._lastDurability?.durabilityScore   ?? 0.15,
 		      durabilityClass:   MEMORY._lastDurability?.durabilityClass   ?? 'EMERGING',
