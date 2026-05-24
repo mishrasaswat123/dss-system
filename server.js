@@ -4209,6 +4209,104 @@ function updateConvictionTrajectory(score) {
 }
 
 ////////////////////////////////////////////////////////
+// SECTION-19C-V9 : PORTFOLIO CONTEXT ENGINE (Sprint 3)
+// PortfolioContextEngine.compute() — pure function, no I/O, no caching
+// Constitutional: allocation values NEVER logged or persisted
+////////////////////////////////////////////////////////
+
+const PCE_EQUITY_RANGES = {
+  STRONG_RISK_ON: { Conservative: [35,50], Moderate: [55,70], Aggressive: [70,85] },
+  RISK_ON:        { Conservative: [30,45], Moderate: [50,65], Aggressive: [65,80] },
+  NEUTRAL:        { Conservative: [25,40], Moderate: [40,55], Aggressive: [55,70] },
+  RISK_OFF:       { Conservative: [15,30], Moderate: [25,40], Aggressive: [35,55] },
+  STRONG_RISK_OFF:{ Conservative: [10,20], Moderate: [15,30], Aggressive: [25,40] }
+};
+
+const PCE_ALIGNMENT_SCORES = {
+  APPROPRIATELY_POSITIONED: 0.20,
+  MINIMAL:   0.30,
+  MODERATE:  0.55,
+  SIGNIFICANT: 0.75,
+  SUBSTANTIAL: 0.90
+};
+
+function pceComputePortfolioContext(equityPct, debtPct, goldPct, riskProfile, regime, durabilityClass) {
+  // Input validation
+  const VALID_PROFILES = ['Conservative', 'Moderate', 'Aggressive'];
+  const VALID_REGIMES  = ['STRONG_RISK_ON','RISK_ON','NEUTRAL','RISK_OFF','STRONG_RISK_OFF'];
+
+  if (typeof equityPct !== 'number' || typeof debtPct !== 'number') {
+    return { valid: false, error: 'PCE_INVALID_INPUT', provided: true };
+  }
+  const _gold = (typeof goldPct === 'number') ? goldPct : (100 - equityPct - debtPct);
+  const _sum = equityPct + debtPct + _gold;
+  if (Math.abs(_sum - 100) > 1) {
+    return { valid: false, error: 'PCE_INVALID_INPUT', reason: 'sum_check_failed', provided: true };
+  }
+  if (equityPct < 0 || debtPct < 0 || _gold < 0) {
+    return { valid: false, error: 'PCE_INVALID_INPUT', reason: 'negative_value', provided: true };
+  }
+  if (!VALID_PROFILES.includes(riskProfile)) {
+    return { valid: false, error: 'PCE_INVALID_INPUT', reason: 'invalid_risk_profile', provided: true };
+  }
+  const _regime = VALID_REGIMES.includes(regime) ? regime : 'NEUTRAL';
+  const _dur    = durabilityClass || 'EMERGING';
+
+  // Equity range lookup
+  const _baseRange = PCE_EQUITY_RANGES[_regime][riskProfile];
+  let _lower = _baseRange[0];
+  let _upper = _baseRange[1];
+
+  // Durability adjustment
+  if (_dur === 'EMERGING') { _lower -= 5; _upper += 5; }
+  if (_dur === 'MATURE' && riskProfile === 'Aggressive') { _upper -= 5; }
+  _lower = Math.max(0, _lower);
+  _upper = Math.min(100, _upper);
+
+  const _midpoint = (_lower + _upper) / 2;
+  const _gap = equityPct - _midpoint;
+  const _absGap = Math.abs(_gap);
+
+  // Mismatch direction
+  let mismatchDirection;
+  if (_absGap < 5)       mismatchDirection = 'APPROPRIATELY_POSITIONED';
+  else if (_gap > 0)     mismatchDirection = 'OVERWEIGHT';
+  else                   mismatchDirection = 'UNDERWEIGHT';
+
+  // Mismatch class
+  let mismatchClass;
+  if (_absGap < 5)        mismatchClass = 'MINIMAL';
+  else if (_absGap < 10)  mismatchClass = 'MODERATE';
+  else if (_absGap < 20)  mismatchClass = 'SIGNIFICANT';
+  else                    mismatchClass = 'SUBSTANTIAL';
+
+  // Deployment capacity
+  const _cap = mismatchDirection === 'UNDERWEIGHT' ? Math.abs(_gap) : 0;
+  let deploymentCapacityClass;
+  if (_cap < 5)       deploymentCapacityClass = 'MINIMAL';
+  else if (_cap < 15) deploymentCapacityClass = 'MODERATE';
+  else                deploymentCapacityClass = 'SUBSTANTIAL';
+
+  // portfolioAlignmentScore for conviction engine
+  const _alignKey = mismatchDirection === 'APPROPRIATELY_POSITIONED' ? 'APPROPRIATELY_POSITIONED' : mismatchClass;
+  const portfolioAlignmentScore = PCE_ALIGNMENT_SCORES[_alignKey] ?? 0.50;
+
+  return {
+    provided: true,
+    valid: true,
+    riskProfile,
+    mismatchDirection,
+    mismatchMagnitude: Math.round(_gap * 10) / 10,
+    mismatchClass,
+    deploymentCapacity: Math.round(_cap * 10) / 10,
+    deploymentCapacityClass,
+    targetRange: { lower: _lower, upper: _upper },
+    portfolioAlignmentScore,
+    computedAt: Date.now()
+  };
+}
+
+////////////////////////////////////////////////////////
 // SECTION-19B : REGIME ENGINE (AUTHORITATIVE)
 ////////////////////////////////////////////////////////
 
@@ -8398,6 +8496,46 @@ app.post("/api/v1/narrative/generate", (req, res) =>
       timestamp: Date.now(),
       dataStatus: result.narrativeMeta && result.narrativeMeta.fallbackUsed ? "fallback" : "live",
       data: result,
+    });
+  }, res)
+);
+
+
+// ===============================
+// SPRINT 3: POST /api/v1/portfolio/context
+// Stateless PCE — session-scoped, never persisted
+// Constitutional: no allocation values in logs
+// ===============================
+app.post("/api/v1/portfolio/context", (req, res) =>
+  safeExecuteAsync(async () => {
+    const { equityPct, debtPct, goldPct, riskProfile } = req.body || {};
+    if (typeof equityPct !== 'number' || typeof debtPct !== 'number' || !riskProfile) {
+      return res.status(400).json({ status: "ERROR", error: "PCE_INVALID_INPUT", message: "equityPct, debtPct, riskProfile required" });
+    }
+    const _brainLatest = DSSCache.get("brain:latest") || {};
+    const _regime = _brainLatest.regime || "NEUTRAL";
+    const _durClass = _brainLatest.durabilityClass || "EMERGING";
+    const _durScore = _brainLatest.durabilityScore || 0.15;
+    const _conf = _brainLatest.confidence || 0.50;
+    const pceResult = pceComputePortfolioContext(equityPct, debtPct, goldPct ?? null, riskProfile, _regime, _durClass);
+    if (!pceResult.valid) {
+      return res.status(400).json({ status: "ERROR", error: pceResult.error, reason: pceResult.reason || null });
+    }
+    // Compute conviction with live portfolioAlignmentScore
+    const _convResult = (() => { try {
+      const _c = computeConviction(_conf, _durScore, pceResult.portfolioAlignmentScore);
+      return { convictionScore: _c.convictionScore, convictionClass: _c.convictionClass, convictionComponents: _c.convictionComponents };
+    } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null }; } })();
+    // Privacy: observability records mismatchClass only — never numeric allocation values
+    logger.info({ job: "pce", regime: _regime, durabilityClass: _durClass, mismatchClass: pceResult.mismatchClass, mismatchDirection: pceResult.mismatchDirection }, "PCE computed");
+    return res.json({
+      status: "OK",
+      timestamp: Date.now(),
+      data: {
+        portfolioContext: pceResult,
+        conviction: _convResult,
+        marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf }
+      }
     });
   }, res)
 );
