@@ -172,7 +172,19 @@ const PROMPT_VERSION = "v1.0.0";
 
 // Forbidden language filter
 const FORBIDDEN_PHRASES = ["guaranteed","certain to","must buy","strong buy",
-  "sell immediately","risk-free","assured returns","definitely will","100%"];
+  "sell immediately","risk-free","assured returns","definitely will","100%",
+  // H5.3 extensions
+  "must act now","act immediately","don't miss","act before","time is running out",
+  "window is closing","limited time","before the market opens","today's opportunity",
+  "market crash","collapse is coming","panic selling","catastrophic losses","disaster ahead",
+  "protect yourself now","crisis mode","emergency rebalancing","flee to safety",
+  "rare opportunity","once in a decade","exceptional entry point","ideal conditions",
+  "perfect allocation","best time to invest","golden opportunity","high-return opportunity",
+  "will definitely","cannot fail","no downside risk","market will definitely","certain to outperform",
+  "exciting opportunity","remarkable setup","outstanding conditions","markets look great",
+  "fantastic entry","brilliant timing","extraordinary conditions",
+  "safe investment","ideal for you","perfect for your goals","designed for investors like you","meets your needs"
+];
 
 function sanitizeNarrativeText(text) {
   if (!text) return text;
@@ -754,9 +766,44 @@ STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} i
 
   logger.info({ job: "narrative-generate", provider: narrativeMeta.provider, fallback: fallbackUsed, latencyMs }, "Narrative generated");
 
+  // H1: Apply Final Governance Sanitizer
+  const _brainLatestForFgs = DSSCache.get('brain:latest') || null;
+  let _fgsResult = { executed: false, failureFallback: false, sanitizationsApplied: 0, categoriesTriggered: [], convictionDowngradesApplied: 0, suppressionsApplied: 0, sanitizerVersion: FGS_VERSION };
+  try {
+    const _fgsOut = fgsSanitize(raw, narrativeMeta, _brainLatestForFgs);
+    raw = _fgsOut.narrative;
+    _fgsResult = _fgsOut.fgsResult;
+  } catch(e) {
+    logger.error({ err: e.message }, 'FGS failed — serving ruleBasedAdapter fallback');
+    raw = ruleBasedAdapter(ctx);
+    _fgsResult = { executed: false, failureFallback: true, sanitizationsApplied: 0, categoriesTriggered: [], convictionDowngradesApplied: 0, suppressionsApplied: 0, sanitizerVersion: FGS_VERSION };
+  }
+  // H2: Detect uncertainty mode
+  const _uncertaintyMode = detectUncertaintyMode(narrativeMeta, _brainLatestForFgs);
+  // H3: Detect mature regime reversal
+  const _dur = _brainLatestForFgs && _brainLatestForFgs.durabilityClass || 'EMERGING';
+  const _reg = _brainLatestForFgs && _brainLatestForFgs.regime || ctx.regime;
+  const _cyc = _brainLatestForFgs && typeof _brainLatestForFgs.cyclesSinceChange === 'number' ? _brainLatestForFgs.cyclesSinceChange : 0;
+  const _reversalState = detectMatureRegimeReversal(_reg, _dur, _cyc);
+  // H4: Escalation caps
+  const _convClass = _brainLatestForFgs && _brainLatestForFgs.convictionClass || null;
+  const _convScore = _brainLatestForFgs && _brainLatestForFgs.convictionScore || null;
+  const _conf = ctx.confidence || 0.50;
+  const _fbMods = _brainLatestForFgs && _brainLatestForFgs.fallbackModules ? _brainLatestForFgs.fallbackModules.length : 0;
+  const _escalationCheck = convictionConsistencyValidation('ACT', _convClass, _convScore, _dur, _conf, _reversalState.matureRegimeReversal, _fbMods);
   return {
     ...raw,
-    narrativeMeta,
+    narrativeMeta: {
+      ...narrativeMeta,
+      fgsResult: _fgsResult,
+      uncertaintyMode: _uncertaintyMode,
+      matureRegimeReversal: _reversalState.matureRegimeReversal,
+      reversalWindowActive: _reversalState.reversalWindowActive,
+      reversalWindowCyclesRemaining: _reversalState.reversalWindowCyclesRemaining,
+      previousMatureRegime: _reversalState.previousMatureRegime,
+      escalationCapsApplied: _escalationCheck.caps,
+      toneGovernanceFlags: _fgsResult.categoriesTriggered
+    },
     governanceApplied: true,
     disclaimer: ctx.confidence < 0.40
       ? "This narrative is generated under reduced data confidence. Some inputs use fallback values."
@@ -4112,6 +4159,169 @@ function deriveMacroCompositeScore({
 	  };
 	}
 
+
+////////////////////////////////////////////////////////
+// SECTION-19-V9-H : SPRINT 5 GOVERNANCE HARDENING
+// H1: FinalGovernanceSanitizer
+// H2: Uncertainty Mode Detection
+// H3: Mature Regime Reversal Protection
+// H4: Escalation Caps Matrix
+////////////////////////////////////////////////////////
+
+// H2: Uncertainty mode trigger detection
+function detectUncertaintyMode(narrativeMeta, brainLatest) {
+  const triggers = [];
+  const conf = brainLatest && typeof brainLatest.confidence === 'number' ? brainLatest.confidence : 0.50;
+  const durClass = brainLatest && brainLatest.durabilityClass ? brainLatest.durabilityClass : 'EMERGING';
+  const convClass = brainLatest && brainLatest.convictionClass ? brainLatest.convictionClass : null;
+  const convTraj = brainLatest && brainLatest.convictionTrajectory ? brainLatest.convictionTrajectory : null;
+  const cycles = brainLatest && typeof brainLatest.cyclesSinceChange === 'number' ? brainLatest.cyclesSinceChange : 0;
+  const fallbackMods = brainLatest && Array.isArray(brainLatest.fallbackModules) ? brainLatest.fallbackModules.length : 0;
+  const highTriggers = [];
+  const moderateTriggers = [];
+  if (conf < 0.50)                        highTriggers.push('LOW_CONFIDENCE');
+  if (durClass === 'EMERGING')             highTriggers.push('EMERGING_DURABILITY');
+  if (convClass === 'LOW')                 highTriggers.push('LOW_CONVICTION');
+  if (cycles <= 3)                         highTriggers.push('UNSTABLE_REGIME_TRANSITION');
+  if (fallbackMods >= 3)                   moderateTriggers.push('HIGH_FALLBACK_COUNT');
+  if (convTraj === 'DECLINING')            moderateTriggers.push('CONVICTION_DECLINING');
+  const allTriggers = [...highTriggers, ...moderateTriggers];
+  const isHigh = highTriggers.length > 0;
+  const isCompound = moderateTriggers.length >= 3;
+  const severity = isCompound ? 'COMPOUND' : isHigh ? 'HIGH' : moderateTriggers.length > 0 ? 'MODERATE' : null;
+  return {
+    active: allTriggers.length > 0,
+    triggers: allTriggers,
+    severity,
+    mandatoryPosture: (isHigh || isCompound) ? 'OBSERVATIONAL' : moderateTriggers.length > 0 ? 'CONDITIONAL' : 'STANDARD'
+  };
+}
+
+// H3: Mature Regime Reversal detection
+let _prevDurabilityClass = null;
+let _prevRegimeForReversal = null;
+let _matureReversalDetectedAt = null;
+let _matureReversalPrevRegime = null;
+
+function detectMatureRegimeReversal(currentRegime, currentDurabilityClass, cyclesSinceChange) {
+  const wasMature = _prevDurabilityClass === 'MATURE';
+  const regimeChanged = _prevRegimeForReversal && _prevRegimeForReversal !== currentRegime;
+  const isFresh = cyclesSinceChange <= 3;
+  let reversalActive = false;
+  let cyclesRemaining = null;
+  if (wasMature && regimeChanged && isFresh) {
+    if (!_matureReversalDetectedAt) {
+      _matureReversalDetectedAt = Date.now();
+      _matureReversalPrevRegime = _prevRegimeForReversal;
+    }
+    reversalActive = true;
+    cyclesRemaining = Math.max(0, 5 - cyclesSinceChange);
+  } else if (cyclesSinceChange > 5) {
+    _matureReversalDetectedAt = null;
+    _matureReversalPrevRegime = null;
+  }
+  // Update tracking state
+  _prevDurabilityClass = currentDurabilityClass;
+  _prevRegimeForReversal = currentRegime;
+  return {
+    matureRegimeReversal: reversalActive,
+    reversalWindowActive: reversalActive,
+    reversalWindowCyclesRemaining: cyclesRemaining,
+    previousMatureRegime: _matureReversalPrevRegime || null,
+    reversalDetectedAt: _matureReversalDetectedAt || null
+  };
+}
+
+// H4: Escalation caps matrix — convictionConsistencyValidation
+function convictionConsistencyValidation(intensity, convictionClass, convictionScore, durabilityClass, confidence, matureReversal, fallbackModCount) {
+  const caps = [];
+  let capped = intensity;
+  const INTENSITY_RANK = { 'OBSERVE': 0, 'MAINTAIN': 0, 'CONSIDER': 1, 'ACT': 2, 'PRIORITISE_REDUCTION': 3 };
+  const applyRank = (cap, reason) => {
+    if ((INTENSITY_RANK[capped] || 0) > (INTENSITY_RANK[cap] || 0)) {
+      capped = cap; caps.push(reason);
+    }
+  };
+  // H3 override — highest priority
+  if (matureReversal) { capped = 'OBSERVE'; caps.push('MATURE_REVERSAL_OVERRIDE'); return { intensity: capped, caps }; }
+  // Compound no-confidence floor (H4.4)
+  if ((confidence || 0) < 0.50 && durabilityClass === 'EMERGING' && (fallbackModCount || 0) >= 2) {
+    capped = 'OBSERVE'; caps.push('COMPOUND_NO_CONFIDENCE_FLOOR'); return { intensity: capped, caps };
+  }
+  // Individual caps
+  if (convictionClass === 'LOW')                                    applyRank('CONSIDER', 'LOW_CONVICTION_CAP');
+  if (convictionClass === 'MODERATE')                               applyRank('ACT', 'MODERATE_CONVICTION_CAP');
+  if (durabilityClass === 'EMERGING')                               applyRank('CONSIDER', 'EMERGING_DURABILITY_CAP');
+  if (durabilityClass === 'CONFIRMING' && convictionClass !== 'HIGH' && convictionClass !== 'STRONG') applyRank('ACT', 'CONFIRMING_DURABILITY_CAP');
+  if ((confidence || 0) < 0.40)                                     applyRank('OBSERVE', 'LOW_CONFIDENCE_CAP');
+  else if ((confidence || 0) < 0.60)                                applyRank('CONSIDER', 'MEDIUM_CONFIDENCE_CAP');
+  if ((fallbackModCount || 0) >= 3)                                  applyRank('CONSIDER', 'HIGH_FALLBACK_CAP');
+  return { intensity: capped, caps };
+}
+
+// H1: Final Governance Sanitizer
+const FGS_VERSION = '1.0';
+
+function fgsSanitize(narrative, narrativeMeta, brainLatest) {
+  if (!narrative) return { narrative, fgsResult: { executed: false, failureFallback: false, sanitizationsApplied: 0, categoriesTriggered: [], convictionDowngradesApplied: 0, suppressionsApplied: 0, sanitizerVersion: FGS_VERSION } };
+  let sanitizationsApplied = 0;
+  let suppressionsApplied = 0;
+  let convictionDowngradesApplied = 0;
+  const categoriesTriggered = [];
+  const out = { ...narrative };
+  const convClass = (brainLatest && brainLatest.convictionClass) || null;
+  const durClass = (brainLatest && brainLatest.durabilityClass) || 'EMERGING';
+  const fieldsToSanitize = ['summary', 'tacticalView', 'macroContext', 'confidenceNote',
+    'portfolioPostureNote', 'durabilityNote', 'convictionQualifier',
+    'deploymentPacingNote', 'stressAwarenessNote'];
+  for (const field of fieldsToSanitize) {
+    if (!out[field] || typeof out[field] !== 'string') continue;
+    let text = out[field];
+    // S1: Transaction specificity
+    const s1rx = /\b(move|shift|transfer|invest|withdraw|redeploy|allocate)\s+\d+[\d.]*\s*%/gi;
+    if (s1rx.test(text)) { text = text.replace(s1rx, '[Specific allocation guidance is the responsibility of the advisor.]'); sanitizationsApplied++; if (!categoriesTriggered.includes('S1_TRANSACTION_SPECIFICITY')) categoriesTriggered.push('S1_TRANSACTION_SPECIFICITY'); }
+    // S2: Urgency framing
+    const s2patterns = ['must act now','act immediately','urgent','time-sensitive','window closing','limited time','don\'t delay','act before markets','once in a decade'];
+    for (const p of s2patterns) { if (text.toLowerCase().includes(p)) { text = text.replace(new RegExp(p, 'gi'), ''); sanitizationsApplied++; if (!categoriesTriggered.includes('S2_URGENCY_FRAMING')) categoriesTriggered.push('S2_URGENCY_FRAMING'); } }
+    // S3: Product/security references (generic patterns)
+    const s3rx = /\b(fund|scheme|ETF|NAV|ISIN|BeES|Index Fund)\s+[A-Z][a-zA-Z]+/g;
+    if (s3rx.test(text)) { text = text.replace(s3rx, 'equity-oriented allocation'); sanitizationsApplied++; if (!categoriesTriggered.includes('S3_PRODUCT_REFERENCE')) categoriesTriggered.push('S3_PRODUCT_REFERENCE'); }
+    // S4: Prohibited certainty framing
+    const s4patterns = ['guaranteed','certain to','will definitely','cannot fail','assured','risk-free','no downside','safe investment','best time to invest','ideal allocation','perfect entry'];
+    for (const p of s4patterns) { if (text.toLowerCase().includes(p)) { text = text.replace(new RegExp(p, 'gi'), 'signal conditions are constructive'); sanitizationsApplied++; suppressionsApplied++; if (!categoriesTriggered.includes('S4_CERTAINTY_FRAMING')) categoriesTriggered.push('S4_CERTAINTY_FRAMING'); } }
+    // S5: Conviction-language alignment
+    if (convClass === 'LOW') {
+      const s5map = [['strong opportunity','potential opportunity warrants monitoring'],['deploy now','conditions may support gradual consideration'],['significant upside','some upside signals are present'],['high conviction',''],['act on this','consider monitoring']];
+      for (const [from, to] of s5map) { if (text.toLowerCase().includes(from)) { text = text.replace(new RegExp(from, 'gi'), to); convictionDowngradesApplied++; sanitizationsApplied++; if (!categoriesTriggered.includes('S5_CONVICTION_ALIGNMENT')) categoriesTriggered.push('S5_CONVICTION_ALIGNMENT'); } }
+    }
+    // S6: Suitability claims
+    const s6patterns = ['suitable for','appropriate for your','fits your profile','meets your requirement','ideal for','designed for investors like'];
+    for (const p of s6patterns) { if (text.toLowerCase().includes(p)) { text = text.replace(new RegExp(p, 'gi'), 'relevant to current market conditions'); sanitizationsApplied++; if (!categoriesTriggered.includes('S6_SUITABILITY_CLAIM')) categoriesTriggered.push('S6_SUITABILITY_CLAIM'); } }
+    // S7: Fear amplification (RISK_OFF contexts)
+    const s7patterns = [['market crash','sustained risk-off conditions'],['collapse is coming','sustained risk-off signals present'],['emergency rebalancing','defensive posture adjustment'],['flee to safety','increase allocation to defensive assets'],['catastrophic','significant'],['panic selling','sustained risk-off pressure']];
+    for (const [from, to] of s7patterns) { if (text.toLowerCase().includes(from)) { text = text.replace(new RegExp(from, 'gi'), to); sanitizationsApplied++; if (!categoriesTriggered.includes('S7_FEAR_AMPLIFICATION')) categoriesTriggered.push('S7_FEAR_AMPLIFICATION'); } }
+    out[field] = text.trim();
+  }
+  // H1.5 suppressions — remove entire sentences with prohibited patterns
+  const suppressPatterns = [/[^.!?]*\d+[\d.]*\s*%[^.!?]*(?:returns?|gains?|growth)[^.!?]*[.!?]/gi, /[^.!?]*(?:market will|markets will|will rise|will fall)[^.!?]*(?:next quarter|next month|this year)[^.!?]*[.!?]/gi, /[^.!?]*(?:SEBI|RBI|regulatory)[^.!?]*(?:compliant|approved|guideline)[^.!?]*[.!?]/gi];
+  for (const field of ['summary','tacticalView']) {
+    if (!out[field]) continue;
+    for (const rx of suppressPatterns) { if (rx.test(out[field])) { out[field] = out[field].replace(rx, '').trim(); suppressionsApplied++; } }
+  }
+  return {
+    narrative: out,
+    fgsResult: {
+      executed: true,
+      sanitizationsApplied,
+      categoriesTriggered,
+      convictionDowngradesApplied,
+      suppressionsApplied,
+      postSanitizationLength: JSON.stringify(out).length,
+      sanitizerVersion: FGS_VERSION,
+      failureFallback: false
+    }
+  };
+}
 
 ////////////////////////////////////////////////////////
 // SECTION-19A-V9 : REGIME DURABILITY ENGINE (Sprint 1)
