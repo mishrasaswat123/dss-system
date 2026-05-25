@@ -1,8 +1,0 @@
-/home/ubuntu/.pm2/logs/dss-error.log last 2500 lines:
-0|dss      | [13:26:26.186] ERROR (379964): SafeExecuteAsync failure
-0|dss      |       "type": "TypeError",
-0|dss      |           TypeError: warmup1.headers.getSetCookie is not a function
-0|dss      | [13:41:56.614] ERROR (379964): safeFetchText failed
-0|dss      | [13:41:56.653] ERROR (379964): SafeExecuteAsync failure
-0|dss      |       "type": "TypeError",
-0|dss      |           TypeError: warmup1.headers.getSetCookie is not a function
