@@ -174,188 +174,70 @@ const PROMPT_VERSION = "v1.0.0";
 // NARRATIVE RELIABILITY LAYER — v1.0.0
 // R1: Prompt Provenance Logging
 // R2: Narrative Replay Store (in-memory, admin-only, last 20 entries)
-// R3: Contradiction Detection
-// R4: Uncertainty Language Calibration
-// R5: Regression Test Suite
-// R6: Degradation Simulation Harness
-// ══════════════════════════════════════════════════════════════════
-
-// R1 — Provenance log: ring buffer, last 50 entries, no portfolio values
-const PROVENANCE_LOG = (() => {
-  const MAX = 50;
-  const entries = [];
-  return {
-    push(entry) {
-      entries.push({ ...entry, loggedAt: Date.now() });
-      if (entries.length > MAX) entries.shift();
-    },
-    getAll() { return [...entries]; },
-    getLast(n=10) { return entries.slice(-n); },
-    clear() { entries.length = 0; },
-    size() { return entries.length; },
-  };
-})();
-
-// R2 — Replay store: last 20 narrative generations with full prompt snapshot
-// Admin-only access via /api/v1/admin/narrative/replay
-// Never stores portfolio values — narrative context only
-const REPLAY_STORE = (() => {
-  const MAX = 20;
-  const entries = [];
-  return {
-    push(entry) {
-      entries.push(entry);
-      if (entries.length > MAX) entries.shift();
-    },
-    getAll() { return [...entries]; },
-    getById(id) { return entries.find(e => e.replayId === id) || null; },
-    size() { return entries.length; },
-  };
-})();
-
-// R1: Generate a deterministic hash for a narrative context snapshot
-// Used as replay identifier — reproducible for identical inputs
-function narrativeContextHash(ctx, audience, riskProfile, promptVersion) {
-  const snapshot = JSON.stringify({
-    regime: ctx.regime,
-    compositeScore: ctx.compositeScore,
-    confidence: ctx.confidence ? Math.round(ctx.confidence * 1000) / 1000 : null,
-    confidenceClass: ctx.confidenceClass,
-    fallbackModules: (ctx.fallbackModules || []).sort(),
-    degradedModules: (ctx.degradedModules || []).sort(),
-    audience,
-    riskProfile,
-    promptVersion,
-  });
-  return 'nr_' + hashlib_sha256_short(snapshot);
-}
-
-// Simple deterministic short hash (no crypto module needed — SHA256 approximation via string fold)
-function hashlib_sha256_short(str) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = (h * 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
-}
-
-// R1: Log a provenance entry for every narrative generation
-// No portfolio values. No client data. Governance-safe.
-function logNarrativeProvenance({ replayId, audience, riskProfile, provider, model, promptVersion,
-  regime, confidenceClass, fallbackUsed, fallbackReason, latencyMs, governanceViolations,
-  contradictions, uncertaintyActive, reversalActive, fgsSanitizations, degradationActive }) {
-  const entry = {
-    replayId,
-    audience,
-    riskProfile,
-    provider,
-    model: model || 'rulebased',
-    promptVersion,
-    regime,
-    confidenceClass,
-    fallbackUsed: !!fallbackUsed,
-    fallbackReason: fallbackReason || null,
-    latencyMs: Math.round(latencyMs || 0),
-    governanceViolations: governanceViolations || [],
-    contradictions: contradictions || [],
-    uncertaintyActive: !!uncertaintyActive,
-    reversalActive: !!reversalActive,
-    fgsSanitizations: fgsSanitizations || 0,
-    degradationActive: !!degradationActive,
-  };
-  PROVENANCE_LOG.push(entry);
-  logger.info({ job: 'narrative-provenance', replayId, provider: entry.provider,
-    fallback: entry.fallbackUsed, contradictions: entry.contradictions.length,
-    latencyMs: entry.latencyMs }, 'Narrative provenance logged');
-  return entry;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// R3 — CONTRADICTION DETECTION
-// Lightweight heuristic validation — no NLP required
-// Detects narrative/governance mismatch before render
-// ══════════════════════════════════════════════════════════════════
-
-// Contradiction rules: each returns { id, description } if contradiction found, else null
+// A5: Hardened Contradiction Detection (7 rules, expanded keyword sets)
 const CONTRADICTION_RULES = [
-  // C1: Bullish posture + defensive/cautious language
-  {
-    id: 'C1_BULLISH_CAUTIOUS_MISMATCH',
-    check(narrative, ctx, meta) {
-      const regime = ctx.regime || '';
-      const tone = narrative.marketTone || '';
-      const summary = (narrative.summary || '').toLowerCase();
-      const isBullish = regime.includes('RISK_ON');
-      const hasCautiousLanguage = summary.includes('cautious') || summary.includes('defensive') ||
-        summary.includes('reduce exposure') || summary.includes('pullback risk');
-      if (isBullish && tone === 'CAUTIOUS' && hasCautiousLanguage) {
-        return { id: 'C1_BULLISH_CAUTIOUS_MISMATCH', description: `RISK_ON regime with CAUTIOUS tone and defensive language` };
-      }
-      return null;
-    }
-  },
-  // C2: Strong conviction + heavy uncertainty language
-  {
-    id: 'C2_HIGH_CONVICTION_UNCERTAINTY_MISMATCH',
-    check(narrative, ctx, meta) {
-      const convClass = meta.convictionClass || '';
-      const summary = (narrative.summary || '').toLowerCase();
-      const isHighConviction = convClass === 'STRONG' || convClass === 'HIGH';
-      const hasUncertainty = summary.includes('unclear') || summary.includes('uncertain') ||
-        summary.includes('difficult to predict') || summary.includes('no clear direction');
-      if (isHighConviction && hasUncertainty) {
-        return { id: 'C2_HIGH_CONVICTION_UNCERTAINTY_MISMATCH', description: `${convClass} conviction with uncertainty-heavy language` };
-      }
-      return null;
-    }
-  },
-  // C3: Reversal window active + aggressive certainty tone
-  {
-    id: 'C3_REVERSAL_CERTAINTY_MISMATCH',
-    check(narrative, ctx, meta) {
-      const reversalActive = meta.reversalWindowActive || false;
-      const tone = narrative.marketTone || '';
-      const tactical = (narrative.tacticalView || '').toLowerCase();
-      const hasCertainty = tone === 'CONFIDENT' || tactical.includes('strongly recommend') ||
-        tactical.includes('clear opportunity') || tactical.includes('act now');
-      if (reversalActive && hasCertainty) {
-        return { id: 'C3_REVERSAL_CERTAINTY_MISMATCH', description: 'Reversal window active with high-certainty tone/language' };
-      }
-      return null;
-    }
-  },
-  // C4: Degradation active + overly authoritative narrative (no qualification)
-  {
-    id: 'C4_DEGRADATION_AUTHORITY_MISMATCH',
-    check(narrative, ctx, meta) {
-      const fallbackMods = ctx.fallbackModules || [];
-      const hasDegradation = fallbackMods.length >= 3;
-      const tone = narrative.marketTone || '';
-      const confidenceNote = narrative.confidenceNote || null;
-      const isOverlyAuthoritative = (tone === 'CONFIDENT' || tone === 'CONSTRUCTIVE') && !confidenceNote;
-      if (hasDegradation && isOverlyAuthoritative) {
-        return { id: 'C4_DEGRADATION_AUTHORITY_MISMATCH', description: `${fallbackMods.length} modules on fallback with ${tone} tone and no confidence qualification` };
-      }
-      return null;
-    }
-  },
-  // C5: RISK_OFF regime + constructive/confident deployment language
-  {
-    id: 'C5_RISK_OFF_DEPLOYMENT_MISMATCH',
-    check(narrative, ctx, meta) {
-      const regime = ctx.regime || '';
-      const tactical = (narrative.tacticalView || '').toLowerCase();
-      const isRiskOff = regime.includes('RISK_OFF');
-      const hasDeployment = tactical.includes('deploy') || tactical.includes('increase equity') ||
-        tactical.includes('add exposure') || tactical.includes('accumulate aggressively');
-      if (isRiskOff && hasDeployment) {
-        return { id: 'C5_RISK_OFF_DEPLOYMENT_MISMATCH', description: 'RISK_OFF regime with deployment/accumulation language in tactical view' };
-      }
-      return null;
-    }
-  },
+  { id: 'C1_BULLISH_CAUTIOUS_MISMATCH',
+    check(n, ctx, meta) {
+      if (!ctx.regime.includes('RISK_ON')) return null;
+      const all = ((n.summary||'')+(n.tacticalView||'')).toLowerCase();
+      const kw = ['cautious','defensive','pullback risk','reduce exposure','trim equity',
+        'protect capital','preserve optionality','avoid deployment','hold back',
+        'wait for clarity','elevated risk','market anxious','headwinds building','caution warranted'];
+      if (n.marketTone==='CAUTIOUS' && kw.some(k=>all.includes(k)))
+        return { id:'C1_BULLISH_CAUTIOUS_MISMATCH', description:`RISK_ON regime with CAUTIOUS tone and defensive language` };
+    } },
+  { id: 'C2_HIGH_CONVICTION_UNCERTAINTY_MISMATCH',
+    check(n, ctx, meta) {
+      if (meta.convictionClass!=='STRONG'&&meta.convictionClass!=='HIGH') return null;
+      const s = (n.summary||'').toLowerCase();
+      const kw = ['unclear','uncertain','no clear direction','difficult to predict','ambiguous',
+        'range-bound','mixed signals','conflicting','hard to call','visibility limited',
+        'awaiting confirmation','direction uncertain'];
+      if (kw.some(k=>s.includes(k)))
+        return { id:'C2_HIGH_CONVICTION_UNCERTAINTY_MISMATCH', description:`${meta.convictionClass} conviction with uncertainty language` };
+    } },
+  { id: 'C3_REVERSAL_CERTAINTY_MISMATCH',
+    check(n, ctx, meta) {
+      if (!meta.reversalWindowActive) return null;
+      const all = ((n.tacticalView||'')+(n.summary||'')).toLowerCase();
+      const kw = ['strongly recommend','act now','clear opportunity','ideal entry',
+        'excellent conditions','deploy aggressively','add exposure','accumulate now',
+        'strong buy signal','high confidence deployment'];
+      if (n.marketTone==='CONFIDENT'||kw.some(k=>all.includes(k)))
+        return { id:'C3_REVERSAL_CERTAINTY_MISMATCH', description:'Reversal window active with high-certainty tone/language' };
+    } },
+  { id: 'C4_DEGRADATION_AUTHORITY_MISMATCH',
+    check(n, ctx, meta) {
+      if ((ctx.fallbackModules||[]).length < 3) return null;
+      if ((n.marketTone==='CONFIDENT'||n.marketTone==='CONSTRUCTIVE')&&!n.confidenceNote)
+        return { id:'C4_DEGRADATION_AUTHORITY_MISMATCH', description:`${(ctx.fallbackModules||[]).length} fallback modules with ${n.marketTone} tone and no qualification` };
+    } },
+  { id: 'C5_RISK_OFF_DEPLOYMENT_MISMATCH',
+    check(n, ctx, meta) {
+      if (!ctx.regime.includes('RISK_OFF')) return null;
+      const t = (n.tacticalView||'').toLowerCase();
+      const kw = ['deploy','increase equity','accumulate aggressively','add exposure',
+        'buy the dip','increase allocation','go long','overweight equity','raise equity'];
+      if (kw.some(k=>t.includes(k)))
+        return { id:'C5_RISK_OFF_DEPLOYMENT_MISMATCH', description:'RISK_OFF regime with deployment language' };
+    } },
+  { id: 'C6_LOW_CONVICTION_STRONG_LANGUAGE',
+    check(n, ctx, meta) {
+      if (meta.convictionClass !== 'LOW') return null;
+      const t = (n.tacticalView||'').toLowerCase();
+      const kw = ['strongly','clearly','definitely','without doubt','with confidence',
+        'high conviction','decisive','unambiguous','certain','must'];
+      if (kw.some(k=>t.includes(k)))
+        return { id:'C6_LOW_CONVICTION_STRONG_LANGUAGE', description:'LOW conviction with strong/decisive tactical language' };
+    } },
+  { id: 'C7_UNCERTAINTY_MODE_CONFIDENT_TONE',
+    check(n, ctx, meta) {
+      if (!meta.uncertaintyMode?.active) return null;
+      if (n.marketTone==='CONFIDENT')
+        return { id:'C7_UNCERTAINTY_MODE_CONFIDENT_TONE', description:'Uncertainty mode active with CONFIDENT market tone' };
+    } },
 ];
+
 
 // scanContradictions: run all rules, return array of detected contradictions
 function scanContradictions(narrative, ctx, meta) {
@@ -571,6 +453,12 @@ const NARRATIVE_REGRESSION_TESTS = [
       return { pass: result.some(c => c.id === 'C5_RISK_OFF_DEPLOYMENT_MISMATCH'), detail: JSON.stringify(result.map(c=>c.id)) };
     }
   },
+  { id: 'NR-11',
+    desc:'C6: LOW conviction+strong language flags contradiction',
+    run() { const n={marketTone:'MEASURED',summary:'Market mixed.',tacticalView:'Strongly and clearly increase equity without doubt.'}; const ctx={regime:'NEUTRAL',compositeScore:50,confidence:0.55,fallbackModules:[]}; const m={convictionClass:'LOW',reversalWindowActive:false,uncertaintyMode:{active:false}}; const r=scanContradictions(n,ctx,m); return{pass:r.some(c=>c.id==='C6_LOW_CONVICTION_STRONG_LANGUAGE'),detail:JSON.stringify(r.map(c=>c.id))}; } },
+  { id: 'NR-12',
+    desc:'C7: uncertainty mode+CONFIDENT tone flags contradiction',
+    run() { const n={marketTone:'CONFIDENT',summary:'Market great.',tacticalView:'Deploy capital.'}; const ctx={regime:'NEUTRAL',compositeScore:55,confidence:0.60,fallbackModules:[]}; const m={convictionClass:'MODERATE',reversalWindowActive:false,uncertaintyMode:{active:true,severity:'HIGH'}}; const r=scanContradictions(n,ctx,m); return{pass:r.some(c=>c.id==='C7_UNCERTAINTY_MODE_CONFIDENT_TONE'),detail:JSON.stringify(r.map(c=>c.id))}; } },
 ];
 
 function runNarrativeRegressionTests() {
@@ -708,17 +596,33 @@ const LLMCircuitBreaker = (() => {
   const THRESHOLD = 3, COOLDOWN_MS = 300000;
   return {
     recordFailure() {
-      failures++;
-      lastFailure = Date.now();
+      failures++; lastFailure = Date.now();
       if (failures >= THRESHOLD) {
         open = true;
         logger.warn({ failures, cooldownMs: COOLDOWN_MS }, "LLM circuit breaker OPEN — falling back to rule-based");
-        setTimeout(() => { open = false; failures = 0; logger.info("LLM circuit breaker CLOSED"); }, COOLDOWN_MS);
+        persistCBState(failures, true); // A2
+        setTimeout(() => {
+          open = false; failures = 0;
+          logger.info("LLM circuit breaker CLOSED");
+          persistCBState(0, false); // A2
+        }, COOLDOWN_MS);
+      } else {
+        persistCBState(failures, false); // A2
       }
     },
-    recordSuccess() { failures = 0; open = false; },
+    recordSuccess() { failures = 0; open = false; persistCBState(0, false); }, // A2
     isOpen() { return open; },
     getState() { return { open, failures, lastFailure }; },
+    async restoreFromDB() { // A2: called on startup
+      try {
+        const s = await loadCBState();
+        if (s.isOpen) {
+          open = true; failures = s.failures;
+          logger.warn({ failures }, 'LLM CB restored as OPEN from DB');
+          setTimeout(() => { open = false; failures = 0; persistCBState(0, false); logger.info('LLM CB CLOSED after restart cooldown'); }, COOLDOWN_MS);
+        } else { failures = s.failures; if (failures > 0) logger.info({ failures }, 'LLM CB failure count restored'); }
+      } catch(e) { logger.warn({ err: e.message }, 'CB restore failed'); }
+    },
   };
 })();
 
@@ -1468,6 +1372,33 @@ const ERROR_ENUM = Object.freeze({
 			)
 		  `);
 		db.run('CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(timestamp)');
+                // A1: Narrative provenance persistence
+                db.run(`
+                  CREATE TABLE IF NOT EXISTS narrative_provenance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    replay_id TEXT NOT NULL,
+                    audience TEXT, risk_profile TEXT, provider TEXT, model TEXT,
+                    prompt_version TEXT, regime TEXT, confidence_class TEXT,
+                    fallback_used INTEGER DEFAULT 0, fallback_reason TEXT,
+                    latency_ms INTEGER, contradiction_count INTEGER DEFAULT 0,
+                    contradiction_ids TEXT, uncertainty_active INTEGER DEFAULT 0,
+                    reversal_active INTEGER DEFAULT 0, fgs_sanitizations INTEGER DEFAULT 0,
+                    degradation_active INTEGER DEFAULT 0, calibration_applied INTEGER DEFAULT 0,
+                    logged_at INTEGER
+                  )
+                `);
+                db.run('CREATE INDEX IF NOT EXISTS idx_prov_replay ON narrative_provenance(replay_id)');
+                db.run('CREATE INDEX IF NOT EXISTS idx_prov_time ON narrative_provenance(logged_at)');
+                // A2: Circuit breaker state persistence
+                db.run(`
+                  CREATE TABLE IF NOT EXISTS circuit_breaker_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    failures INTEGER DEFAULT 0, last_failure INTEGER,
+                    is_open INTEGER DEFAULT 0, updated_at INTEGER
+                  )
+                `);
+                db.run('INSERT OR IGNORE INTO circuit_breaker_state (id,failures,last_failure,is_open,updated_at) VALUES (1,0,NULL,0,NULL)');
+
 		db.run('CREATE INDEX IF NOT EXISTS idx_decisions_time ON decisions(timestamp)');
 		});
 		const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
@@ -10363,15 +10294,51 @@ app.get("/api/v1/admin/narrative/regression", (req, res) => {
   }
 });
 
-// R1: GET /api/v1/admin/narrative/provenance — last N provenance entries
+// A1/A4: Provenance — SQLite persistent + in-memory fallback
 app.get("/api/v1/admin/narrative/provenance", (req, res) => {
-  try {
-    const n = Math.min(parseInt(req.query.n || '20'), 50);
+  const n = Math.min(parseInt(req.query.n||'20'), 100);
+  if (req.query.source === 'memory') {
     const entries = PROVENANCE_LOG.getLast(n);
-    return res.json({ status: "OK", timestamp: Date.now(), data: { count: entries.length, entries } });
-  } catch(e) {
-    return res.status(500).json({ status: "ERROR", error: e.message });
+    return res.json({ status:"OK", timestamp:Date.now(), source:'memory', data:{ count:entries.length, entries } });
   }
+  db.all(`SELECT * FROM narrative_provenance ORDER BY logged_at DESC LIMIT ?`, [n], (err, rows) => {
+    if (err) return res.status(500).json({ status:"ERROR", error:err.message });
+    const entries = (rows||[]).map(r => ({
+      replayId:r.replay_id, audience:r.audience, riskProfile:r.risk_profile,
+      provider:r.provider, model:r.model, promptVersion:r.prompt_version,
+      regime:r.regime, confidenceClass:r.confidence_class,
+      fallbackUsed:!!r.fallback_used, fallbackReason:r.fallback_reason,
+      latencyMs:r.latency_ms, contradictionCount:r.contradiction_count,
+      contradictionIds:(() => { try { return JSON.parse(r.contradiction_ids||'[]'); } catch(e) { return []; } })(),
+      uncertaintyActive:!!r.uncertainty_active, reversalActive:!!r.reversal_active,
+      fgsSanitizations:r.fgs_sanitizations, degradationActive:!!r.degradation_active,
+      calibrationApplied:!!r.calibration_applied, loggedAt:r.logged_at,
+    }));
+    return res.json({ status:"OK", timestamp:Date.now(), source:'sqlite', data:{ count:entries.length, entries } });
+  });
+});
+
+// A4: Provenance aggregate stats (last 24h)
+app.get("/api/v1/admin/narrative/provenance/stats", (req, res) => {
+  db.all(`SELECT COUNT(*) as total, SUM(fallback_used) as fallbacks,
+    SUM(contradiction_count) as contradictions, SUM(calibration_applied) as calibrations,
+    AVG(latency_ms) as avg_latency, MAX(latency_ms) as max_latency,
+    SUM(fgs_sanitizations) as sanitizations, SUM(degradation_active) as degradations
+    FROM narrative_provenance WHERE logged_at > ?`, [Date.now()-86400000], (err, rows) => {
+    if (err) return res.status(500).json({ status:"ERROR", error:err.message });
+    const s = rows[0]||{};
+    const t = s.total||0;
+    return res.json({ status:"OK", timestamp:Date.now(), data:{
+      period:'24h', total:t,
+      fallbackRate: t>0 ? +((s.fallbacks||0)/t).toFixed(3) : null,
+      contradictionRate: t>0 ? +((s.contradictions||0)/t).toFixed(3) : null,
+      calibrationRate: t>0 ? +((s.calibrations||0)/t).toFixed(3) : null,
+      avgLatencyMs: s.avg_latency ? Math.round(s.avg_latency) : null,
+      maxLatencyMs: s.max_latency||null,
+      totalSanitizations: s.sanitizations||0,
+      degradationRate: t>0 ? +((s.degradations||0)/t).toFixed(3) : null,
+    }});
+  });
 });
 
 // R2: GET /api/v1/admin/narrative/replay — list replay store entries
@@ -10458,6 +10425,11 @@ try {
   logger.warn({ job: 'narrative-regression-startup', err: e.message }, 'Narrative regression startup failed');
 }
 
+// A2: Restore circuit breaker state from SQLite on startup
+LLMCircuitBreaker.restoreFromDB().then(() => {
+  logger.info({ job:'startup', cbState:LLMCircuitBreaker.getState() }, 'CB state restored from DB');
+}).catch(e => logger.warn({ err:e.message }, 'CB restore failed'));
+
 // app.listen — server start
 ////////////////////////////////////////////////////////
 
@@ -10491,7 +10463,15 @@ try {
 	// unhandled errors anywhere in the process
 	// =====================================
 
-	process.on("uncaughtException", (err) => {
+	// A3: SIGTERM — PM2 restart alerting + CB state persist
+process.on("SIGTERM", () => {
+  logger.warn({ job:'process-lifecycle', event:'SIGTERM',
+    cbState: LLMCircuitBreaker.getState() }, 'SIGTERM — PM2 restart. Persisting CB state.');
+  persistCBState(LLMCircuitBreaker.getState().failures, LLMCircuitBreaker.isOpen());
+  setTimeout(() => process.exit(0), 300);
+});
+
+process.on("uncaughtException", (err) => {
 	  logger.error({
 		code: "UNCAUGHT_EXCEPTION",
 		error: err.message,
