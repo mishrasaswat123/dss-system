@@ -161,7 +161,7 @@ const LLM_CONFIG = Object.freeze({
   groqKey:     process.env.GROQ_API_KEY  || "",
   groqUrl:     "https://api.groq.com/openai/v1/chat/completions",
   maxTokens:   400,
-  timeoutMs:   8000,
+  timeoutMs:   5000,
   maxRetries:  1,
   maxRespChars:1200,
   promptVersion: "v1.0.0",
