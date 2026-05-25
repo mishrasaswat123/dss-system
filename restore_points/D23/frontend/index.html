@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AdvisIQ DSS V5.1</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+  margin: 0;
+  font-family: -apple-system, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+.container { padding: 14px; }
+.card {
+  background: #1e293b;
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.title { font-size: 20px; font-weight: bold; margin-bottom: 10px; }
+.sell { color: #ef4444; }
+.buy { color: #22c55e; }
+.bar { height: 6px; border-radius: 4px; margin-top: 6px; }
+.green { background: #22c55e; }
+.red { background: #ef4444; }
+
+.heatmap {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 8px;
+}
+.cell {
+  padding: 10px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.transition {
+  background: linear-gradient(90deg,#ef4444,#22c55e);
+  padding: 10px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="title">📊 AdvisIQ DSS</div>
+
+<div id="transition"></div>
+<div class="card" id="decision"></div>
+<div class="card" id="drivers"></div>
+<div class="card" id="signals"></div>
+
+<div class="card">
+  <b>Signal Heatmap</b>
+  <div id="heatmap" class="heatmap"></div>
+</div>
+
+<div class="card"><canvas id="scoreChart"></canvas></div>
+<div class="card"><canvas id="confidenceChart"></canvas></div>
+
+<div class="card" id="portfolio"></div>
+<div class="card" id="narrative"></div>
+
+</div>
+
+<script>
+
+// ✅ FIX: use relative path (works on domain)
+const API = "/brain-auto";
+
+let scoreChart, confidenceChart;
+
+function render(d){
+
+  // TRANSITION
+  if(d.v7?.transition){
+    document.getElementById("transition").innerHTML =
+      `<div class="transition">
+        ⚡ ${d.v7.transition.from} → ${d.v7.transition.to}
+      </div>`;
+  }
+
+  // DECISION
+  document.getElementById("decision").innerHTML = `
+    <div class="${d.tradeDecision.action==='SELL'?'sell':'buy'}" style="font-size:26px;font-weight:bold">
+      ${d.tradeDecision.action} (${d.tradeDecision.allocation})
+    </div>
+    <div>Confidence: ${d.confidence}%</div>
+    <div>Market: ${d.regime}</div>
+  `;
+
+  // DRIVERS
+  document.getElementById("drivers").innerHTML = `
+    <b>Why Market is Moving</b><br>
+    Positive: ${d.explanation.keyDrivers.join(", ")}<br>
+    Risk: ${d.explanation.riskFlags.join(", ")}
+  `;
+
+  // SIGNALS
+  let s = "<b>Signal Contribution</b>";
+  Object.entries(d.signals).forEach(([k,v])=>{
+    s += `
+      <div>${k} (${v.score})</div>
+      <div class="bar ${v.score>0?'green':'red'}" style="width:${Math.abs(v.weight*100)}%"></div>
+    `;
+  });
+  document.getElementById("signals").innerHTML = s;
+
+  // HEATMAP
+  let h = "";
+  Object.entries(d.signals).forEach(([k,v])=>{
+    const color = v.score>0 ? "#22c55e" : "#ef4444";
+    h += `<div class="cell" style="background:${color}">${k}<br>${v.score}</div>`;
+  });
+  document.getElementById("heatmap").innerHTML = h;
+
+  // PORTFOLIO
+  let p = "<b>Portfolio</b>";
+  d.portfolio.instruments.forEach(i=>{
+    p += `<div>${i.instrument} — ${i.weight}%</div>`;
+  });
+  document.getElementById("portfolio").innerHTML = p;
+
+  // NARRATIVE
+  document.getElementById("narrative").innerHTML = `
+    <b>AI Narrative</b><br>${d.narrative.marketSummary}
+  `;
+
+  // CHART DATA
+  const labels = d.v8.trend.timestamps.map(t=>new Date(t).toLocaleTimeString());
+
+  // SCORE CHART
+  if(scoreChart) scoreChart.destroy();
+  scoreChart = new Chart(document.getElementById("scoreChart"),{
+    type:'line',
+    data:{
+      labels,
+      datasets:[{
+        data:d.v8.trend.score,
+        borderColor:'#38bdf8',
+        fill:false,
+        tension:0.4
+      }]
+    },
+    options:{plugins:{legend:{display:false}}}
+  });
+
+  // CONFIDENCE CHART
+  if(confidenceChart) confidenceChart.destroy();
+  confidenceChart = new Chart(document.getElementById("confidenceChart"),{
+    type:'line',
+    data:{
+      labels,
+      datasets:[{
+        data:d.v8.trend.confidence,
+        borderColor:'#22c55e',
+        fill:false,
+        tension:0.4
+      }]
+    },
+    options:{plugins:{legend:{display:false}}}
+  });
+}
+
+// FETCH
+async function fetchData(){
+  try{
+    const res = await fetch(API,{method:'POST'});
+    const data = await res.json();
+    render(data);
+  }catch(e){
+    console.error(e);
+    document.body.innerHTML = "<h3 style='color:red'>API Failed</h3>";
+  }
+}
+
+setInterval(fetchData,5000);
+fetchData();
+
+</script>
+
+</body>
+</html>

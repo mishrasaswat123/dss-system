@@ -23,1322 +23,6 @@
 // SECTION-06 : MEMORY LAYER
 // SECTION-07 : LOGGING
 // SECTION-08 : SAFE EXECUTION
-
-// GOVERNANCE Phase E: Narrative Context Builder
-function buildNarrativeContext(cache){
-  try{
-    const regime=cache.get("regime:composite")||{};
-    const sysConf=computeSystemConfidence(cache);
-    const ms=regime.moduleScores||{};
-    const nseIdx=cache.get("nse:index")||{};
-    const globalRaw=cache.get("equity:global")||{};
-    const fredMacro=cache.get("macro:fred")||{};
-    const blsMacro=cache.get("macro:bls")||{};
-    const fedRSS=cache.get("macro:fedrss")||{};
-    const debtCache=cache.get("nse:debt")||{};
-    const moduleList=Object.entries(ms).filter(([,v])=>v!==null&&v!==undefined).map(([k,v])=>({key:k,score:v,weight:MOD_CONF_WEIGHTS[k]||0})).sort((a,b)=>(b.score*b.weight)-(a.score*a.weight));
-    const topDrivers=moduleList.filter(m=>m.score>=55).map(m=>m.key);
-    const weakestDrivers=moduleList.filter(m=>m.score<=40).map(m=>m.key);
-    const vix=nseIdx.vixValue??null;
-    // P3-1: buildReasoningChain — FSD v8 Section 10.1
-    // Reads already-populated caches. Read-only. Zero compute risk.
-    // Produces factual signal chain for LLM context and narrative keyDrivers.
-    const _techSignals = cache.get("signals:technical") || {};
-    const _sigList = _techSignals.signals || [];
-    const _rsiSig  = _sigList.find(s => s.name && s.name.includes("RSI"));
-    const _macdSig = _sigList.find(s => s.name && s.name.includes("MACD"));
-    const _sma50Sig = _sigList.find(s => s.name && s.name.includes("50"));
-    const _sma200Sig = _sigList.find(s => s.name && s.name.includes("200"));
-    const _reasoningParts = [];
-    if (_rsiSig?.value !== undefined)  _reasoningParts.push(`RSI ${_rsiSig.value} (${_rsiSig.sentiment})`);
-    if (_macdSig)                      _reasoningParts.push(`MACD ${_macdSig.signal}`);
-    if (_sma50Sig)                     _reasoningParts.push(`50DMA ${_sma50Sig.signal}`);
-    if (_sma200Sig)                    _reasoningParts.push(`200DMA ${_sma200Sig.signal}`);
-    if (vix !== null)                  _reasoningParts.push(`India VIX ${vix}`);
-    if (fredMacro.us10YYield)          _reasoningParts.push(`US 10Y ${fredMacro.us10YYield}%`);
-    if (fredMacro.fedFundsRate)        _reasoningParts.push(`Fed Funds ${fredMacro.fedFundsRate}%`);
-    if (fredMacro.yieldCurveSignal)    _reasoningParts.push(`Yield curve ${fredMacro.yieldCurveSignal}`);
-    if (fredMacro.fedStance)           _reasoningParts.push(`Fed ${fredMacro.fedStance}`);
-    if (blsMacro.usUnemployment)       _reasoningParts.push(`US unemployment ${blsMacro.usUnemployment}%`);
-    if (fedRSS.overallTone)            _reasoningParts.push(`Fed tone ${fedRSS.overallTone}`);
-    const reasoningChain = _reasoningParts.length > 0
-      ? _reasoningParts.join(" | ")
-      : "Signal basis: live data insufficient for explicit chain";
-    const topSignalDrivers = [
-      _rsiSig  ? `RSI ${_rsiSig.value} — ${_rsiSig.sentiment}` : null,
-      _macdSig ? `MACD ${_macdSig.signal}` : null,
-      vix      ? `India VIX ${vix} — ${vix < 15 ? "calm" : vix < 22 ? "elevated" : "fear"}` : null,
-      fredMacro.us10YYield ? `US 10Y at ${fredMacro.us10YYield}% (${fredMacro.fedStance || "n/a"})` : null,
-      blsMacro.usUnemployment ? `US unemployment ${blsMacro.usUnemployment}%` : null,
-    ].filter(Boolean).slice(0, 4);
-
-    return {
-      compositeScore:regime.compositeScore??null,
-      regime:regime.regime??null,
-      regimeLabel:regime.regimeLabel??null,
-      regimeStrength:!regime.compositeScore?null:regime.compositeScore>=70?"STRONG":regime.compositeScore>=55?"MODERATE":regime.compositeScore>=45?"NEUTRAL":"WEAK",
-      actionBias:regime.actionBias??null,
-      tacticalBias:regime.actionBias??null,
-      confidence:sysConf.overall,
-      confidenceClass:sysConf.classification,
-      degradedModules:sysConf.degradedModules,
-      fallbackModules:sysConf.fallbackModules,
-      staleModules:sysConf.staleModules,
-      topDrivers,weakestDrivers,
-      reasoningChain, topSignalDrivers,
-      includedModules:regime.includedModules||[],
-      moduleCoverage:sysConf.moduleCoverage,
-      volatilityState:vix===null?null:vix<15?"LOW":vix<22?"MODERATE":"HIGH",
-      liquidityState:null,
-      macroState:{dxy:globalRaw.dxy??null,crudeBrent:globalRaw.crudeOil??null,repoRate:debtCache.overview?.repoRate??null,realRate:debtCache.overview?.realRate??null,us10Y:fredMacro.us10YYield??null,us2Y:fredMacro.us2YYield??null,yieldSpread:fredMacro.yieldSpread10_2??null,yieldCurve:fredMacro.yieldCurveSignal??null,fedFundsRate:fredMacro.fedFundsRate??null,fedStance:fredMacro.fedStance??null,usUnemployment:fredMacro.usUnemployment??null,fredSource:fredMacro.fetchedAt?"FRED":"fallback",usUnemploymentBLS:blsMacro.usUnemployment??null,laborSignal:blsMacro.laborSignal??null,usPayrolls:blsMacro.usPayrolls??null,payrollSignal:blsMacro.payrollSignal??null,usCpiIndex:blsMacro.usCpiIndex??null,blsSource:blsMacro.fetchedAt?"BLS":"fallback"},
-      riskFlags:[
-        ...(sysConf.fallbackModules.length>2?["HIGH_FALLBACK_COUNT"]:[]),
-        ...(sysConf.overall<0.40?["LOW_SYSTEM_CONFIDENCE"]:[]),
-        ...(vix>22?["ELEVATED_VOLATILITY"]:[]),
-        ...((regime.compositeScore||50)<=30?["EXTREME_RISK_OFF"]:[]),
-        ...((regime.compositeScore||50)>=75?["EXTREME_RISK_ON"]:[]),
-        ...(fredMacro.yieldCurveSignal==="INVERTED"?["YIELD_CURVE_INVERTED"]:[]),
-        ...(fredMacro.fedStance==="RESTRICTIVE"?["FED_RESTRICTIVE"]:[]),
-        ...(fedRSS.overallTone==="HAWKISH"?["FED_HAWKISH_SIGNAL"]:[]),
-      ],
-      governance:{
-        llmMayOverrideRegime:false,llmMayOverrideScore:false,
-        llmMayInferMissingData:false,
-        llmMustDiscloseDegraded:sysConf.degradedModules.length>0||sysConf.fallbackModules.length>0,
-        llmToneModifier:sysConf.overall<0.40?"CAUTIOUS":sysConf.overall<0.60?"MEASURED":"CONFIDENT",
-        requiredDisclaimers:sysConf.fallbackModules.length>0?["Data quality note: "+sysConf.fallbackModules.join(", ")+" using fallback values"]:[],
-      },
-      generatedAt:Date.now(),
-    };
-  }catch(e){return{error:e.message,generatedAt:Date.now()};}
-}
-
-// GOVERNANCE Phase H: Provider Health Registry
-const ProviderHealthRegistry=(()=>{
-  const _s={},_w=3600000;
-  function _i(p){if(!_s[p])_s[p]={success:[],failure:[],latencies:[],lastSuccess:null,lastFailure:null};}
-  return {
-    recordSuccess(p,lat=0){_i(p);const n=Date.now();_s[p].success.push(n);_s[p].latencies.push(lat);_s[p].lastSuccess=n;_s[p].success=_s[p].success.filter(t=>n-t<_w);_s[p].failure=_s[p].failure.filter(t=>n-t<_w);_s[p].latencies=_s[p].latencies.slice(-50);},
-    recordFailure(p){_i(p);const n=Date.now();_s[p].failure.push(n);_s[p].lastFailure=n;_s[p].failure=_s[p].failure.filter(t=>n-t<_w);_s[p].success=_s[p].success.filter(t=>n-t<_w);},
-    getSummary(){const o={};for(const[p,d]of Object.entries(_s)){const tot=d.success.length+d.failure.length;const avg=d.latencies.length?Math.round(d.latencies.reduce((a,b)=>a+b,0)/d.latencies.length):null;o[p]={successRate:tot>0?Math.round((d.success.length/tot)*100):null,successCount:d.success.length,failureCount:d.failure.length,avgLatencyMs:avg,lastSuccess:d.lastSuccess,lastFailure:d.lastFailure,status:d.failure.length>d.success.length?"DEGRADED":d.success.length>0?"OK":"UNKNOWN"};}return o;},
-  };
-})();
-
-// GOVERNANCE Phase F: Narrative Governance Rules
-const NarrativeGovernanceRules = Object.freeze({
-  LLM_MAY_OVERRIDE_REGIME:       false,
-  LLM_MAY_OVERRIDE_SCORE:        false,
-  LLM_MAY_INFER_MISSING_DATA:    false,
-  LLM_MAY_HIDE_DEGRADED_STATE:   false,
-  LLM_MAY_GENERATE_INDEPENDENT_RECS: false,
-  LLM_MAY_REINTERPRET_WEIGHTS:   false,
-  MIN_CONFIDENCE_FOR_CONFIDENT_TONE: 0.60,
-  MIN_CONFIDENCE_FOR_MEASURED_TONE:  0.40,
-  REQUIRED_CONTEXT_FIELDS: ["compositeScore","regime","confidence","confidenceClass","degradedModules","fallbackModules","tacticalBias","riskFlags"],
-  FORBIDDEN_CONTEXT_FIELDS: ["moduleWeights","engineFormulas","rawProviderOutputs","hiddenState","optionChainDump"],
-  applyToneModifier(confidence) {
-    if (confidence >= this.MIN_CONFIDENCE_FOR_CONFIDENT_TONE) return "CONFIDENT";
-    if (confidence >= this.MIN_CONFIDENCE_FOR_MEASURED_TONE)  return "MEASURED";
-    return "CAUTIOUS";
-  },
-  validateContext(ctx) {
-    const missing = this.REQUIRED_CONTEXT_FIELDS.filter(f => ctx[f] === undefined);
-    const forbidden = this.FORBIDDEN_CONTEXT_FIELDS.filter(f => ctx[f] !== undefined);
-    return { valid: missing.length===0 && forbidden.length===0, missing, forbidden };
-  },
-});
-
-// ════════════════════════════════════════════════════════════════════
-// SPRINT 4A: LLM NARRATIVE ADAPTER LAYER
-// Mandate: zero-cost, self-hosted-first, governed, deterministic fallback
-// Provider abstraction: MockAdapter | GroqAdapter | RuleBasedAdapter
-// LLM receives ONLY buildNarrativeContext() output — never raw feeds
-// ════════════════════════════════════════════════════════════════════
-
-const LLM_CONFIG = Object.freeze({
-  provider:    process.env.LLM_PROVIDER  || "rulebased",
-  model:       process.env.LLM_MODEL     || "llama-3.1-8b-instant",
-  groqKey:     process.env.GROQ_API_KEY  || "",
-  groqUrl:     "https://api.groq.com/openai/v1/chat/completions",
-  maxTokens:   400,
-  timeoutMs:   8000,
-  maxRetries:  1,
-  maxRespChars:1200,
-  promptVersion: "v1.0.0",
-});
-
-// Prompt version tracking
-const PROMPT_VERSION = "v1.0.0";
-
-// ══════════════════════════════════════════════════════════════════
-// NARRATIVE RELIABILITY LAYER — v1.0.0
-// R1: Prompt Provenance Logging
-// R2: Narrative Replay Store (in-memory, admin-only, last 20 entries)
-// R3: Contradiction Detection
-// R4: Uncertainty Language Calibration
-// R5: Regression Test Suite
-// R6: Degradation Simulation Harness
-// ══════════════════════════════════════════════════════════════════
-
-// R1 — Provenance log: ring buffer, last 50 entries, no portfolio values
-const PROVENANCE_LOG = (() => {
-  const MAX = 50;
-  const entries = [];
-  return {
-    push(entry) {
-      entries.push({ ...entry, loggedAt: Date.now() });
-      if (entries.length > MAX) entries.shift();
-    },
-    getAll() { return [...entries]; },
-    getLast(n=10) { return entries.slice(-n); },
-    clear() { entries.length = 0; },
-    size() { return entries.length; },
-  };
-})();
-
-// R2 — Replay store: last 20 narrative generations with full prompt snapshot
-// Admin-only access via /api/v1/admin/narrative/replay
-// Never stores portfolio values — narrative context only
-const REPLAY_STORE = (() => {
-  const MAX = 20;
-  const entries = [];
-  return {
-    push(entry) {
-      entries.push(entry);
-      if (entries.length > MAX) entries.shift();
-    },
-    getAll() { return [...entries]; },
-    getById(id) { return entries.find(e => e.replayId === id) || null; },
-    size() { return entries.length; },
-  };
-})();
-
-// R1: Generate a deterministic hash for a narrative context snapshot
-// Used as replay identifier — reproducible for identical inputs
-function narrativeContextHash(ctx, audience, riskProfile, promptVersion) {
-  const snapshot = JSON.stringify({
-    regime: ctx.regime,
-    compositeScore: ctx.compositeScore,
-    confidence: ctx.confidence ? Math.round(ctx.confidence * 1000) / 1000 : null,
-    confidenceClass: ctx.confidenceClass,
-    fallbackModules: (ctx.fallbackModules || []).sort(),
-    degradedModules: (ctx.degradedModules || []).sort(),
-    audience,
-    riskProfile,
-    promptVersion,
-  });
-  return 'nr_' + hashlib_sha256_short(snapshot);
-}
-
-// Simple deterministic short hash (no crypto module needed — SHA256 approximation via string fold)
-function hashlib_sha256_short(str) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = (h * 0x01000193) >>> 0;
-  }
-  return h.toString(16).padStart(8, '0');
-}
-
-// R1: Log a provenance entry for every narrative generation
-// No portfolio values. No client data. Governance-safe.
-function logNarrativeProvenance({ replayId, audience, riskProfile, provider, model, promptVersion,
-  regime, confidenceClass, fallbackUsed, fallbackReason, latencyMs, governanceViolations,
-  contradictions, uncertaintyActive, reversalActive, fgsSanitizations, degradationActive }) {
-  const entry = {
-    replayId,
-    audience,
-    riskProfile,
-    provider,
-    model: model || 'rulebased',
-    promptVersion,
-    regime,
-    confidenceClass,
-    fallbackUsed: !!fallbackUsed,
-    fallbackReason: fallbackReason || null,
-    latencyMs: Math.round(latencyMs || 0),
-    governanceViolations: governanceViolations || [],
-    contradictions: contradictions || [],
-    uncertaintyActive: !!uncertaintyActive,
-    reversalActive: !!reversalActive,
-    fgsSanitizations: fgsSanitizations || 0,
-    degradationActive: !!degradationActive,
-  };
-  PROVENANCE_LOG.push(entry);
-  logger.info({ job: 'narrative-provenance', replayId, provider: entry.provider,
-    fallback: entry.fallbackUsed, contradictions: entry.contradictions.length,
-    latencyMs: entry.latencyMs }, 'Narrative provenance logged');
-  return entry;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// R3 — CONTRADICTION DETECTION
-// Lightweight heuristic validation — no NLP required
-// Detects narrative/governance mismatch before render
-// ══════════════════════════════════════════════════════════════════
-
-// Contradiction rules: each returns { id, description } if contradiction found, else null
-const CONTRADICTION_RULES = [
-  // C1: Bullish posture + defensive/cautious language
-  {
-    id: 'C1_BULLISH_CAUTIOUS_MISMATCH',
-    check(narrative, ctx, meta) {
-      const regime = ctx.regime || '';
-      const tone = narrative.marketTone || '';
-      const summary = (narrative.summary || '').toLowerCase();
-      const isBullish = regime.includes('RISK_ON');
-      const hasCautiousLanguage = summary.includes('cautious') || summary.includes('defensive') ||
-        summary.includes('reduce exposure') || summary.includes('pullback risk');
-      if (isBullish && tone === 'CAUTIOUS' && hasCautiousLanguage) {
-        return { id: 'C1_BULLISH_CAUTIOUS_MISMATCH', description: `RISK_ON regime with CAUTIOUS tone and defensive language` };
-      }
-      return null;
-    }
-  },
-  // C2: Strong conviction + heavy uncertainty language
-  {
-    id: 'C2_HIGH_CONVICTION_UNCERTAINTY_MISMATCH',
-    check(narrative, ctx, meta) {
-      const convClass = meta.convictionClass || '';
-      const summary = (narrative.summary || '').toLowerCase();
-      const isHighConviction = convClass === 'STRONG' || convClass === 'HIGH';
-      const hasUncertainty = summary.includes('unclear') || summary.includes('uncertain') ||
-        summary.includes('difficult to predict') || summary.includes('no clear direction');
-      if (isHighConviction && hasUncertainty) {
-        return { id: 'C2_HIGH_CONVICTION_UNCERTAINTY_MISMATCH', description: `${convClass} conviction with uncertainty-heavy language` };
-      }
-      return null;
-    }
-  },
-  // C3: Reversal window active + aggressive certainty tone
-  {
-    id: 'C3_REVERSAL_CERTAINTY_MISMATCH',
-    check(narrative, ctx, meta) {
-      const reversalActive = meta.reversalWindowActive || false;
-      const tone = narrative.marketTone || '';
-      const tactical = (narrative.tacticalView || '').toLowerCase();
-      const hasCertainty = tone === 'CONFIDENT' || tactical.includes('strongly recommend') ||
-        tactical.includes('clear opportunity') || tactical.includes('act now');
-      if (reversalActive && hasCertainty) {
-        return { id: 'C3_REVERSAL_CERTAINTY_MISMATCH', description: 'Reversal window active with high-certainty tone/language' };
-      }
-      return null;
-    }
-  },
-  // C4: Degradation active + overly authoritative narrative (no qualification)
-  {
-    id: 'C4_DEGRADATION_AUTHORITY_MISMATCH',
-    check(narrative, ctx, meta) {
-      const fallbackMods = ctx.fallbackModules || [];
-      const hasDegradation = fallbackMods.length >= 3;
-      const tone = narrative.marketTone || '';
-      const confidenceNote = narrative.confidenceNote || null;
-      const isOverlyAuthoritative = (tone === 'CONFIDENT' || tone === 'CONSTRUCTIVE') && !confidenceNote;
-      if (hasDegradation && isOverlyAuthoritative) {
-        return { id: 'C4_DEGRADATION_AUTHORITY_MISMATCH', description: `${fallbackMods.length} modules on fallback with ${tone} tone and no confidence qualification` };
-      }
-      return null;
-    }
-  },
-  // C5: RISK_OFF regime + constructive/confident deployment language
-  {
-    id: 'C5_RISK_OFF_DEPLOYMENT_MISMATCH',
-    check(narrative, ctx, meta) {
-      const regime = ctx.regime || '';
-      const tactical = (narrative.tacticalView || '').toLowerCase();
-      const isRiskOff = regime.includes('RISK_OFF');
-      const hasDeployment = tactical.includes('deploy') || tactical.includes('increase equity') ||
-        tactical.includes('add exposure') || tactical.includes('accumulate aggressively');
-      if (isRiskOff && hasDeployment) {
-        return { id: 'C5_RISK_OFF_DEPLOYMENT_MISMATCH', description: 'RISK_OFF regime with deployment/accumulation language in tactical view' };
-      }
-      return null;
-    }
-  },
-];
-
-// scanContradictions: run all rules, return array of detected contradictions
-function scanContradictions(narrative, ctx, meta) {
-  const detected = [];
-  for (const rule of CONTRADICTION_RULES) {
-    try {
-      const result = rule.check(narrative, ctx, meta);
-      if (result) detected.push(result);
-    } catch(e) {
-      logger.warn({ job: 'contradiction-scan', rule: rule.id, err: e.message }, 'Contradiction rule threw');
-    }
-  }
-  if (detected.length > 0) {
-    logger.warn({ job: 'contradiction-scan', count: detected.length, ids: detected.map(d=>d.id) }, 'Narrative contradictions detected');
-  }
-  return detected;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// R4 — UNCERTAINTY LANGUAGE CALIBRATION
-// Deterministic tone hierarchy — institutional language discipline
-// Applied as post-processing after LLM/rulebased output
-// ══════════════════════════════════════════════════════════════════
-
-const UNCERTAINTY_CALIBRATION = Object.freeze({
-  // LOW confidence: < 0.40
-  LOW_CONFIDENCE: {
-    requiredTone: ['CAUTIOUS'],
-    prohibitedTones: ['CONFIDENT', 'CONSTRUCTIVE'],
-    requiredQualification: true,
-    institutionalNote: 'Data confidence limited — exercise additional caution in advisory use.',
-  },
-  // MODERATE confidence: 0.40–0.60
-  MODERATE_CONFIDENCE: {
-    requiredTone: ['CAUTIOUS', 'MEASURED', 'BALANCED'],
-    prohibitedTones: ['CONFIDENT'],
-    requiredQualification: false,
-    institutionalNote: null,
-  },
-  // HIGH uncertainty mode active
-  HIGH_UNCERTAINTY: {
-    requiredTone: ['CAUTIOUS', 'MEASURED'],
-    prohibitedTones: ['CONFIDENT', 'CONSTRUCTIVE'],
-    requiredQualification: true,
-    institutionalNote: 'Uncertainty conditions active — advisory conviction qualified.',
-  },
-  // Reversal window active
-  REVERSAL_ACTIVE: {
-    requiredTone: ['CAUTIOUS', 'MEASURED'],
-    prohibitedTones: ['CONFIDENT', 'CONSTRUCTIVE'],
-    requiredQualification: true,
-    institutionalNote: 'Mature regime reversal window — posture: OBSERVE.',
-  },
-  // Degraded state (3+ fallback modules)
-  DEGRADED: {
-    requiredTone: ['CAUTIOUS', 'MEASURED', 'BALANCED'],
-    prohibitedTones: ['CONFIDENT'],
-    requiredQualification: true,
-    institutionalNote: 'Multiple data sources on fallback — narrative reflects estimated values.',
-  },
-});
-
-function calibrateUncertaintyTone(narrative, ctx, meta) {
-  const confidence = ctx.confidence || 0.5;
-  const fallbackCount = (ctx.fallbackModules || []).length;
-  const uncertaintyActive = meta.uncertaintyMode?.active || false;
-  const reversalActive = meta.reversalWindowActive || false;
-  const degraded = fallbackCount >= 3;
-
-  const violations = [];
-  let calibration = null;
-
-  // Determine applicable calibration tier (priority order)
-  if (reversalActive) calibration = UNCERTAINTY_CALIBRATION.REVERSAL_ACTIVE;
-  else if (uncertaintyActive && meta.uncertaintyMode?.severity === 'HIGH') calibration = UNCERTAINTY_CALIBRATION.HIGH_UNCERTAINTY;
-  else if (confidence < 0.40) calibration = UNCERTAINTY_CALIBRATION.LOW_CONFIDENCE;
-  else if (confidence < 0.60) calibration = UNCERTAINTY_CALIBRATION.MODERATE_CONFIDENCE;
-  else if (degraded) calibration = UNCERTAINTY_CALIBRATION.DEGRADED;
-
-  if (!calibration) return { violations: [], calibrationApplied: null, note: null };
-
-  const tone = narrative.marketTone || '';
-  if (calibration.prohibitedTones.includes(tone)) {
-    violations.push(`Tone ${tone} prohibited under current calibration tier — expected: ${calibration.requiredTone.join('/')}`);
-    // Apply correction: downgrade to safest allowed tone
-    narrative = { ...narrative, marketTone: calibration.requiredTone[0], _toneCalibrated: true };
-  }
-
-  // Ensure confidenceNote present when required and missing
-  if (calibration.requiredQualification && !narrative.confidenceNote && calibration.institutionalNote) {
-    narrative = { ...narrative, confidenceNote: calibration.institutionalNote, _confidenceNoteInjected: true };
-  }
-
-  if (violations.length > 0) {
-    logger.warn({ job: 'uncertainty-calibration', violations, tone: narrative.marketTone }, 'Uncertainty calibration corrections applied');
-  }
-
-  return { narrative, violations, calibrationApplied: calibration, note: calibration.institutionalNote };
-}
-
-// ══════════════════════════════════════════════════════════════════
-// R5 — NARRATIVE REGRESSION TEST SUITE
-// Focus: semantic consistency, governance compliance, degradation behavior
-// Not rigid text snapshots — structural and behavioral assertions
-// ══════════════════════════════════════════════════════════════════
-
-const NARRATIVE_REGRESSION_TESTS = [
-  {
-    id: 'NR-01',
-    description: 'contradictionScan: RISK_ON + CAUTIOUS tone flags C1',
-    run() {
-      const narrative = { marketTone: 'CAUTIOUS', summary: 'Market is cautious with defensive posture and pullback risk.', tacticalView: '' };
-      const ctx = { regime: 'RISK_ON', compositeScore: 65, confidence: 0.70, fallbackModules: [] };
-      const meta = { convictionClass: 'MODERATE', reversalWindowActive: false };
-      const result = scanContradictions(narrative, ctx, meta);
-      return { pass: result.some(c => c.id === 'C1_BULLISH_CAUTIOUS_MISMATCH'), detail: 'C1 detected: ' + JSON.stringify(result.map(c=>c.id)) };
-    }
-  },
-  {
-    id: 'NR-02',
-    description: 'contradictionScan: NEUTRAL regime + no contradiction',
-    run() {
-      const narrative = { marketTone: 'BALANCED', summary: 'Market is neutral.', tacticalView: 'Maintain allocation.' };
-      const ctx = { regime: 'NEUTRAL', compositeScore: 50, confidence: 0.60, fallbackModules: [] };
-      const meta = { convictionClass: 'MODERATE', reversalWindowActive: false };
-      const result = scanContradictions(narrative, ctx, meta);
-      return { pass: result.length === 0, detail: 'No contradictions on clean NEUTRAL: ' + JSON.stringify(result) };
-    }
-  },
-  {
-    id: 'NR-03',
-    description: 'contradictionScan: reversal active + CONFIDENT tone flags C3',
-    run() {
-      const narrative = { marketTone: 'CONFIDENT', summary: 'Market looks strong.', tacticalView: 'Strongly recommend increasing equity.' };
-      const ctx = { regime: 'RISK_ON', compositeScore: 70, confidence: 0.75, fallbackModules: [] };
-      const meta = { convictionClass: 'HIGH', reversalWindowActive: true };
-      const result = scanContradictions(narrative, ctx, meta);
-      return { pass: result.some(c => c.id === 'C3_REVERSAL_CERTAINTY_MISMATCH'), detail: JSON.stringify(result.map(c=>c.id)) };
-    }
-  },
-  {
-    id: 'NR-04',
-    description: 'calibrateUncertaintyTone: LOW confidence enforces CAUTIOUS tone',
-    run() {
-      const narrative = { marketTone: 'CONFIDENT', summary: 'Market looks great.', confidenceNote: null };
-      const ctx = { regime: 'NEUTRAL', confidence: 0.30, fallbackModules: ['equity', 'debt'] };
-      const meta = { uncertaintyMode: { active: false }, reversalWindowActive: false };
-      const { narrative: cal, violations } = calibrateUncertaintyTone(narrative, ctx, meta);
-      return { pass: cal.marketTone === 'CAUTIOUS' && violations.length > 0, detail: `Tone: ${cal.marketTone}, violations: ${violations.length}` };
-    }
-  },
-  {
-    id: 'NR-05',
-    description: 'calibrateUncertaintyTone: HIGH uncertainty injects confidenceNote when missing',
-    run() {
-      const narrative = { marketTone: 'MEASURED', summary: 'Market uncertain.', confidenceNote: null };
-      const ctx = { regime: 'NEUTRAL', confidence: 0.55, fallbackModules: [] };
-      const meta = { uncertaintyMode: { active: true, severity: 'HIGH' }, reversalWindowActive: false };
-      const { narrative: cal } = calibrateUncertaintyTone(narrative, ctx, meta);
-      return { pass: !!cal.confidenceNote, detail: 'confidenceNote injected: ' + !!cal.confidenceNote };
-    }
-  },
-  {
-    id: 'NR-06',
-    description: 'calibrateUncertaintyTone: reversal active prohibits CONFIDENT tone',
-    run() {
-      const narrative = { marketTone: 'CONFIDENT', summary: 'Strong conditions.', confidenceNote: null };
-      const ctx = { regime: 'RISK_ON', confidence: 0.80, fallbackModules: [] };
-      const meta = { uncertaintyMode: { active: false }, reversalWindowActive: true };
-      const { narrative: cal, violations } = calibrateUncertaintyTone(narrative, ctx, meta);
-      return { pass: cal.marketTone !== 'CONFIDENT' && violations.length > 0, detail: `Calibrated tone: ${cal.marketTone}` };
-    }
-  },
-  {
-    id: 'NR-07',
-    description: 'narrativeContextHash: identical inputs produce identical hash',
-    run() {
-      const ctx = { regime: 'NEUTRAL', compositeScore: 50, confidence: 0.60, confidenceClass: 'MODERATE', fallbackModules: [], degradedModules: [] };
-      const h1 = narrativeContextHash(ctx, 'IFA Advisory Pitch', 'Moderate', 'v1.0.0');
-      const h2 = narrativeContextHash(ctx, 'IFA Advisory Pitch', 'Moderate', 'v1.0.0');
-      return { pass: h1 === h2 && h1.startsWith('nr_'), detail: `Hash: ${h1}` };
-    }
-  },
-  {
-    id: 'NR-08',
-    description: 'narrativeContextHash: different regimes produce different hashes',
-    run() {
-      const base = { regime: 'NEUTRAL', compositeScore: 50, confidence: 0.60, confidenceClass: 'MODERATE', fallbackModules: [], degradedModules: [] };
-      const h1 = narrativeContextHash(base, 'IFA Advisory Pitch', 'Moderate', 'v1.0.0');
-      const h2 = narrativeContextHash({ ...base, regime: 'RISK_ON' }, 'IFA Advisory Pitch', 'Moderate', 'v1.0.0');
-      return { pass: h1 !== h2, detail: `h1: ${h1}, h2: ${h2}` };
-    }
-  },
-  {
-    id: 'NR-09',
-    description: 'C4: 3+ fallback modules + CONFIDENT tone + no confidenceNote flags contradiction',
-    run() {
-      const narrative = { marketTone: 'CONFIDENT', summary: 'Market strong.', confidenceNote: null, tacticalView: '' };
-      const ctx = { regime: 'NEUTRAL', compositeScore: 55, confidence: 0.65, fallbackModules: ['equity','debt','global'] };
-      const meta = { convictionClass: 'MODERATE', reversalWindowActive: false };
-      const result = scanContradictions(narrative, ctx, meta);
-      return { pass: result.some(c => c.id === 'C4_DEGRADATION_AUTHORITY_MISMATCH'), detail: JSON.stringify(result.map(c=>c.id)) };
-    }
-  },
-  {
-    id: 'NR-10',
-    description: 'C5: RISK_OFF + deployment language flags contradiction',
-    run() {
-      const narrative = { marketTone: 'BALANCED', summary: 'Deploy equity aggressively.', confidenceNote: null, tacticalView: 'Deploy capital and increase equity exposure now.' };
-      const ctx = { regime: 'RISK_OFF', compositeScore: 35, confidence: 0.60, fallbackModules: [] };
-      const meta = { convictionClass: 'MODERATE', reversalWindowActive: false };
-      const result = scanContradictions(narrative, ctx, meta);
-      return { pass: result.some(c => c.id === 'C5_RISK_OFF_DEPLOYMENT_MISMATCH'), detail: JSON.stringify(result.map(c=>c.id)) };
-    }
-  },
-];
-
-function runNarrativeRegressionTests() {
-  const results = NARRATIVE_REGRESSION_TESTS.map(t => {
-    try { const r = t.run(); return { id: t.id, description: t.description, ...r }; }
-    catch(e) { return { id: t.id, description: t.description, pass: false, detail: 'Threw: ' + e.message }; }
-  });
-  const passed = results.filter(r => r.pass).length;
-  const failed = results.filter(r => !r.pass);
-  logger.info({ job: 'narrative-regression', passed, total: results.length, failed: failed.length }, 'Narrative regression tests complete');
-  return { total: results.length, passed, failed: failed.length, failures: failed, results };
-}
-
-// ══════════════════════════════════════════════════════════════════
-// R6 — DEGRADATION SIMULATION HARNESS
-// Test graceful degradation under various failure conditions
-// Admin-only: POST /api/v1/admin/narrative/simulate-degradation
-// ══════════════════════════════════════════════════════════════════
-
-const DEGRADATION_SCENARIOS = {
-  ALL_FALLBACK: { fallbackModules: ['equity','debt','global','derivatives','sector'], degradedModules: ['equity','debt','global','derivatives','sector'], confidence: 0.30, regime: 'NEUTRAL' },
-  PARTIAL_FALLBACK: { fallbackModules: ['debt','derivatives'], degradedModules: ['debt'], confidence: 0.55, regime: 'NEUTRAL' },
-  LLM_TIMEOUT: { simulateLLMTimeout: true, fallbackModules: [], confidence: 0.70, regime: 'RISK_ON' },
-  STALE_CACHE: { simulateStalecache: true, fallbackModules: ['equity'], confidence: 0.50, regime: 'NEUTRAL' },
-  MISSING_MACRO: { fallbackModules: ['global'], degradedModules: ['global'], confidence: 0.58, regime: 'NEUTRAL' },
-};
-
-
-
-// Forbidden language filter
-const FORBIDDEN_PHRASES = ["guaranteed","certain to","must buy","strong buy",
-  "sell immediately","risk-free","assured returns","definitely will","100%",
-  // H5.3 extensions
-  "must act now","act immediately","don't miss","act before","time is running out",
-  "window is closing","limited time","before the market opens","today's opportunity",
-  "market crash","collapse is coming","panic selling","catastrophic losses","disaster ahead",
-  "protect yourself now","crisis mode","emergency rebalancing","flee to safety",
-  "rare opportunity","once in a decade","exceptional entry point","ideal conditions",
-  "perfect allocation","best time to invest","golden opportunity","high-return opportunity",
-  "will definitely","cannot fail","no downside risk","market will definitely","certain to outperform",
-  "exciting opportunity","remarkable setup","outstanding conditions","markets look great",
-  "fantastic entry","brilliant timing","extraordinary conditions",
-  "safe investment","ideal for you","perfect for your goals","designed for investors like you","meets your needs"
-];
-
-function sanitizeNarrativeText(text) {
-  if (!text) return text;
-  let out = text;
-  for (const phrase of FORBIDDEN_PHRASES) {
-    const rx = new RegExp(phrase, "gi");
-    out = out.replace(rx, "[assessment]");
-  }
-  return out;
-}
-
-// Structured output validator
-function validateNarrativeOutput(parsed, ctx) {
-  const violations = [];
-  if (!parsed || typeof parsed !== "object") return { valid: false, violations: ["Not a JSON object"] };
-  if (!parsed.summary)      violations.push("Missing summary field");
-  if (!parsed.marketTone)   violations.push("Missing marketTone field");
-  // Governance: LLM cannot override regime
-  if (parsed.regime && parsed.regime !== ctx.regime)
-    violations.push(`Regime override attempt: ${parsed.regime} vs ${ctx.regime}`);
-  // Governance: no hallucinated scores
-  if (parsed.compositeScore && Math.abs(parsed.compositeScore - ctx.compositeScore) > 5)
-    violations.push("Score deviation detected");
-  // Forbidden language check
-  const allText = JSON.stringify(parsed).toLowerCase();
-  for (const p of FORBIDDEN_PHRASES) {
-    if (allText.includes(p.toLowerCase())) violations.push(`Forbidden phrase: "${p}"`);
-  }
-  return { valid: violations.length === 0, violations };
-}
-
-// Priority 9: validateOverviewResponse — FSD DEF-NEW-004
-// Validates compositeScore range, regime enum, confidence range.
-// On failure: logs VALIDATION_FAILED, returns false (caller serves stale cache).
-function validateOverviewResponse(payload) {
-  const violations = [];
-  if (!payload || typeof payload !== "object") return { valid: false, violations: ["Not an object"] };
-  const cs = payload.compositeScore;
-  if (cs !== null && cs !== undefined) {
-    if (typeof cs.score !== "number" || cs.score < 0 || cs.score > 100)
-      violations.push(`compositeScore.score out of range: ${cs.score}`);
-    const VALID_REGIMES = ["STRONG_RISK_ON","RISK_ON","NEUTRAL","RISK_OFF","STRONG_RISK_OFF"];
-    if (cs.regime && !VALID_REGIMES.includes(cs.regime))
-      violations.push(`Invalid regime enum: ${cs.regime}`);
-  }
-  const conf = payload.confidence;
-  if (conf !== null && conf !== undefined) {
-    if (typeof conf.overall === "number" && (conf.overall < 0 || conf.overall > 1))
-      violations.push(`Confidence out of range: ${conf.overall}`);
-  }
-  if (violations.length > 0) {
-    logger.warn({ job: "validateOverviewResponse", violations }, "VALIDATION_FAILED: overview payload");
-  }
-  return { valid: violations.length === 0, violations };
-}
-
-// Priority 9: validateMacroSynthesis — FSD DEF-NEW-004
-// Validates FRED/BLS key fields present and in expected ranges.
-// On failure: logs VALIDATION_FAILED, returns false.
-function validateMacroSynthesis(fredData, blsData) {
-  const violations = [];
-  if (fredData) {
-    if (fredData.us10YYield !== null && fredData.us10YYield !== undefined) {
-      if (typeof fredData.us10YYield !== "number" || fredData.us10YYield < 0 || fredData.us10YYield > 20)
-        violations.push(`us10YYield out of range: ${fredData.us10YYield}`);
-    }
-    if (fredData.fedFundsRate !== null && fredData.fedFundsRate !== undefined) {
-      if (typeof fredData.fedFundsRate !== "number" || fredData.fedFundsRate < 0 || fredData.fedFundsRate > 25)
-        violations.push(`fedFundsRate out of range: ${fredData.fedFundsRate}`);
-    }
-    if (fredData.yieldSpread10_2 !== null && fredData.yieldSpread10_2 !== undefined) {
-      if (typeof fredData.yieldSpread10_2 !== "number" || Math.abs(fredData.yieldSpread10_2) > 10)
-        violations.push(`yieldSpread10_2 out of range: ${fredData.yieldSpread10_2}`);
-    }
-  }
-  if (blsData) {
-    if (blsData.usUnemployment !== null && blsData.usUnemployment !== undefined) {
-      if (typeof blsData.usUnemployment !== "number" || blsData.usUnemployment < 0 || blsData.usUnemployment > 30)
-        violations.push(`usUnemployment out of range: ${blsData.usUnemployment}`);
-    }
-  }
-  if (violations.length > 0) {
-    logger.warn({ job: "validateMacroSynthesis", violations }, "VALIDATION_FAILED: macro synthesis");
-  }
-  return { valid: violations.length === 0, violations };
-}
-
-// LLM circuit breaker
-const LLMCircuitBreaker = (() => {
-  let failures = 0, lastFailure = null, open = false;
-  const THRESHOLD = 3, COOLDOWN_MS = 300000;
-  return {
-    recordFailure() {
-      failures++;
-      lastFailure = Date.now();
-      if (failures >= THRESHOLD) {
-        open = true;
-        logger.warn({ failures, cooldownMs: COOLDOWN_MS }, "LLM circuit breaker OPEN — falling back to rule-based");
-        setTimeout(() => { open = false; failures = 0; logger.info("LLM circuit breaker CLOSED"); }, COOLDOWN_MS);
-      }
-    },
-    recordSuccess() { failures = 0; open = false; },
-    isOpen() { return open; },
-    getState() { return { open, failures, lastFailure }; },
-  };
-})();
-
-// Build narrative prompt from curated context
-function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
-  const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
-  const degradedNote = ctx.fallbackModules?.length > 0
-    ? `DATA NOTE: ${ctx.fallbackModules.join(", ")} modules on fallback — reflect uncertainty.`
-    : "";
-
-  // Audience communication contracts — 10-point behavioral spec per segment
-  const AUDIENCE_CONTRACTS = {
-    "IFA Advisory Pitch": {
-      who: "Independent Financial Advisor briefing retail clients today",
-      objective: "Give the IFA a clear, confident posture they can relay verbatim to a client",
-      language: "Plain English. No jargon. Short sentences. Think: trusted advisor on a phone call.",
-      forbidden: "RSI, MACD, DMA, EMA, Bollinger, basis points, yield spread, technical indicator names or raw values",
-      translate: "Momentum weakening not RSI 39. Market anxious not VIX 17.9. US rates a headwind not 10Y at 4.57%.",
-      keyDrivers: "3 plain-English reasons why the market feels the way it does. Client-ready.",
-      tacticalView: "One actionable allocation posture the IFA can recommend. Concrete and simple.",
-      tone: "Warm, confident, reassuring or cautionary as regime warrants. No hedging every sentence.",
-    },
-    "Retail Investor": {
-      who: "Individual retail investor making their own decisions",
-      objective: "Help them understand what the market is doing and what to do with their SIP/portfolio",
-      language: "Everyday language. Relatable analogies. Avoid all financial jargon.",
-      forbidden: "All technical indicators, macro acronyms, institutional terminology",
-      translate: "Market is cautious not NEUTRAL regime. Good time to keep investing steadily not staggered deployment.",
-      keyDrivers: "3 simple reasons in everyday language. Why should a regular person care?",
-      tacticalView: "Stay invested / reduce / accumulate — in plain words with a simple reason.",
-      tone: "Encouraging, honest, calm. Never alarmist. Never condescending.",
-    },
-    "HNI Investor": {
-      who: "High Net Worth Individual with financial literacy, managing significant personal wealth",
-      objective: "Regime-aware positioning advice with tax and concentration awareness",
-      language: "Semi-professional. Can use allocation terms (equity/debt/gold). Avoid deep quant jargon.",
-      forbidden: "Raw technical indicator values, quant terminology, derivative Greeks",
-      translate: "Selling pressure building not MACD bearish. Elevated nervousness not VIX 17.9.",
-      keyDrivers: "3 market dynamics relevant to portfolio allocation decisions.",
-      tacticalView: "Portfolio posture — equity tilt, cash level, defensive allocation. Wealth-aware language.",
-      tone: "Confident, sophisticated but accessible. Peer-to-peer advisory feel.",
-    },
-    "Family Office Risk Brief": {
-      who: "Family Office CIO or investment committee reviewing portfolio risk",
-      objective: "Regime-aware risk budget assessment — what is the downside, what needs protecting",
-      language: "Formal, institutional, risk-first. Committee memo style.",
-      forbidden: "Technical indicator names and raw values, speculative language, retail framing",
-      translate: "Downside momentum building not MACD sell. Investor nervousness elevated not VIX 17.9. Rates a valuation headwind not US 10Y 4.57%.",
-      keyDrivers: "3 specific risk signals framed as portfolio risk factors. What threatens capital preservation?",
-      tacticalView: "Risk budget recommendation — reduce/maintain/deploy. Asset class tilts. Capital protection first.",
-      tone: "Sober, measured, accountable. Every sentence defensible in a committee meeting.",
-    },
-    "Private Banker Advisory": {
-      who: "Private Banker serving UHNW clients with multi-asset portfolios",
-      objective: "Institutional-grade narrative suitable for client advisory conversations",
-      language: "Goldman Sachs weekly note style. Precise, authoritative, narrative-grade.",
-      forbidden: "Retail framing, raw technical values, generic phrases like await confirmation",
-      translate: "Short-term trend has reversed not MACD sell. Elevated market risk premium not VIX 17.9. Monetary tightening cycle constraining multiples not Fed restrictive.",
-      keyDrivers: "3 macro and market dynamics at institutional communication level. Name the mechanism not just the indicator.",
-      tacticalView: "Risk-adjusted positioning with nuance. Opportunity vs risk framing. Sophisticated.",
-      tone: "Authoritative, measured, institutional. Conveys expertise and judgment.",
-    },
-    "Advanced Investor Dashboard": {
-      who: "Sophisticated self-directed investor who reads raw signals directly",
-      objective: "Signal-level synthesis — what do the indicators say together that they don't say alone",
-      language: "Direct, analytical, quantitative. Name indicators explicitly with values.",
-      forbidden: "Generic summaries, vague language, anything a retail investor would need explained",
-      translate: "Do NOT translate. RSI 39.13 is correct. VIX 17.91 is correct. US 10Y 4.57% is correct.",
-      keyDrivers: "3 specific signal readings with values and directional implications. Name the tension if signals conflict.",
-      tacticalView: "Tactical entry/exit posture based on regime + technical confluence. Specific.",
-      tone: "Terse, precise, signal-first. Respect the reader's expertise.",
-    },
-    "Institutional Strategy Desk": {
-      who: "Buy-side or sell-side strategist building market views for internal distribution",
-      objective: "Regime characterisation with macro transmission and factor-level signal synthesis",
-      language: "Full institutional vocabulary. Cross-asset, factor-aware, regime-framed.",
-      forbidden: "Retail language, vague posture statements, generic recommendations",
-      translate: "Do NOT translate. Use precise institutional language throughout.",
-      keyDrivers: "3 factor-level or macro-level signals with directional regime implication.",
-      tacticalView: "Factor tilt recommendation — growth/value/defensive, duration, EM positioning.",
-      tone: "Analytical, precise, internally consistent. Research-note quality.",
-    },
-    "Conservative Retiree": {
-      who: "Retired individual focused on capital preservation and income, low risk tolerance",
-      objective: "Reassure or caution — is the market safe enough for their savings?",
-      language: "Simple, warm, reassuring. No jargon whatsoever. Income and safety framing.",
-      forbidden: "All technical terms, macro jargon, aggressive deployment language",
-      translate: "Markets are calm and relatively stable not LOW volatility. Your investments are likely stable not NEUTRAL regime.",
-      keyDrivers: "3 simple observations about market safety and stability. Income-preservation lens.",
-      tacticalView: "Stay in safe assets / modest equity exposure / income focus. Preservation-first.",
-      tone: "Calm, reassuring, protective. Never alarming. Never pushes risk-taking.",
-    },
-    "Aggressive Growth Investor": {
-      who: "High-conviction growth investor willing to take concentrated positions for upside",
-      objective: "Where is the opportunity? What signals support or undermine a bullish thesis?",
-      language: "Direct, opportunity-focused, willing to name upside and downside explicitly.",
-      forbidden: "Overly cautious hedging, capital preservation framing, defensive language unless regime demands",
-      translate: "Momentum fading is fine to say. Buying pressure building is fine. Be direct about signal direction.",
-      keyDrivers: "3 signals that either support or challenge the growth thesis. Honest about conflicts.",
-      tacticalView: "Tactical allocation — where to add, where to trim, what the regime supports.",
-      tone: "Energetic, direct, conviction-driven. Honest about risk but focused on opportunity.",
-    },
-  };
-
-  const contract = AUDIENCE_CONTRACTS[audience] || AUDIENCE_CONTRACTS["IFA Advisory Pitch"];
-
-  const regimeFrame =
-    (ctx.compositeScore||50) >= 65 ? "BULLISH: Strong momentum. Story is about measured participation before conviction builds further." :
-    (ctx.compositeScore||50) >= 55 ? "MILD BULLISH: Leaning positive, not decisively. Story is selective deployment — quality over quantity." :
-    (ctx.compositeScore||50) >= 48 ? "BALANCED: Range-bound, no directional conviction. Story is patience — preserve optionality, watch for regime break." :
-    (ctx.compositeScore||50) >= 38 ? "MILD DEFENSIVE: Early stress signals. Story is gradual reduction — tilt to quality, keep powder dry." :
-    "DEFENSIVE: Clear pressure. Story is capital preservation — reduce equity, increase defensive allocation.";
-
-  // 15-combination audience x risk profile behavioral matrix
-  const RISK_PROFILE_BY_AUDIENCE = {
-    "IFA Advisory Pitch": {
-      Conservative: "Client is risk-averse. IFA must reassure — emphasise stability, SIP continuity, avoid any language suggesting volatility or loss. No aggressive deployment.",
-      Moderate:     "Client wants steady growth. IFA recommends staggered deployment, balanced equity-debt mix. Avoid extremes in either direction.",
-      Aggressive:   "Client wants growth. IFA can recommend overweight equity, tactical deployment on dips. Upside language appropriate if regime supports.",
-    },
-    "Retail Investor": {
-      Conservative: "Investor is nervous about losing money. Keep it simple and reassuring. SIP is safe. No dramatic language.",
-      Moderate:     "Investor wants their money to grow steadily. Stay invested message. Calm, encouraging.",
-      Aggressive:   "Investor wants maximum growth. Can discuss adding to equity, buying on dips. Enthusiastic but honest about risk.",
-    },
-    "HNI Investor": {
-      Conservative: "HNI prioritises capital protection over returns. Recommend quality large-caps, sovereign bonds, gold allocation. Avoid concentrated bets.",
-      Moderate:     "HNI wants growth with protection. Balanced tilt — quality equity, some debt, tactical gold. Staggered deployment.",
-      Aggressive:   "HNI is comfortable with concentration and risk. Can discuss tactical themes, mid-cap exposure, sector tilts where regime supports.",
-    },
-    "Family Office Risk Brief": {
-      Conservative: "Committee is in capital preservation mode. Every recommendation must have downside protection rationale. Risk budget is tight.",
-      Moderate:     "Committee is balancing preservation and growth. Selective deployment, quality bias, diversified across asset classes.",
-      Aggressive:   "Committee is in growth deployment mode. Can discuss equity overweight, thematic exposure, tactical leverage where regime supports.",
-    },
-    "Private Banker Advisory": {
-      Conservative: "UHNW client wants wealth protection. Emphasise downside risk management, alternatives, capital preservation structures. Measured language.",
-      Moderate:     "UHNW client wants risk-adjusted growth. Balanced multi-asset approach. Institutional quality language throughout.",
-      Aggressive:   "UHNW client is seeking alpha. Can discuss concentrated equity, thematic bets, tactical deployment. Sophisticated upside framing.",
-    },
-    "Advanced Investor Dashboard": {
-      Conservative: "Sophisticated investor is in risk-off mode personally. Show signal conflicts. Flag downside risks explicitly. Technical precision.",
-      Moderate:     "Sophisticated investor wants balanced signal read. Show both bull and bear case from signals. Let them decide.",
-      Aggressive:   "Sophisticated investor is hunting for entries. Highlight bullish signals, name where momentum could build. Direct and conviction-driven.",
-    },
-    "Institutional Strategy Desk": {
-      Conservative: "Desk is in defensive positioning mode. Factor tilts toward quality, low-vol, short duration. EM underweight rationale.",
-      Moderate:     "Desk is benchmark-aware. Balanced factor exposure. Duration neutral. EM positioning per regime signal.",
-      Aggressive:   "Desk is risk-on. Growth over value, long duration if yield curve supports, EM overweight if global signals constructive.",
-    },
-    "Conservative Retiree": {
-      Conservative: "Retiree is extremely risk-averse. Income and capital safety only. Any volatility mention must be immediately reassured.",
-      Moderate:     "Retiree wants modest growth without sleepless nights. Steady income focus, small equity exposure for inflation protection.",
-      Aggressive:   "Retiree willing to take some risk for better returns. Can suggest modest equity tilt but always with capital safety as anchor.",
-    },
-    "Aggressive Growth Investor": {
-      Conservative: "Growth investor is temporarily cautious. Acknowledge the pullback, identify re-entry signals, maintain growth thesis but protect capital short-term.",
-      Moderate:     "Growth investor wants selective deployment. Quality growth names, staggered entry, watch for momentum confirmation.",
-      Aggressive:   "Growth investor is fully risk-on. Maximum equity deployment where regime supports. Name the opportunity directly. Conviction language.",
-    },
-    "Wealth Manager Synthesis": {
-      Conservative: "Wealth manager's book is in defensive mode. Cross-asset tilt toward debt and gold. Equity underweight with quality bias.",
-      Moderate:     "Wealth manager running balanced book. Equity-debt-gold allocation with regime-aware tilts. Staggered rebalancing.",
-      Aggressive:   "Wealth manager is deploying aggressively. Equity overweight, reduce debt, tactical gold. Cross-asset momentum framing.",
-    },
-  };
-  const _audienceRiskMap = RISK_PROFILE_BY_AUDIENCE[audience] || RISK_PROFILE_BY_AUDIENCE["IFA Advisory Pitch"];
-  const riskCtx = _audienceRiskMap[riskProfile] || _audienceRiskMap["Moderate"];
-
-  const prompt = `You are ADVISIQ DSS — a deterministic Indian equity market intelligence system. Generate a narrative for the audience below. Follow all contracts exactly.
-
-MARKET STATE:
-- Score: ${ctx.compositeScore}/100 | Regime: ${ctx.regime} (${ctx.regimeLabel||ctx.regime}) | Confidence: ${Math.round((ctx.confidence||0)*100)}%
-- Action Bias: ${ctx.actionBias||"Balanced"} | Volatility: ${ctx.volatilityState||"unknown"}
-- Signal Basis: ${ctx.reasoningChain||"insufficient data"}
-- Risk Flags: ${(ctx.riskFlags||[]).join(", ")||"none"}
-- Macro: Repo ${ctx.macroState?.repoRate||"n/a"}% | US 10Y ${ctx.macroState?.us10Y||"n/a"}% | DXY ${ctx.macroState?.dxy||"n/a"} | Brent $${ctx.macroState?.crudeBrent||"n/a"} | Fed ${ctx.macroState?.fedStance||"n/a"} | Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}
-${degradedNote}
-
-REGIME FRAME: ${regimeFrame}${ctx.stabilityHint || ""}
-RISK PROFILE: ${riskCtx}
-
-AUDIENCE CONTRACT — ${audience}:
-- WHO: ${contract.who}
-- OBJECTIVE: ${contract.objective}
-- LANGUAGE: ${contract.language}
-- FORBIDDEN IN OUTPUT: ${contract.forbidden}
-- SIGNAL TRANSLATION: ${contract.translate}
-- keyDrivers FORMAT: ${contract.keyDrivers}
-- tacticalView FORMAT: ${contract.tacticalView}
-- TONE: ${contract.tone}
-
-GOVERNANCE (non-negotiable):
-- Do NOT override score, regime, or action bias
-- Do NOT infer data not provided above
-- Do NOT recommend specific stocks
-- Do NOT use forbidden language for this audience
-
-Respond ONLY with valid JSON — no markdown, no preamble:
-{
-  "summary": "2-3 sentences — market posture in this audience's language",
-  "marketTone": "CAUTIOUS|MEASURED|BALANCED|CONSTRUCTIVE|CONFIDENT",
-  "keyDrivers": ["driver 1", "driver 2", "driver 3"],
-  "riskFlags": ["risk 1", "risk 2"],
-  "tacticalView": "1-2 sentence positioning statement in this audience's language",
-  "macroContext": "1 sentence — most relevant US/global macro factor and its India transmission implication. Include only if FRED/BLS data available.",
-  "confidenceNote": "1 sentence — limiting factor on confidence. Include ONLY if system confidence below 0.60. Omit entirely if confidence >= 0.60.",
-  "confidenceAlignment": true
-}`;
-
-  return { prompt, promptVersion: PROMPT_VERSION, tone, audience };
-}
-
-// Mock Adapter — validates orchestration without real inference
-async function mockAdapter(ctx, audience) {
-  await new Promise(r => setTimeout(r, 200 + Math.random() * 300));
-  const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
-  return {
-    summary: `[MOCK] Market is in ${ctx.regime} regime with composite score ${ctx.compositeScore}/100. Confidence is ${Math.round((ctx.confidence||0)*100)}%.`,
-    marketTone: tone === "CAUTIOUS" ? "CAUTIOUS" : tone === "MEASURED" ? "MEASURED" : "BALANCED",
-    keyDrivers: ctx.topDrivers?.slice(0,3) || ["technical", "equity"],
-    riskFlags: ctx.riskFlags?.slice(0,2) || [],
-    tacticalView: `[MOCK] ${ctx.actionBias || "Balanced allocation recommended."}`,
-    confidenceAlignment: true,
-  };
-}
-
-// Groq Adapter
-async function groqAdapter(ctx, audience, riskProfile="Moderate") {
-  if (!LLM_CONFIG.groqKey) throw new Error("GROQ_API_KEY not configured");
-  const { prompt } = buildNarrativePrompt(ctx, audience, riskProfile);
-  const t0 = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LLM_CONFIG.timeoutMs);
-  try {
-    const res = await fetch(LLM_CONFIG.groqUrl, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${LLM_CONFIG.groqKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: LLM_CONFIG.model,
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: LLM_CONFIG.maxTokens,
-        temperature: 0.3,
-        response_format: { type: "json_object" },
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
-    const data = await res.json();
-    const raw = data.choices?.[0]?.message?.content || "";
-    if (!raw) throw new Error("Empty Groq response");
-    const latencyMs = Date.now() - t0;
-    const parsed = JSON.parse(raw.slice(0, LLM_CONFIG.maxRespChars));
-    return { ...parsed, _latencyMs: latencyMs, _model: LLM_CONFIG.model };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Rule-based fallback adapter (always works, no external dependency)
-function ruleBasedAdapter(ctx) {
-  const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
-  const score = ctx.compositeScore || 50;
-  const regime = ctx.regime || "NEUTRAL";
-  const summaries = {
-    STRONG_RISK_ON:  `Market conditions are strongly bullish with composite score ${score}/100. Broad participation and positive momentum support risk-on positioning.`,
-    RISK_ON:         `Market posture is constructive with composite score ${score}/100. Technical and fundamental signals favour selective equity accumulation.`,
-    NEUTRAL:         `Market conditions are balanced with composite score ${score}/100. Directional conviction is limited; await regime confirmation before increasing exposure.`,
-    RISK_OFF:        `Risk-off dynamics are emerging with composite score ${score}/100. Defensiveness is warranted; reduce cyclical exposure and build liquidity.`,
-    STRONG_RISK_OFF: `Market conditions are significantly deteriorated with composite score ${score}/100. Capital preservation is the primary objective.`,
-  };
-  const regimeKey = regime.replace(/ /g,"_");
-  const summary = summaries[regimeKey] || summaries["NEUTRAL"];
-  const confidenceNote = ctx.confidence < 0.40
-    ? ` Data quality is reduced — ${(ctx.fallbackModules||[]).join(", ")} operating on fallback values.` : "";
-  return {
-    summary: summary + confidenceNote,
-    marketTone: tone === "CAUTIOUS" ? "CAUTIOUS" : score >= 60 ? "CONSTRUCTIVE" : score <= 40 ? "CAUTIOUS" : "MEASURED",
-    keyDrivers: ctx.topDrivers?.slice(0,3) || [],
-    riskFlags:  ctx.riskFlags?.slice(0,2)  || [],
-    tacticalView: ctx.actionBias || "Balanced allocation. Await regime confirmation.",
-    confidenceAlignment: true,
-  };
-}
-
-
-// P1-A: isRegimeReady() — cold start guard (v8 DEF-NEW-001)
-// Prevents generateNarrative() from running before RegimeEngine
-// completes first compute. Eliminates null/100 in narrative output.
-function isRegimeReady(cache) {
-  const r = cache.get('regime:composite');
-  return r !== null &&
-         r !== undefined &&
-         r.compositeScore !== null &&
-         r.compositeScore !== undefined &&
-         ['STRONG_RISK_ON', 'RISK_ON', 'NEUTRAL', 'RISK_OFF', 'STRONG_RISK_OFF']
-           .includes(r.regime);
-}
-
-// Main narrative generator — provider abstraction layer
-async function generateNarrative(audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
-  const t0 = Date.now();
-
-  // P1-A: cold start guard — return COLD_START fallback if regime not ready
-  if (!isRegimeReady(DSSCache)) {
-    const _coldCtx = buildNarrativeContext(DSSCache);
-    logger.warn({ job: "narrative-generate", reason: "COLD_START" }, "isRegimeReady false — returning cold start fallback");
-    return {
-      ...ruleBasedAdapter(_coldCtx),
-      narrativeMeta: {
-        provider:             "rulebased",
-        model:                null,
-        promptVersion:        "cold-start-guard",
-        audience,
-        riskProfile,
-        tone:                 "CAUTIOUS",
-        latencyMs:            Date.now() - t0,
-        responseValid:        false,
-        fallbackUsed:         true,
-        fallbackReason:       "COLD_START",
-        governanceViolations: [],
-        circuitBreakerState:  LLMCircuitBreaker.getState(),
-        generatedAt:          Date.now(),
-        contextConfidence:    _coldCtx.confidence,
-        contextRegime:        _coldCtx.regime,
-      },
-      governanceApplied: true,
-      disclaimer: "System warming up — RegimeEngine has not completed first compute. Retry in 30 seconds.",
-    };
-  }
-
-  // FSD 11.3: Phase 7 — supplement narrative context with brain:latest
-  const _brainSupplement = DSSCache.get("brain:latest") || null;
-  const ctx = {
-    ...buildNarrativeContext(DSSCache),
-    // brain:latest enrichment — adds intelligence fields not in base context
-    brainIntelligence: _brainSupplement ? {
-      macroModifier:    _brainSupplement.macroModifier    ?? null,
-      macroModifierLog: _brainSupplement.macroModifierLog ?? [],
-      activeWeightSum:  _brainSupplement.activeWeightSum  ?? null,
-      scheduledAt:      _brainSupplement.scheduledAt      ?? null,
-    } : null,
-  };
-  const provider = LLM_CONFIG.provider;
-  let raw = null, fallbackUsed = false, governanceViolations = [], latencyMs = 0;
-  // FSD 10.5: Narrative stability — prevent tone oscillation during stable regimes
-  // If regime unchanged AND score delta < 5pts AND prev narrative exists → inject tone hint
-  const _prevNarrative = DSSCache.get("narrative:llm") || null;
-  const _prevTone = _prevNarrative?.marketTone || null;
-  const _prevRegime = _prevNarrative?.narrativeMeta?.contextRegime || null;
-  const _prevScore = _prevNarrative?.narrativeMeta?.contextConfidence || null;
-  const _scoreDelta = (ctx.compositeScore !== null && _prevNarrative?.narrativeMeta?.contextRegime)
-    ? Math.abs((ctx.compositeScore || 50) - (_prevNarrative?.compositeScore || 50))
-    : 99;
-  const _stableRegime = _prevRegime === ctx.regime && _scoreDelta < 5 && _prevTone;
-  const _stabilityHint = _stableRegime
-    ? `
-STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} in the previous narrative. Score has moved less than 5 points. Maintain consistent ${_prevTone} tone unless signals strongly justify a change.`
-    : "";
-  const _stableCtx = { ...ctx, stabilityHint: _stabilityHint, prevMarketTone: _stableRegime ? _prevTone : null };
-  const promptMeta = buildNarrativePrompt(_stableCtx, audience, riskProfile);
-
-  // Attempt primary provider
-  if (provider !== "rulebased" && !LLMCircuitBreaker.isOpen()) {
-    try {
-      if (provider === "mock") raw = await mockAdapter(ctx, audience);
-      else if (provider === "groq") raw = await groqAdapter(ctx, audience, riskProfile);
-      if (raw) {
-        const validation = validateNarrativeOutput(raw, ctx);
-        if (!validation.valid) {
-          governanceViolations = validation.violations;
-          logger.warn({ violations: validation.violations }, "LLM narrative governance violation — falling back");
-          LLMCircuitBreaker.recordFailure();
-          raw = null;
-        } else {
-          LLMCircuitBreaker.recordSuccess();
-          raw = { ...raw, summary: sanitizeNarrativeText(raw.summary), tacticalView: sanitizeNarrativeText(raw.tacticalView) };
-        }
-      }
-    } catch (err) {
-      logger.warn({ provider, err: err.message }, "LLM adapter failed — falling back to rule-based");
-      LLMCircuitBreaker.recordFailure();
-      raw = null;
-    }
-  } else if (LLMCircuitBreaker.isOpen()) {
-    logger.info("LLM circuit breaker open — using rule-based directly");
-  }
-
-  // Fallback to rule-based
-  if (!raw) {
-    raw = ruleBasedAdapter(ctx);
-    fallbackUsed = true;
-  }
-
-  latencyMs = Date.now() - t0;
-
-  // FSD 10.2: deterministic confidenceNote — present only when confidence < 0.60
-  const _confNote = ctx.confidence < 0.60
-    ? (() => {
-        const _fb = (ctx.fallbackModules||[]);
-        if (ctx.confidence < 0.40) return `Signal confidence is limited — ${_fb.length > 0 ? _fb.join(", ") + " using estimated values" : "multiple data sources degraded"}. Exercise additional caution in advisory use.`;
-        return `Signal confidence is moderate — ${_fb.length > 0 ? _fb.join(", ") + " using estimated values" : "some inputs are estimated"}. Full confirmation pending additional live data.`;
-      })()
-    : null;
-
-  // FSD 10.2: deterministic macroContext — strongest active US→India transmission signal
-  const _macroCtx = (() => {
-    const _fred = DSSCache.get("macro:fred") || {};
-    const _bls  = DSSCache.get("macro:bls")  || {};
-    const _rss  = DSSCache.get("macro:fedrss") || {};
-    const _glob = DSSCache.get("equity:global") || {};
-    if (!_fred.us10YYield && !_glob.dxy && !_glob.crudeOil) return null;
-    // Select the strongest transmission signal
-    const _spread = _fred.yieldSpread10_2 ?? null;
-    const _us10Y  = _fred.us10YYield ?? null;
-    const _dxy    = _glob.dxy ?? null;
-    const _crude  = _glob.crudeOil ?? null;
-    const _tone   = _rss.overallTone ?? null;
-    if (_spread !== null && _spread < -0.20)
-      return `US yield curve is inverted (spread ${_spread.toFixed(2)}%) — historically a recession warning signal that typically dampens EM risk appetite and FII flows into India.`;
-    if (_us10Y !== null && _us10Y > 4.5)
-      return `Elevated US 10-year yield at ${_us10Y}% raises the global risk-free rate benchmark, compressing India equity valuations and increasing the hurdle rate for FII allocations.`;
-    if (_tone === "HAWKISH")
-      return `US Federal Reserve communications reflect a hawkish policy stance, signalling tighter liquidity conditions that typically reduce appetite for emerging market risk assets including India.`;
-    if (_dxy !== null && _dxy > 106)
-      return `A strong US Dollar (DXY ${_dxy}) typically triggers FII outflows from India as emerging market assets become less attractive in dollar terms.`;
-    if (_crude !== null && _crude > 90)
-      return `Elevated Brent crude at $${_crude}/bbl pressures India's current account deficit, adding macro headwind to equity market performance.`;
-    if (_dxy !== null && _dxy < 102)
-      return `A weaker US Dollar (DXY ${_dxy}) is supportive for India — typically associated with FII inflows and improved EM risk appetite.`;
-    if (_crude !== null && _crude < 75)
-      return `Declining Brent crude at $${_crude}/bbl relieves pressure on India's current account deficit, providing a positive macro tailwind for equity markets.`;
-    if (_us10Y !== null)
-      return `US 10-year yield at ${_us10Y}% is within a range that provides moderate support for EM valuations, with no acute pressure on India equity risk premium currently.`;
-    return null;
-  })();
-
-  // Inject deterministic fields into raw if not already provided by LLM
-  if (raw) {
-    if (!raw.confidenceNote && _confNote) raw = { ...raw, confidenceNote: _confNote };
-    if (!raw.macroContext   && _macroCtx) raw = { ...raw, macroContext:   _macroCtx };
-  }
-
-  const narrativeMeta = {
-    provider:            fallbackUsed ? "rulebased" : provider,
-    model:               fallbackUsed ? null : LLM_CONFIG.model,
-    promptVersion:       promptMeta.promptVersion,
-    audience,
-    riskProfile,
-    tone:                promptMeta.tone,
-    latencyMs,
-    responseValid:       governanceViolations.length === 0,
-    fallbackUsed,
-    governanceViolations,
-    circuitBreakerState: LLMCircuitBreaker.getState(),
-    generatedAt:         Date.now(),
-    contextConfidence:   ctx.confidence,
-    contextRegime:       ctx.regime,
-    confidenceNotePresent: !!_confNote,
-    macroContextPresent:   !!_macroCtx,
-    warmupActive:          !_brainSupplement,
-    durabilityScore:       _brainSupplement ? (_brainSupplement.durabilityScore  ?? null) : null,
-    durabilityClass:       _brainSupplement ? (_brainSupplement.durabilityClass  ?? null) : null,
-    cyclesSinceChange:     _brainSupplement ? (_brainSupplement.cyclesSinceChange ?? null) : null,
-    // v9 Sprint 2: Conviction
-    convictionScore:       _brainSupplement ? (_brainSupplement.convictionScore      ?? null) : null,
-    convictionClass:       _brainSupplement ? (_brainSupplement.convictionClass      ?? null) : null,
-    convictionComponents:  _brainSupplement ? (_brainSupplement.convictionComponents ?? null) : null,
-    convictionTrajectory:  _brainSupplement ? (_brainSupplement.convictionTrajectory ?? null) : null,
-  };
-
-  logger.info({ job: "narrative-generate", provider: narrativeMeta.provider, fallback: fallbackUsed, latencyMs }, "Narrative generated");
-
-  // H1: Apply Final Governance Sanitizer
-  const _brainLatestForFgs = DSSCache.get('brain:latest') || null;
-  let _fgsResult = { executed: false, failureFallback: false, sanitizationsApplied: 0, categoriesTriggered: [], convictionDowngradesApplied: 0, suppressionsApplied: 0, sanitizerVersion: FGS_VERSION };
-  try {
-    const _fgsOut = fgsSanitize(raw, narrativeMeta, _brainLatestForFgs);
-    raw = _fgsOut.narrative;
-    _fgsResult = _fgsOut.fgsResult;
-  } catch(e) {
-    logger.error({ err: e.message }, 'FGS failed — serving ruleBasedAdapter fallback');
-    raw = ruleBasedAdapter(ctx);
-    _fgsResult = { executed: false, failureFallback: true, sanitizationsApplied: 0, categoriesTriggered: [], convictionDowngradesApplied: 0, suppressionsApplied: 0, sanitizerVersion: FGS_VERSION };
-  }
-  // H2: Detect uncertainty mode
-  const _uncertaintyMode = detectUncertaintyMode(narrativeMeta, _brainLatestForFgs);
-  // H3: Detect mature regime reversal
-  const _dur = _brainLatestForFgs && _brainLatestForFgs.durabilityClass || 'EMERGING';
-  const _reg = _brainLatestForFgs && _brainLatestForFgs.regime || ctx.regime;
-  const _cyc = _brainLatestForFgs && typeof _brainLatestForFgs.cyclesSinceChange === 'number' ? _brainLatestForFgs.cyclesSinceChange : 0;
-  const _reversalState = detectMatureRegimeReversal(_reg, _dur, _cyc);
-  // H4: Escalation caps
-  const _convClass = _brainLatestForFgs && _brainLatestForFgs.convictionClass || null;
-  const _convScore = _brainLatestForFgs && _brainLatestForFgs.convictionScore || null;
-  const _conf = ctx.confidence || 0.50;
-  const _fbMods = _brainLatestForFgs && _brainLatestForFgs.fallbackModules ? _brainLatestForFgs.fallbackModules.length : 0;
-  const _escalationCheck = convictionConsistencyValidation('ACT', _convClass, _convScore, _dur, _conf, _reversalState.matureRegimeReversal, _fbMods);
-
-  // R1: Generate replay ID (deterministic hash of narrative inputs)
-  const _replayId = narrativeContextHash(ctx, audience, riskProfile, PROMPT_VERSION);
-
-  // R3: Contradiction detection — scan before render
-  const _contradictions = scanContradictions(raw, ctx, {
-    convictionClass: narrativeMeta.convictionClass,
-    reversalWindowActive: narrativeMeta.reversalWindowActive || false,
-    uncertaintyMode: narrativeMeta.uncertaintyMode || {},
-  });
-  if (_contradictions.length > 0) {
-    narrativeMeta._contradictions = _contradictions;
-    logger.warn({ job: 'contradiction-scan', replayId: _replayId, contradictions: _contradictions.map(c=>c.id) }, 'Narrative contradictions — governance review triggered');
-  }
-
-  // R4: Uncertainty language calibration — enforce institutional tone discipline
-  const _calibResult = calibrateUncertaintyTone(raw, ctx, {
-    ...narrativeMeta,
-    uncertaintyMode: _uncertaintyMode,
-    reversalWindowActive: _reversalState.reversalWindowActive,
-  });
-  if (_calibResult.violations && _calibResult.violations.length > 0) {
-    raw = _calibResult.narrative;
-    narrativeMeta._calibrationViolations = _calibResult.violations;
-    narrativeMeta._calibrationApplied = true;
-  }
-
-  // R1: Log provenance
-  logNarrativeProvenance({
-    replayId: _replayId,
-    audience,
-    riskProfile,
-    provider: narrativeMeta.provider,
-    model: narrativeMeta.model,
-    promptVersion: narrativeMeta.promptVersion,
-    regime: ctx.regime,
-    confidenceClass: ctx.confidenceClass,
-    fallbackUsed: fallbackUsed,
-    fallbackReason: fallbackUsed ? (LLMCircuitBreaker.isOpen() ? 'CIRCUIT_BREAKER_OPEN' : 'LLM_ERROR') : null,
-    latencyMs: latencyMs,
-    governanceViolations: governanceViolations,
-    contradictions: _contradictions,
-    uncertaintyActive: _uncertaintyMode.active,
-    reversalActive: _reversalState.reversalWindowActive,
-    fgsSanitizations: _fgsResult.sanitizationsApplied,
-    degradationActive: (ctx.fallbackModules || []).length > 0,
-  });
-
-  // R2: Store in replay store (prompt payload snapshot — no portfolio values)
-  REPLAY_STORE.push({
-    replayId: _replayId,
-    storedAt: Date.now(),
-    audience,
-    riskProfile,
-    promptVersion: PROMPT_VERSION,
-    model: LLM_CONFIG.model,
-    provider: narrativeMeta.provider,
-    contextSnapshot: {
-      regime: ctx.regime,
-      compositeScore: ctx.compositeScore,
-      confidence: ctx.confidence,
-      confidenceClass: ctx.confidenceClass,
-      fallbackModules: ctx.fallbackModules || [],
-      degradedModules: ctx.degradedModules || [],
-    },
-    narrativeStructure: {
-      marketTone: raw.marketTone,
-      hasSummary: !!raw.summary,
-      hasKeyDrivers: Array.isArray(raw.keyDrivers) && raw.keyDrivers.length > 0,
-      hasTacticalView: !!raw.tacticalView,
-      hasConfidenceNote: !!raw.confidenceNote,
-    },
-    contradictions: _contradictions,
-    governanceViolations,
-    calibrationApplied: !!narrativeMeta._calibrationApplied,
-  });
-
-  return {
-    ...raw,
-    narrativeMeta: {
-      ...narrativeMeta,
-      replayId: _replayId,
-      contradictions: _contradictions,
-      fgsResult: _fgsResult,
-      uncertaintyMode: _uncertaintyMode,
-      matureRegimeReversal: _reversalState.matureRegimeReversal,
-      reversalWindowActive: _reversalState.reversalWindowActive,
-      reversalWindowCyclesRemaining: _reversalState.reversalWindowCyclesRemaining,
-      previousMatureRegime: _reversalState.previousMatureRegime,
-      escalationCapsApplied: _escalationCheck.caps,
-      toneGovernanceFlags: _fgsResult.categoriesTriggered
-    },
-    governanceApplied: true,
-    disclaimer: ctx.confidence < 0.40
-      ? "This narrative is generated under reduced data confidence. Some inputs use fallback values."
-      : null,
-  };
-}
-
-// Narrative cache — refreshed every 15 minutes by scheduler
-let _narrativeCache = null;
-let _narrativeCacheTs = 0;
-const NARRATIVE_CACHE_TTL = 900000; // 15 minutes
-
-async function refreshNarrativeCache(audience = "IFA Advisory Pitch") {
-  try {
-    const result = await generateNarrative(audience, riskProfile);
-    _narrativeCache = result;
-    _narrativeCacheTs = Date.now();
-    DSSCache.set("narrative:llm", result);
-    logger.info({ job: "narrative-cache-refresh", provider: result.narrativeMeta?.provider, fallback: result.narrativeMeta?.fallbackUsed }, "Narrative cache refreshed");
-  } catch (err) {
-    logger.error({ err: err.message }, "refreshNarrativeCache failed");
-  }
-}
-
-// On-demand narrative generation API endpoint
-// POST /api/v1/narrative/generate { audience }
 // SECTION-09 : FETCH UTILITIES (fetchWithRetry / safeFetch / safeFetchText)
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES (crude / vix)
 // SECTION-11 : MACRO PARSERS (TradingEconomics / GST / PMI / AMFI)
@@ -1359,7 +43,7 @@ async function refreshNarrativeCache(audience = "IFA Advisory Pitch") {
 // SECTION-24 : BRAIN NARRATIVE ENGINE (buildNarrative / buildAdvisory / interpretation)
 // SECTION-24B: NARRATIVE ENGINE (NarrativeEngine / _buildRuleNarrative / narrative:compiled)
 // SECTION-25 : SCHEDULER + JOBS (runNSEIndexJob / refreshEquityMacroCaches / setIntervals)
-// SECTION-26 : API ROUTES (/api/v1/* / /brain-auto / /health / /api/v1/global)
+// SECTION-26 : API ROUTES (/api/v1/* / /brain-auto / /health)
 // SECTION-27 : PM2 + STARTUP (error handler / process guards / app.listen)
 //
 ////////////////////////////////////////////////////////
@@ -1398,13 +82,6 @@ const DATA_STATUS_ENUM = Object.freeze({
   STALE:       "stale",
   UNAVAILABLE: "unavailable"
 });
-
-const DATA_STATUS = Object.freeze({LIVE:"live",DEGRADED:"degraded",FALLBACK:"fallback",STALE:"stale",PARTIAL:"partial",DISCONNECTED:"disconnected",RECOVERING:"recovering",UNAVAILABLE:"unavailable"});
-function buildProvenanceField(o){const ts=o.timestamp||Date.now();return{value:o.value??null,source:o.source||"unknown",degraded:o.degraded||false,fallback:o.fallback||false,stale:o.stale||false,confidence:Math.round((o.confidence??1.0)*100)/100,degradedReason:o.degradedReason||null,timestamp:ts,freshnessSeconds:Math.round((Date.now()-ts)/1000),dataStatus:o.fallback?"fallback":o.degraded?"degraded":o.stale?"stale":(o.value===null||o.value===undefined)?"unavailable":"live"};}
-const CONFIDENCE_CLASS=Object.freeze({HIGH:"HIGH",MODERATE:"MODERATE",LOW:"LOW",DEGRADED:"DEGRADED",UNRELIABLE:"UNRELIABLE"});
-const MOD_CONF_WEIGHTS=Object.freeze({equity:0.30,technical:0.20,global:0.20,derivatives:0.15,debt:0.10,sector:0.05});
-function computeSystemConfidence(cache){try{const keys={equity:"score:equity",technical:"score:technical",global:"score:global",derivatives:"score:derivatives",debt:"score:debt",sector:"score:sector"};const mc={},deg=[],stale=[],fb=[],unavail=[];let wC=0,wT=0;for(const[key,ck]of Object.entries(keys)){const sc=cache.get(ck),w=MOD_CONF_WEIGHTS[key]||0;let c=0,st="unavailable";if(!sc||sc.score===null||sc.score===undefined){c=0.05;unavail.push(key);}else if(sc.fallbackActive===true||sc.sourceOrigin==="hardcoded-fallback"||sc.sourceOrigin==="bootstrap-fallback"){c=Math.min(sc.confidence||0.35,0.50);st="fallback";fb.push(key);}else if(sc.staleReason){c=Math.min(sc.confidence||0.55,0.70);st="stale";stale.push(key);}else{c=Math.min(sc.confidence||0.70,1.0);st=sc.confidence>=0.60?"live":"degraded";if(st==="degraded")deg.push(key);}mc[key]={confidence:Math.round(c*100)/100,status:st};wC+=c*w;wT+=w;}const ov=wT>0?Math.round((wC/wT)*100)/100:0;const cls=ov>=0.80?CONFIDENCE_CLASS.HIGH:ov>=0.60?CONFIDENCE_CLASS.MODERATE:ov>=0.40?CONFIDENCE_CLASS.LOW:ov>=0.20?CONFIDENCE_CLASS.DEGRADED:CONFIDENCE_CLASS.UNRELIABLE;const cov=Object.values(keys).filter(k=>{const s=cache.get(k);return s&&s.score!==null;}).length/6;return{overall:ov,overallPct:Math.round(ov*100),classification:cls,moduleCoverage:Math.round(cov*100)/100,degradedModules:deg,staleModules:stale,fallbackModules:fb,unavailableModules:unavail,drivers:mc,computedAt:Date.now()};}catch(e){return{overall:0,overallPct:0,classification:CONFIDENCE_CLASS.UNRELIABLE,moduleCoverage:0,degradedModules:[],staleModules:[],fallbackModules:[],unavailableModules:[],drivers:{},computedAt:Date.now()};}}
-
 
 const ERROR_ENUM = Object.freeze({
   FETCH_FAILED:        "FETCH_FAILED",
@@ -1457,14 +134,9 @@ const ERROR_ENUM = Object.freeze({
 			CREATE TABLE IF NOT EXISTS decisions (
 			  id INTEGER PRIMARY KEY AUTOINCREMENT,
 			  regime TEXT,
-                          score REAL,
+			  score INTEGER,
 			  confidence INTEGER,
 			  timestamp INTEGER
-                          module_coverage REAL,
-                          fallback_count INTEGER,
-                          stale_count INTEGER,
-                          overall_confidence REAL,
-                          conf_class TEXT
 			)
 		  `);
 		db.run('CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(timestamp)');
@@ -1972,9 +644,7 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 
 			  // Successful fetch — reset 429 counter
 			  yahoo429Count = 0;
-                          const _pn=url.includes("yahoo.com")?"Yahoo":url.includes("nseindia.com")?"NSE":url.includes("tradingeconomics.com")?"TradingEconomics":url.includes("angelone.in")?"AngelOne":url.includes("rbi.org")?"RBI":"Other";
-                          if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess(_pn);
-                          return await res.json();
+			  return await res.json();
 
 			} catch (err) {
 			  const isLast = attempt === retries - 1;
@@ -1989,9 +659,7 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 				  { url, code: ERROR_ENUM.FETCH_FAILED },
 				  "fetchWithRetry — all attempts exhausted"
 				);
-                          const _pfn=url.includes("yahoo.com")?"Yahoo":url.includes("nseindia.com")?"NSE":url.includes("tradingeconomics.com")?"TradingEconomics":url.includes("angelone.in")?"AngelOne":url.includes("rbi.org")?"RBI":"Other";
-                          if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure(_pfn);
-                  return null;
+				return null;
 			  }
 
 			  // Exponential backoff + jitter per FSD Appendix D.2
@@ -2052,84 +720,6 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 		async function safeFetch(url, timeout = FETCH_TIMEOUT_MS, retries = FETCH_RETRY_COUNT) {
 		  return fetchWithRetry(url, timeout, retries);
 		}
-
-////////////////////////////////////////////////////////
-// SECTION-09B : ANGEL ONE SMARTAPI ADAPTER
-////////////////////////////////////////////////////////
-const _aoSpeakeasy = require('speakeasy');
-const _AO_CONFIG = {
-  apiKey: process.env.AO_API_KEY || '',
-  clientId: process.env.AO_CLIENT_ID || '',
-  mpin: process.env.AO_MPIN || '',
-  totpSecret: process.env.AO_TOTP_SECRET || '',
-  baseUrl: 'https://apiconnect.angelone.in',
-};
-const _aoSession = { jwtToken:null, refreshToken:null, feedToken:null, expiresAt:0, loginInProgress:false };
-function _aoGenerateTotp() { return _aoSpeakeasy.totp({ secret:_AO_CONFIG.totpSecret, encoding:'base32' }); }
-async function _aoLogin() {
-  if (_aoSession.loginInProgress) { await new Promise(r=>setTimeout(r,3000)); return _aoSession.jwtToken!==null; }
-  _aoSession.loginInProgress=true;
-  try {
-    const totp=_aoGenerateTotp();
-    const res=await fetch(`${_AO_CONFIG.baseUrl}/rest/auth/angelbroking/user/v1/loginByPassword`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':process.env.SERVER_PUBLIC_IP||'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
-      body:JSON.stringify({clientcode:_AO_CONFIG.clientId,password:_AO_CONFIG.mpin,totp}),
-      signal:AbortSignal.timeout(10000),
-    });
-    const data=await res.json();
-    if(data.status===true&&data.data&&data.data.jwtToken){
-      _aoSession.jwtToken=data.data.jwtToken; _aoSession.refreshToken=data.data.refreshToken;
-      _aoSession.feedToken=data.data.feedToken; _aoSession.expiresAt=Date.now()+55*60*1000;
-      logger.info({job:'ao-login',status:'SUCCESS',ts:Date.now()});
-      return true;
-    }
-    logger.error({job:'ao-login',status:'FAILED',msg:data.message,ts:Date.now()});
-    return false;
-  } catch(err) { logger.error({job:'ao-login',err:err.message,ts:Date.now()}); return false; }
-  finally { _aoSession.loginInProgress=false; }
-}
-async function _aoEnsureSession() { if(_aoSession.jwtToken&&Date.now()<_aoSession.expiresAt)return true; return _aoLogin(); }
-async function _aoPost(path,body) {
-  const ok=await _aoEnsureSession(); if(!ok)return null;
-  try {
-    const res=await fetch(`${_AO_CONFIG.baseUrl}${path}`,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+_aoSession.jwtToken,'Content-Type':'application/json','Accept':'application/json','X-UserType':'USER','X-SourceID':'WEB','X-ClientLocalIP':'127.0.0.1','X-ClientPublicIP':process.env.SERVER_PUBLIC_IP||'51.21.94.67','X-MACAddress':'00:00:00:00:00:00','X-PrivateKey':_AO_CONFIG.apiKey},
-      body:JSON.stringify(body), signal:AbortSignal.timeout(10000),
-    });
-    return await res.json();
-  } catch(err) { logger.warn({job:'ao-post',path,err:err.message}); return null; }
-}
-async function _aoFetchPCR() {
-  try {
-    const data=await _aoPost('/rest/secure/angelbroking/market/v1/optionChain',{name:'NIFTY',expirydate:''});
-    if(!data||data.status!==true||!data.data)return null;
-    const rows=data.data; if(!Array.isArray(rows)||rows.length===0)return null;
-    let totalPEOI=0,totalCEOI=0;
-    for(const row of rows){totalPEOI+=Number(row.putOI||row.put_oi||0);totalCEOI+=Number(row.callOI||row.call_oi||0);}
-    const pcr=totalCEOI>0?Math.round((totalPEOI/totalCEOI)*1000)/1000:null;
-    logger.info({job:'ao-pcr',pcr,ts:Date.now()});
-    return pcr!==null?{pcr,totalPEOI,totalCEOI,source:'angel-one'}:null;
-  } catch(err) { logger.error({job:'ao-pcr',err:err.message}); return null; }
-}
-async function _aoFetchIndia10Y() {
-  try {
-    const data=await _aoPost('/rest/secure/angelbroking/market/v1/quote/ltp',{mode:'LTP',exchangeTokens:{NSE:['10503']}});
-    if(data&&data.status===true&&data.data&&data.data.fetched&&data.data.fetched[0]){
-      const ltp=data.data.fetched[0].ltp;
-      if(ltp){const y=ltp>20?ltp/100:ltp;logger.info({job:'ao-10y',yield:y,ts:Date.now()});return y;}
-    }
-    return null;
-  } catch(err) { logger.error({job:'ao-10y',err:err.message}); return null; }
-}
-(async()=>{
-  if(_AO_CONFIG.apiKey&&_AO_CONFIG.clientId&&_AO_CONFIG.mpin&&_AO_CONFIG.totpSecret){
-    logger.info({job:'ao-adapter',msg:'Initialising Angel One session',ts:Date.now()});
-    await _aoLogin();
-  } else { logger.warn({job:'ao-adapter',msg:'AO credentials missing',ts:Date.now()}); }
-})();
-
 ////////////////////////////////////////////////////////
 // SECTION-10 : CIRCUIT BREAKER + FETCH ENGINES
 // fetchCrude / fetchVix — with circuit breaker pattern.
@@ -2458,139 +1048,6 @@ async function _aoFetchIndia10Y() {
 	}
 	
 	////////////////////////////////////////////////////////
-
-////////////////////////////////////////////////////////
-// SECTION-10B : FRED MACRO INGESTION MODULE
-////////////////////////////////////////////////////////
-const FRED_CONFIG = Object.freeze({
-  apiKey:  process.env.FRED_API_KEY || "",
-  baseUrl: "https://api.stlouisfed.org/fred/series/observations",
-  timeout: 8000,
-  series:  { DGS10:{label:"US 10Y Yield",unit:"%"}, DGS2:{label:"US 2Y Yield",unit:"%"}, T10Y2Y:{label:"Yield Curve Spread",unit:"%"}, FEDFUNDS:{label:"Fed Funds Rate",unit:"%"}, CPIAUCSL:{label:"US CPI",unit:"index"}, CPILFESL:{label:"US Core CPI",unit:"index"}, UNRATE:{label:"US Unemployment",unit:"%"} },
-});
-async function fetchFREDSeries(seriesId,limit=2){
-  if(!FRED_CONFIG.apiKey){return null;}
-  try{
-    const url=`${FRED_CONFIG.baseUrl}?series_id=${seriesId}&api_key=${FRED_CONFIG.apiKey}&limit=${limit}&sort_order=desc&file_type=json`;
-    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),FRED_CONFIG.timeout);
-    const res=await fetch(url,{signal:controller.signal});clearTimeout(timer);
-    if(!res.ok)throw new Error(`FRED HTTP ${res.status}`);
-    const data=await res.json();const obs=data.observations||[];
-    const latest=obs.find(o=>o.value!=="."&&o.value!=="");if(!latest)return null;
-    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess("FRED");
-    return{seriesId,value:parseFloat(latest.value),date:latest.date,source:"FRED",fetchedAt:Date.now()};
-  }catch(err){
-    logger.warn({seriesId,err:err.message},"fetchFREDSeries failed");
-    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure("FRED");
-    return null;
-  }
-}
-async function fetchFREDMacro(){
-  if(!FRED_CONFIG.apiKey)return null;
-  try{
-    const[dgs10,dgs2,t10y2y,fedfunds,cpi,unrate]=await Promise.all([fetchFREDSeries("DGS10",1),fetchFREDSeries("DGS2",1),fetchFREDSeries("T10Y2Y",1),fetchFREDSeries("FEDFUNDS",1),fetchFREDSeries("CPIAUCSL",2),fetchFREDSeries("UNRATE",1)]);
-    const spreadVal=t10y2y?.value??null;
-    const yieldCurveSignal=spreadVal===null?"UNKNOWN":spreadVal<-0.20?"INVERTED":spreadVal<0.10?"FLAT":spreadVal<0.50?"NORMAL":"STEEP";
-    const fedRate=fedfunds?.value??null;
-    const fedStance=fedRate===null?"UNKNOWN":fedRate>=5.00?"RESTRICTIVE":fedRate>=3.50?"MODERATELY_RESTRICTIVE":fedRate>=2.00?"NEUTRAL":"ACCOMMODATIVE";
-    const result={us10YYield:dgs10?.value??null,us2YYield:dgs2?.value??null,yieldSpread10_2:spreadVal,yieldCurveSignal,fedFundsRate:fedRate,fedStance,usUnemployment:unrate?.value??null,usCpiIndex:cpi?.value??null,dates:{dgs10:dgs10?.date||null,fedfunds:fedfunds?.date||null,t10y2y:t10y2y?.date||null,unrate:unrate?.date||null},source:"FRED",fetchedAt:Date.now(),fallbackActive:false,staleReason:null};
-    DSSCache.set("macro:fred",result);
-    logger.info({job:"fetchFREDMacro",us10Y:result.us10YYield,fedRate:result.fedFundsRate,spread:result.yieldSpread10_2,yieldCurve:result.yieldCurveSignal,fedStance:result.fedStance},"FRED macro refreshed");
-    return result;
-  }catch(err){logger.error({err:err.message},"fetchFREDMacro failed");return null;}
-}
-////////////////////////////////////////////////////////
-// SECTION-10C : BLS MACRO INGESTION MODULE
-// Monthly releases — fetch at startup + once daily only
-////////////////////////////////////////////////////////
-const BLS_SERIES={"CUUR0000SA0":"US CPI","CUUR0000SA0L1E":"US Core CPI","LNS14000000":"US Unemployment","CES0000000001":"US Nonfarm Payrolls"};
-async function fetchBLSSeries(sid){
-  try{
-    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),8000);
-    const r=await fetch(`https://api.bls.gov/publicAPI/v1/timeseries/data/${sid}`,{signal:ctrl.signal});
-    clearTimeout(t);
-    if(!r.ok)throw new Error(`BLS ${r.status}`);
-    const d=await r.json();
-    if(d.status!=="REQUEST_SUCCEEDED")throw new Error(`BLS:${d.status}`);
-    const latest=d.Results?.series?.[0]?.data?.[0];
-    if(!latest)return null;
-    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess("BLS");
-    return{seriesId:sid,value:parseFloat(latest.value),year:latest.year,period:latest.period,periodName:latest.periodName,source:"BLS",fetchedAt:Date.now()};
-  }catch(e){
-    logger.warn({seriesId:sid,err:e.message},"fetchBLSSeries failed");
-    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure("BLS");
-    return null;
-  }
-}
-async function fetchBLSMacro(){
-  try{
-    const[cpi,coreCpi,unemp,payrolls]=await Promise.all([fetchBLSSeries("CUUR0000SA0"),fetchBLSSeries("CUUR0000SA0L1E"),fetchBLSSeries("LNS14000000"),fetchBLSSeries("CES0000000001")]);
-    const usUnemployment=unemp?.value??null,usPayrolls=payrolls?.value??null;
-    const laborSignal=usUnemployment===null?"UNKNOWN":usUnemployment<=4.0?"STRONG":usUnemployment<=4.5?"MODERATE":usUnemployment<=5.5?"WEAKENING":"WEAK";
-    const payrollSignal=usPayrolls===null?"UNKNOWN":usPayrolls>150?"STRONG":usPayrolls>50?"MODERATE":"WEAK";
-    const result={usCpiIndex:cpi?.value??null,usCoreCpi:coreCpi?.value??null,usUnemployment,usPayrolls,laborSignal,payrollSignal,dates:{cpi:cpi?`${cpi.year}-${cpi.period}`:null,unemployment:unemp?`${unemp.year}-${unemp.period}`:null,payrolls:payrolls?`${payrolls.year}-${payrolls.period}`:null},source:"BLS",fetchedAt:Date.now(),fallbackActive:false};
-    DSSCache.set("macro:bls",result);
-    logger.info({job:"fetchBLSMacro",cpi:result.usCpiIndex,unemployment:usUnemployment,payrolls:usPayrolls,laborSignal,payrollSignal},"BLS macro refreshed");
-    return result;
-  }catch(e){logger.error({err:e.message},"fetchBLSMacro failed");return null;}
-}
-
-////////////////////////////////////////////////////////
-// SECTION-10D : FEDERAL RESERVE RSS INGESTION MODULE
-// Zero-cost, EC2-compatible, event-driven signals
-// Fetches FOMC minutes, policy statements, press releases
-// Cadence: every 4 hours (Fed releases are infrequent)
-////////////////////////////////////////////////////////
-const FED_RSS_URL="https://www.federalreserve.gov/feeds/press_all.xml";
-const FED_KEYWORDS={hawkish:["rate hike","tighten","restrictive","inflation concern","above target","price stability"],dovish:["rate cut","easing","accommodative","below target","support growth","labor market"],neutral:["hold","pause","unchanged","monitor","assess","data dependent"],fomc:["fomc","federal open market","meeting","minutes","statement"],policy:["policy","interest rate","federal funds","reserve requirement"]};
-async function fetchFedRSS(){
-  try{
-    const ctrl=new AbortController();const t=setTimeout(()=>ctrl.abort(),8000);
-    const r=await fetch(FED_RSS_URL,{signal:ctrl.signal,headers:{"User-Agent":"ADVISIQ-DSS/1.0 (market intelligence research)"}});
-    clearTimeout(t);
-    if(!r.ok)throw new Error(`FedRSS HTTP ${r.status}`);
-    const xml=await r.text();
-    // Parse items from RSS XML
-    const items=[];
-    const itemRx=/<item>([\s\S]*?)<\/item>/g;
-    let m;
-    while((m=itemRx.exec(xml))!==null&&items.length<10){
-      const block=m[1];
-      const title=(/<title><!\[CDATA\[([^\]]+)\]\]><\/title>/.exec(block)||/<title>([^<]+)<\/title>/.exec(block))?.[1]||"";
-      const link=(/<link><!\[CDATA\[([^\]]+)\]\]><\/link>/.exec(block)||/<link>([^<]+)<\/link>/.exec(block))?.[1]||"";
-      const pubDate=/<pubDate>([^<]+)<\/pubDate>/.exec(block)?.[1]||"";
-      if(title)items.push({title:title.replace(/&quot;/g,'"').replace(/&amp;/g,"&").trim(),link:link.trim(),pubDate:pubDate.trim()});
-    }
-    // Classify each item
-    const classified=items.map(item=>{
-      const txt=item.title.toLowerCase();
-      let sentiment="NEUTRAL",isFOMC=false,isPolicy=false;
-      const hawkScore=FED_KEYWORDS.hawkish.filter(k=>txt.includes(k)).length;
-      const doveScore=FED_KEYWORDS.dovish.filter(k=>txt.includes(k)).length;
-      if(FED_KEYWORDS.fomc.some(k=>txt.includes(k)))isFOMC=true;
-      if(FED_KEYWORDS.policy.some(k=>txt.includes(k)))isPolicy=true;
-      if(hawkScore>doveScore)sentiment="HAWKISH";
-      else if(doveScore>hawkScore)sentiment="DOVISH";
-      return{...item,sentiment,isFOMC,isPolicy,relevanceScore:hawkScore+doveScore+(isFOMC?2:0)+(isPolicy?1:0)};
-    }).sort((a,b)=>b.relevanceScore-a.relevanceScore);
-    // Overall Fed tone from top 3 items
-    const top3=classified.slice(0,3);
-    const hawkCount=top3.filter(i=>i.sentiment==="HAWKISH").length;
-    const doveCount=top3.filter(i=>i.sentiment==="DOVISH").length;
-    const overallTone=hawkCount>doveCount?"HAWKISH":doveCount>hawkCount?"DOVISH":"NEUTRAL";
-    const fomcItems=classified.filter(i=>i.isFOMC);
-    const result={items:classified.slice(0,8),overallTone,fomcItems:fomcItems.slice(0,3),latestTitle:classified[0]?.title||null,latestDate:classified[0]?.pubDate||null,source:"FedRSS",fetchedAt:Date.now(),fallbackActive:false};
-    DSSCache.set("macro:fedrss",result);
-    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordSuccess("FedRSS");
-    logger.info({job:"fetchFedRSS",items:classified.length,tone:overallTone,fomcItems:fomcItems.length},"Fed RSS refreshed");
-    return result;
-  }catch(e){
-    logger.warn({err:e.message},"fetchFedRSS failed");
-    if(typeof ProviderHealthRegistry!=="undefined")ProviderHealthRegistry.recordFailure("FedRSS");
-    return null;
-  }
-}
-
 // SECTION-11 : MACRO PARSERS
 // fetchTradingEconomicsIndicator / fetchGSTCollections
 // fetchManufacturingPMI / fetchAMFISIPData
@@ -3639,52 +2096,30 @@ const fiiDebtSell = Number(
 		);
 
 		// ── SESSION 18 STEP 2: score:derivatives ──
-		// P1-B: VIX-only scoring (v8 DEF-NEW-005)
-		// FSD v8 Section 8 Priority 3 — clean lookup table replaces
-		// additive-from-50 when PCR null. Conf 0.55 (directionally valid).
 		safeExecute(() => {
 		  const _pcr    = payload.pcr;
 		  const _vixVal = DSSCache.get("nse:index")?.vixValue || null;
-		  const _pcrLive = _pcr !== null && _pcr !== undefined;
-		  const _vixLive = _vixVal !== null;
-
-		  function computeDerivativesScoreVixOnly(vix) {
-		    if (vix === null || vix === undefined) return 50;
-		    if (vix < 13)  return 70;
-		    if (vix < 18)  return 55;
-		    if (vix <= 25) return 40;
-		    return 20;
-		  }
-
-		  let _derivScore, _dConf, _sourceOrigin;
-
-		  if (_pcrLive && _vixLive) {
-		    _derivScore = 50;
+		  let _derivScore = 50;
+		  if (_pcr !== null && _pcr !== undefined) {
 		    if (_pcr > 1.3) _derivScore += 15; else if (_pcr > 1.1) _derivScore += 8;
 		    else if (_pcr < 0.75) _derivScore -= 15; else if (_pcr < 0.9) _derivScore -= 8;
+		  }
+		  if (_vixVal !== null) {
 		    if (_vixVal < 12) _derivScore += 10; else if (_vixVal < 16) _derivScore += 5;
 		    else if (_vixVal > 22) _derivScore -= 15; else if (_vixVal > 18) _derivScore -= 8;
-		    _derivScore = Math.max(0, Math.min(100, _derivScore));
-		    _dConf = 0.78;
-		    _sourceOrigin = "nse-option-chain";
-		  } else if (_vixLive) {
-		    _derivScore = computeDerivativesScoreVixOnly(_vixVal);
-		    _dConf = 0.55;
-		    _sourceOrigin = "vix-only-fallback";
-		  } else {
-		    _derivScore = 50;
-		    _dConf = 0.20;
-		    _sourceOrigin = "bootstrap-fallback";
 		  }
-
+		  _derivScore = Math.max(0, Math.min(100, _derivScore));
+		  const _pcrLive = _pcr !== null && _pcr !== undefined;
+		  const _vixLive = _vixVal !== null;
+		  const _dConf   = _pcrLive && _vixLive ? 0.78 : _vixLive ? 0.42 : 0.20;
 		  DSSCache.set("score:derivatives", {
 		    score: _derivScore, confidence: _dConf,
-		    sourceOrigin: _sourceOrigin,
-		    fallbackActive: !_pcrLive && !_vixLive,
-		    staleReason: !_pcrLive ? "DEF-001: PCR null — VIX-only scoring active" : null,
+		    sourceOrigin: _pcrLive ? "nse-option-chain" : "vix-only-fallback",
+		    fallbackActive: !_pcrLive,
+		    staleReason: !_pcrLive ? "DEF-001: PCR null — NSE option chain fetch incomplete" : null,
 		    fetchedAt: Date.now(), cacheAgeMin: 0
 		  });
-		  logger.info({ job: "score:derivatives-write", score: _derivScore, confidence: _dConf, pcrLive: _pcrLive, vixLive: _vixLive, vix: _vixVal, sourceOrigin: _sourceOrigin, ts: Date.now() });
+		  logger.info({ job: "score:derivatives-write", score: _derivScore, confidence: _dConf, pcrLive: _pcrLive, vixLive: _vixLive, pcr: _pcr, ts: Date.now() });
 		}, null);
 		// ── END score:derivatives ──
 
@@ -4008,18 +2443,11 @@ const fiiDebtSell = Number(
 
 	  try {
 
-		const [
-		  us10Y,
-		  dxy,
-		  crude
-		] = await Promise.all([
-
-		  fetchYahooQuote(DEBT_SYMBOLS.US10Y),
-
-		  fetchYahooQuote(DEBT_SYMBOLS.DXY),
-
-		  fetchCrude()
-		]);
+		const us10Y = await fetchYahooQuote(DEBT_SYMBOLS.US10Y);
+		await new Promise(r => setTimeout(r, 2000));
+		const dxy = await fetchYahooQuote(DEBT_SYMBOLS.DXY);
+		await new Promise(r => setTimeout(r, 2000));
+		const crude = await fetchCrude();
 
 		const fed =
 		  deriveFedPolicy({
@@ -4030,25 +2458,18 @@ const fiiDebtSell = Number(
 			  dxy?.current || null
 		  });
 
-		const _us10YVal=us10Y?.current||null,_dxyVal=dxy?.current||null,_crudeVal=crude||null;
-		const _prevG=DSSCache.get("equity:global")||{};
-		// FRED: primary source for US10Y
-		const _fredG=DSSCache.get("macro:fred")||{};
-		const _fredUs10Y=_fredG.us10YYield||null;
-		const dxyFinal=_dxyVal||_prevG.dxy||104.50;
-		const crudeFinal=_crudeVal||_prevG.crudeOil||83.00;
-		const us10YFinal=_fredUs10Y||_us10YVal||_prevG.us10Y||null;
 		const payload = {
 
-		  us10Y: us10YFinal,
+		  us10Y:
+			us10Y?.current || null,
 
-		  dxy: dxyFinal,
+		  dxy:
+			dxy?.current || null,
 
-		  crudeOil: crudeFinal,
+		  crudeOil:
+			crude || null,
 
 		  fedPolicy: fed,
-
-		  hardcodedFallback: (!_us10YVal||!_dxyVal||!_crudeVal),
 
 		  timestamp: Date.now()
 		};
@@ -4226,30 +2647,6 @@ const fiiDebtSell = Number(
 	  try {
 
 		// Fetch live G-Sec yields from Trading Economics
-		// FSD Priority 7: RBI RSS G-Sec attempt (before TE fetch)
-		let _rbiYieldData = null;
-		try {
-		  const _rbiRss = await fetch("https://rbi.org.in/scripts/rss.aspx?Id=316", {
-		    headers: { "User-Agent": "Mozilla/5.0 (compatible; ADVISIQ/1.0)" },
-		    signal: AbortSignal.timeout(8000)
-		  });
-		  if (_rbiRss.ok) {
-		    const _rbiText = await _rbiRss.text();
-		    const _repoPattern = /repo\s+rate[^0-9]*([0-9]+\.?[0-9]*)\s*(?:per\s*cent|%)/i;
-		    const _repoMatch = _rbiText.match(_repoPattern);
-		    if (_repoMatch && _repoMatch[1]) {
-		      const _parsedRate = parseFloat(_repoMatch[1]);
-		      if (_parsedRate >= 4.0 && _parsedRate <= 10.0) {
-		        _rbiYieldData = { repoRate: _parsedRate, source: "rbi-rss-live" };
-		        logger.info({ repoRate: _parsedRate }, "P7: RBI RSS repo rate parsed");
-		      }
-		    }
-		    if (!_rbiYieldData) logger.info("P7: RBI RSS fetched — no parseable rate — TE fallback active");
-		  }
-		} catch(e) {
-		  logger.warn({ err: e.message }, "P7: RBI RSS failed — TE fallback active");
-		}
-
 		const [gsec10Y, gsec5Y, gsec2Y] = await Promise.all([
 		  fetchTEYield("https://tradingeconomics.com/india/government-bond-yield", "10Y"),
 		  fetchTEYield("https://tradingeconomics.com/india/5-year-note-yield", "5Y"),
@@ -4270,8 +2667,8 @@ const fiiDebtSell = Number(
 		}
 
 		return {
-		  repoRate: _rbiYieldData?.repoRate ?? (DSSCache.get("monetary:policy")?.repoRate ?? 6.0),
-		  repoRateSource: _rbiYieldData ? "rbi-rss-live" : (DSSCache.get("monetary:policy")?.dataStatus ?? "governed-config"),
+		  repoRate: 6.5,
+		  repoRateSource: "hardcoded",
 		  cpi: 4.75,
 		  cpiSource: "hardcoded",
 		  gsec10Y: gsec10YResolved,
@@ -4670,513 +3067,6 @@ function deriveMacroCompositeScore({
 
 
 ////////////////////////////////////////////////////////
-// SECTION-19-V9-H : SPRINT 5 GOVERNANCE HARDENING
-// H1: FinalGovernanceSanitizer
-// H2: Uncertainty Mode Detection
-// H3: Mature Regime Reversal Protection
-// H4: Escalation Caps Matrix
-////////////////////////////////////////////////////////
-
-// H2: Uncertainty mode trigger detection
-function detectUncertaintyMode(narrativeMeta, brainLatest) {
-  const triggers = [];
-  const conf = brainLatest && typeof brainLatest.confidence === 'number' ? brainLatest.confidence : 0.50;
-  const durClass = brainLatest && brainLatest.durabilityClass ? brainLatest.durabilityClass : 'EMERGING';
-  const convClass = brainLatest && brainLatest.convictionClass ? brainLatest.convictionClass : null;
-  const convTraj = brainLatest && brainLatest.convictionTrajectory ? brainLatest.convictionTrajectory : null;
-  const cycles = brainLatest && typeof brainLatest.cyclesSinceChange === 'number' ? brainLatest.cyclesSinceChange : 0;
-  const fallbackMods = brainLatest && Array.isArray(brainLatest.fallbackModules) ? brainLatest.fallbackModules.length : 0;
-  const highTriggers = [];
-  const moderateTriggers = [];
-  if (conf < 0.50)                        highTriggers.push('LOW_CONFIDENCE');
-  if (durClass === 'EMERGING')             highTriggers.push('EMERGING_DURABILITY');
-  if (convClass === 'LOW')                 highTriggers.push('LOW_CONVICTION');
-  if (cycles <= 3)                         highTriggers.push('UNSTABLE_REGIME_TRANSITION');
-  if (fallbackMods >= 3)                   moderateTriggers.push('HIGH_FALLBACK_COUNT');
-  if (convTraj === 'DECLINING')            moderateTriggers.push('CONVICTION_DECLINING');
-  const allTriggers = [...highTriggers, ...moderateTriggers];
-  const isHigh = highTriggers.length > 0;
-  const isCompound = moderateTriggers.length >= 3;
-  const severity = isCompound ? 'COMPOUND' : isHigh ? 'HIGH' : moderateTriggers.length > 0 ? 'MODERATE' : null;
-  return {
-    active: allTriggers.length > 0,
-    triggers: allTriggers,
-    severity,
-    mandatoryPosture: (isHigh || isCompound) ? 'OBSERVATIONAL' : moderateTriggers.length > 0 ? 'CONDITIONAL' : 'STANDARD'
-  };
-}
-
-// H3: Mature Regime Reversal detection
-let _prevDurabilityClass = null;
-let _prevRegimeForReversal = null;
-let _matureReversalDetectedAt = null;
-let _matureReversalPrevRegime = null;
-
-function detectMatureRegimeReversal(currentRegime, currentDurabilityClass, cyclesSinceChange) {
-  const wasMature = _prevDurabilityClass === 'MATURE';
-  const regimeChanged = _prevRegimeForReversal && _prevRegimeForReversal !== currentRegime;
-  const isFresh = cyclesSinceChange <= 3;
-  let reversalActive = false;
-  let cyclesRemaining = null;
-  if (wasMature && regimeChanged && isFresh) {
-    if (!_matureReversalDetectedAt) {
-      _matureReversalDetectedAt = Date.now();
-      _matureReversalPrevRegime = _prevRegimeForReversal;
-    }
-    reversalActive = true;
-    cyclesRemaining = Math.max(0, 5 - cyclesSinceChange);
-  } else if (cyclesSinceChange > 5) {
-    _matureReversalDetectedAt = null;
-    _matureReversalPrevRegime = null;
-  }
-  // Update tracking state
-  _prevDurabilityClass = currentDurabilityClass;
-  _prevRegimeForReversal = currentRegime;
-  return {
-    matureRegimeReversal: reversalActive,
-    reversalWindowActive: reversalActive,
-    reversalWindowCyclesRemaining: cyclesRemaining,
-    previousMatureRegime: _matureReversalPrevRegime || null,
-    reversalDetectedAt: _matureReversalDetectedAt || null
-  };
-}
-
-// H4: Escalation caps matrix — convictionConsistencyValidation
-function convictionConsistencyValidation(intensity, convictionClass, convictionScore, durabilityClass, confidence, matureReversal, fallbackModCount) {
-  const caps = [];
-  let capped = intensity;
-  const INTENSITY_RANK = { 'OBSERVE': 0, 'MAINTAIN': 0, 'CONSIDER': 1, 'ACT': 2, 'PRIORITISE_REDUCTION': 3 };
-  const applyRank = (cap, reason) => {
-    if ((INTENSITY_RANK[capped] || 0) > (INTENSITY_RANK[cap] || 0)) {
-      capped = cap; caps.push(reason);
-    }
-  };
-  // H3 override — highest priority
-  if (matureReversal) { capped = 'OBSERVE'; caps.push('MATURE_REVERSAL_OVERRIDE'); return { intensity: capped, caps }; }
-  // Compound no-confidence floor (H4.4)
-  if ((confidence || 0) < 0.50 && durabilityClass === 'EMERGING' && (fallbackModCount || 0) >= 2) {
-    capped = 'OBSERVE'; caps.push('COMPOUND_NO_CONFIDENCE_FLOOR'); return { intensity: capped, caps };
-  }
-  // Individual caps
-  if (convictionClass === 'LOW')                                    applyRank('CONSIDER', 'LOW_CONVICTION_CAP');
-  if (convictionClass === 'MODERATE')                               applyRank('ACT', 'MODERATE_CONVICTION_CAP');
-  if (durabilityClass === 'EMERGING')                               applyRank('CONSIDER', 'EMERGING_DURABILITY_CAP');
-  if (durabilityClass === 'CONFIRMING' && convictionClass !== 'HIGH' && convictionClass !== 'STRONG') applyRank('ACT', 'CONFIRMING_DURABILITY_CAP');
-  if ((confidence || 0) < 0.40)                                     applyRank('OBSERVE', 'LOW_CONFIDENCE_CAP');
-  else if ((confidence || 0) < 0.60)                                applyRank('CONSIDER', 'MEDIUM_CONFIDENCE_CAP');
-  if ((fallbackModCount || 0) >= 3)                                  applyRank('CONSIDER', 'HIGH_FALLBACK_CAP');
-  return { intensity: capped, caps };
-}
-
-// H1: Final Governance Sanitizer
-const FGS_VERSION = '1.0';
-
-function fgsSanitize(narrative, narrativeMeta, brainLatest) {
-  if (!narrative) return { narrative, fgsResult: { executed: false, failureFallback: false, sanitizationsApplied: 0, categoriesTriggered: [], convictionDowngradesApplied: 0, suppressionsApplied: 0, sanitizerVersion: FGS_VERSION } };
-  let sanitizationsApplied = 0;
-  let suppressionsApplied = 0;
-  let convictionDowngradesApplied = 0;
-  const categoriesTriggered = [];
-  const out = { ...narrative };
-  const convClass = (brainLatest && brainLatest.convictionClass) || null;
-  const durClass = (brainLatest && brainLatest.durabilityClass) || 'EMERGING';
-  const fieldsToSanitize = ['summary', 'tacticalView', 'macroContext', 'confidenceNote',
-    'portfolioPostureNote', 'durabilityNote', 'convictionQualifier',
-    'deploymentPacingNote', 'stressAwarenessNote'];
-  for (const field of fieldsToSanitize) {
-    if (!out[field] || typeof out[field] !== 'string') continue;
-    let text = out[field];
-    // S1: Transaction specificity
-    const s1rx = /\b(move|shift|transfer|invest|withdraw|redeploy|allocate)\s+\d+[\d.]*\s*%/gi;
-    if (s1rx.test(text)) { text = text.replace(s1rx, '[Specific allocation guidance is the responsibility of the advisor.]'); sanitizationsApplied++; if (!categoriesTriggered.includes('S1_TRANSACTION_SPECIFICITY')) categoriesTriggered.push('S1_TRANSACTION_SPECIFICITY'); }
-    // S2: Urgency framing
-    const s2patterns = ['must act now','act immediately','urgent','time-sensitive','window closing','limited time','don\'t delay','act before markets','once in a decade'];
-    for (const p of s2patterns) { if (text.toLowerCase().includes(p)) { text = text.replace(new RegExp(p, 'gi'), ''); sanitizationsApplied++; if (!categoriesTriggered.includes('S2_URGENCY_FRAMING')) categoriesTriggered.push('S2_URGENCY_FRAMING'); } }
-    // S3: Product/security references (generic patterns)
-    const s3rx = /\b(fund|scheme|ETF|NAV|ISIN|BeES|Index Fund)\s+[A-Z][a-zA-Z]+/g;
-    if (s3rx.test(text)) { text = text.replace(s3rx, 'equity-oriented allocation'); sanitizationsApplied++; if (!categoriesTriggered.includes('S3_PRODUCT_REFERENCE')) categoriesTriggered.push('S3_PRODUCT_REFERENCE'); }
-    // S4: Prohibited certainty framing
-    const s4patterns = ['guaranteed','certain to','will definitely','cannot fail','assured','risk-free','no downside','safe investment','best time to invest','ideal allocation','perfect entry'];
-    for (const p of s4patterns) { if (text.toLowerCase().includes(p)) { text = text.replace(new RegExp(p, 'gi'), 'signal conditions are constructive'); sanitizationsApplied++; suppressionsApplied++; if (!categoriesTriggered.includes('S4_CERTAINTY_FRAMING')) categoriesTriggered.push('S4_CERTAINTY_FRAMING'); } }
-    // S5: Conviction-language alignment
-    if (convClass === 'LOW') {
-      const s5map = [['strong opportunity','potential opportunity warrants monitoring'],['deploy now','conditions may support gradual consideration'],['significant upside','some upside signals are present'],['high conviction',''],['act on this','consider monitoring']];
-      for (const [from, to] of s5map) { if (text.toLowerCase().includes(from)) { text = text.replace(new RegExp(from, 'gi'), to); convictionDowngradesApplied++; sanitizationsApplied++; if (!categoriesTriggered.includes('S5_CONVICTION_ALIGNMENT')) categoriesTriggered.push('S5_CONVICTION_ALIGNMENT'); } }
-    }
-    // S6: Suitability claims
-    const s6patterns = ['suitable for','appropriate for your','fits your profile','meets your requirement','ideal for','designed for investors like'];
-    for (const p of s6patterns) { if (text.toLowerCase().includes(p)) { text = text.replace(new RegExp(p, 'gi'), 'relevant to current market conditions'); sanitizationsApplied++; if (!categoriesTriggered.includes('S6_SUITABILITY_CLAIM')) categoriesTriggered.push('S6_SUITABILITY_CLAIM'); } }
-    // S7: Fear amplification (RISK_OFF contexts)
-    const s7patterns = [['market crash','sustained risk-off conditions'],['collapse is coming','sustained risk-off signals present'],['emergency rebalancing','defensive posture adjustment'],['flee to safety','increase allocation to defensive assets'],['catastrophic','significant'],['panic selling','sustained risk-off pressure']];
-    for (const [from, to] of s7patterns) { if (text.toLowerCase().includes(from)) { text = text.replace(new RegExp(from, 'gi'), to); sanitizationsApplied++; if (!categoriesTriggered.includes('S7_FEAR_AMPLIFICATION')) categoriesTriggered.push('S7_FEAR_AMPLIFICATION'); } }
-    out[field] = text.trim();
-  }
-  // H1.5 suppressions — remove entire sentences with prohibited patterns
-  const suppressPatterns = [/[^.!?]*\d+[\d.]*\s*%[^.!?]*(?:returns?|gains?|growth)[^.!?]*[.!?]/gi, /[^.!?]*(?:market will|markets will|will rise|will fall)[^.!?]*(?:next quarter|next month|this year)[^.!?]*[.!?]/gi, /[^.!?]*(?:SEBI|RBI|regulatory)[^.!?]*(?:compliant|approved|guideline)[^.!?]*[.!?]/gi];
-  for (const field of ['summary','tacticalView']) {
-    if (!out[field]) continue;
-    for (const rx of suppressPatterns) { if (rx.test(out[field])) { out[field] = out[field].replace(rx, '').trim(); suppressionsApplied++; } }
-  }
-  return {
-    narrative: out,
-    fgsResult: {
-      executed: true,
-      sanitizationsApplied,
-      categoriesTriggered,
-      convictionDowngradesApplied,
-      suppressionsApplied,
-      postSanitizationLength: JSON.stringify(out).length,
-      sanitizerVersion: FGS_VERSION,
-      failureFallback: false
-    }
-  };
-}
-
-////////////////////////////////////////////////////////
-// SECTION-19A-V9 : REGIME DURABILITY ENGINE (Sprint 1)
-// computeRegimeDurability(memory, moduleScores) -> { durabilityScore, durabilityClass }
-// Formula: 0.40*ageScore + 0.35*stabilityScore + 0.25*signalConsensus
-////////////////////////////////////////////////////////
-
-function computeRegimeDurability(memory, moduleScores) {
-  if (!memory || !Array.isArray(memory.signalsHistory) || memory.signalsHistory.length < 3) {
-    return { durabilityScore: 0.15, durabilityClass: 'EMERGING' };
-  }
-  const cycles = typeof memory.cyclesSinceChange === 'number' ? memory.cyclesSinceChange : 0;
-  const ageScore = Math.min(1.0, cycles / 20);
-  const last10 = memory.signalsHistory.slice(-10);
-  let stabilityScore = 1.0;
-  if (last10.length >= 2) {
-    const scores = last10.map(e => (typeof e.compositeScore === 'number' ? e.compositeScore : 50));
-    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const variance = scores.reduce((acc, s) => acc + Math.pow(s - mean, 2), 0) / scores.length;
-    stabilityScore = Math.max(0, 1 - (variance / 25));
-  }
-  let signalConsensus = 0.5;
-  const regime = memory.lastSnapshot && memory.lastSnapshot.regime ? memory.lastSnapshot.regime : null;
-  if (regime && moduleScores && typeof moduleScores === 'object') {
-    const modArr = Object.values(moduleScores).filter(m => m && typeof m.score === 'number' && m.score !== null);
-    if (modArr.length > 0) {
-      let agreeing = 0;
-      for (const m of modArr) {
-        const s = m.score;
-        if ((regime === 'RISK_ON' || regime === 'STRONG_RISK_ON') && s >= 55) agreeing++;
-        else if ((regime === 'RISK_OFF' || regime === 'STRONG_RISK_OFF') && s <= 45) agreeing++;
-        else if (regime === 'NEUTRAL' && s >= 43 && s <= 57) agreeing++;
-      }
-      signalConsensus = agreeing / modArr.length;
-    }
-  }
-  const durabilityScore = Math.round(((0.40 * ageScore) + (0.35 * stabilityScore) + (0.25 * signalConsensus)) * 1000) / 1000;
-  let durabilityClass;
-  if (durabilityScore >= 0.75)      durabilityClass = 'MATURE';
-  else if (durabilityScore >= 0.50) durabilityClass = 'ESTABLISHED';
-  else if (durabilityScore >= 0.25) durabilityClass = 'CONFIRMING';
-  else                              durabilityClass = 'EMERGING';
-  return { durabilityScore, durabilityClass };
-}
-
-////////////////////////////////////////////////////////
-// SECTION-19B-V9 : CONVICTION ENGINE (Sprint 2)
-// computeConviction(confidence, durabilityScore, portfolioAlignmentScore)
-// Formula: (0.40 x confidence) + (0.35 x durabilityScore) + (0.25 x portfolioAlignmentScore)
-// portfolioAlignmentScore defaults to 0.50 (neutral) when no portfolio context
-////////////////////////////////////////////////////////
-
-function computeConviction(confidence, durabilityScore, portfolioAlignmentScore) {
-  // Input normalisation and fallback
-  const _conf  = (typeof confidence         === 'number' && isFinite(confidence))         ? Math.min(1, Math.max(0, confidence))         : 0.50;
-  const _dur   = (typeof durabilityScore    === 'number' && isFinite(durabilityScore))    ? Math.min(1, Math.max(0, durabilityScore))    : 0.15;
-  const _align = (typeof portfolioAlignmentScore === 'number' && isFinite(portfolioAlignmentScore)) ? Math.min(1, Math.max(0, portfolioAlignmentScore)) : 0.50;
-
-  const raw = (0.40 * _conf) + (0.35 * _dur) + (0.25 * _align);
-  const convictionScore = Math.round(raw * 1000) / 1000;
-
-  let convictionClass;
-  if (convictionScore >= 0.75)      convictionClass = 'STRONG';
-  else if (convictionScore >= 0.55) convictionClass = 'HIGH';
-  else if (convictionScore >= 0.30) convictionClass = 'MODERATE';
-  else                              convictionClass = 'LOW';
-
-  const _isDurabilityFallback = (_dur === 0.15);
-  return {
-    convictionScore,
-    convictionClass,
-    convictionComponents: { confidence: _conf, durabilityScore: _dur, portfolioAlignmentScore: _align },
-    convictionDataQuality: _isDurabilityFallback ? 'FALLBACK_DURABILITY' : 'LIVE'
-  };
-}
-
-// Conviction smoothing — Brain.Auto CONFIDENCE_SMOOTHING = 0.70
-// Prevents single-cycle spikes. Applied in brain scheduler.
-let _lastConvictionScore = null;
-let _lastConvictionTs = null;
-const CONVICTION_SMOOTHING = 0.70;
-
-function smoothConviction(prev, next) {
-  if (prev === null || prev === undefined) return next;
-  return Math.round(((CONVICTION_SMOOTHING * prev) + ((1 - CONVICTION_SMOOTHING) * next)) * 1000) / 1000;
-}
-
-// Conviction trajectory detection — 5-cycle declining trend
-const _convictionHistory = [];
-function updateConvictionTrajectory(score) {
-  _convictionHistory.push(score);
-  if (_convictionHistory.length > 5) _convictionHistory.shift();
-  if (_convictionHistory.length < 5) return 'INSUFFICIENT_DATA';
-  const declining = _convictionHistory.every((v, i) => i === 0 || v <= _convictionHistory[i - 1]);
-  const rising    = _convictionHistory.every((v, i) => i === 0 || v >= _convictionHistory[i - 1]);
-  if (declining) return 'DECLINING';
-  if (rising)    return 'RISING';
-  return 'STABLE';
-}
-
-////////////////////////////////////////////////////////
-// SECTION-19C-V9 : PORTFOLIO CONTEXT ENGINE (Sprint 3)
-// PortfolioContextEngine.compute() — pure function, no I/O, no caching
-// Constitutional: allocation values NEVER logged or persisted
-////////////////////////////////////////////////////////
-
-const PCE_EQUITY_RANGES = {
-  STRONG_RISK_ON: { Conservative: [35,50], Moderate: [55,70], Aggressive: [70,85] },
-  RISK_ON:        { Conservative: [30,45], Moderate: [50,65], Aggressive: [65,80] },
-  NEUTRAL:        { Conservative: [25,40], Moderate: [40,55], Aggressive: [55,70] },
-  RISK_OFF:       { Conservative: [15,30], Moderate: [25,40], Aggressive: [35,55] },
-  STRONG_RISK_OFF:{ Conservative: [10,20], Moderate: [15,30], Aggressive: [25,40] }
-};
-
-const PCE_ALIGNMENT_SCORES = {
-  APPROPRIATELY_POSITIONED: 0.20,
-  MINIMAL:   0.30,
-  MODERATE:  0.55,
-  SIGNIFICANT: 0.75,
-  SUBSTANTIAL: 0.90
-};
-
-function pceComputePortfolioContext(equityPct, debtPct, goldPct, riskProfile, regime, durabilityClass) {
-  // Input validation
-  const VALID_PROFILES = ['Conservative', 'Moderate', 'Aggressive'];
-  const VALID_REGIMES  = ['STRONG_RISK_ON','RISK_ON','NEUTRAL','RISK_OFF','STRONG_RISK_OFF'];
-
-  if (typeof equityPct !== 'number' || typeof debtPct !== 'number') {
-    return { valid: false, error: 'PCE_INVALID_INPUT', provided: true };
-  }
-  const _gold = (typeof goldPct === 'number') ? goldPct : (100 - equityPct - debtPct);
-  const _sum = equityPct + debtPct + _gold;
-  if (Math.abs(_sum - 100) > 1) {
-    return { valid: false, error: 'PCE_INVALID_INPUT', reason: 'sum_check_failed', provided: true };
-  }
-  if (equityPct < 0 || debtPct < 0 || _gold < 0) {
-    return { valid: false, error: 'PCE_INVALID_INPUT', reason: 'negative_value', provided: true };
-  }
-  if (!VALID_PROFILES.includes(riskProfile)) {
-    return { valid: false, error: 'PCE_INVALID_INPUT', reason: 'invalid_risk_profile', provided: true };
-  }
-  const _regime = VALID_REGIMES.includes(regime) ? regime : 'NEUTRAL';
-  const _dur    = durabilityClass || 'EMERGING';
-
-  // Equity range lookup
-  const _baseRange = PCE_EQUITY_RANGES[_regime][riskProfile];
-  let _lower = _baseRange[0];
-  let _upper = _baseRange[1];
-
-  // Durability adjustment
-  if (_dur === 'EMERGING') { _lower -= 5; _upper += 5; }
-  if (_dur === 'MATURE' && riskProfile === 'Aggressive') { _upper -= 5; }
-  _lower = Math.max(0, _lower);
-  _upper = Math.min(100, _upper);
-
-  const _midpoint = (_lower + _upper) / 2;
-  const _gap = equityPct - _midpoint;
-  const _absGap = Math.abs(_gap);
-
-  // Mismatch direction
-  let mismatchDirection;
-  if (_absGap < 5)       mismatchDirection = 'APPROPRIATELY_POSITIONED';
-  else if (_gap > 0)     mismatchDirection = 'OVERWEIGHT';
-  else                   mismatchDirection = 'UNDERWEIGHT';
-
-  // Mismatch class
-  let mismatchClass;
-  if (_absGap < 5)        mismatchClass = 'MINIMAL';
-  else if (_absGap < 10)  mismatchClass = 'MODERATE';
-  else if (_absGap < 20)  mismatchClass = 'SIGNIFICANT';
-  else                    mismatchClass = 'SUBSTANTIAL';
-
-  // Deployment capacity
-  const _cap = mismatchDirection === 'UNDERWEIGHT' ? Math.abs(_gap) : 0;
-  let deploymentCapacityClass;
-  if (_cap < 5)       deploymentCapacityClass = 'MINIMAL';
-  else if (_cap < 15) deploymentCapacityClass = 'MODERATE';
-  else                deploymentCapacityClass = 'SUBSTANTIAL';
-
-  // portfolioAlignmentScore for conviction engine
-  const _alignKey = mismatchDirection === 'APPROPRIATELY_POSITIONED' ? 'APPROPRIATELY_POSITIONED' : mismatchClass;
-  const portfolioAlignmentScore = PCE_ALIGNMENT_SCORES[_alignKey] ?? 0.50;
-
-  return {
-    provided: true,
-    valid: true,
-    riskProfile,
-    goldPctDerived: (typeof goldPct !== 'number'),
-    goldPctAssumed: (typeof goldPct !== 'number') ? _gold : null,
-    mismatchDirection,
-    mismatchMagnitude: Math.round(_gap * 10) / 10,
-    mismatchClass,
-    deploymentCapacity: Math.round(_cap * 10) / 10,
-    deploymentCapacityClass,
-    targetRange: { lower: _lower, upper: _upper },
-    portfolioAlignmentScore,
-    computedAt: Date.now()
-  };
-}
-
-////////////////////////////////////////////////////////
-// SECTION-19D-V9 : ADVISORY COGNITION LAYER (Sprint 4)
-// aclComputeAdvisoryPosture() -- convergence of Market State + Portfolio State
-// Constitutional: no securities, no amounts, no suitability, deterministic
-////////////////////////////////////////////////////////
-
-function aclClassifyScenario(regime, durabilityClass, mismatchDirection, mismatchClass, confidence) {
-  const _bullish  = ['RISK_ON','STRONG_RISK_ON'].includes(regime);
-  const _bearish  = ['RISK_OFF','STRONG_RISK_OFF'].includes(regime);
-  const _neutral  = regime === 'NEUTRAL';
-  const _confirmed = ['ESTABLISHED','MATURE'].includes(durabilityClass);
-  const _fresh     = ['EMERGING','CONFIRMING'].includes(durabilityClass);
-  const _lowConf   = confidence < 0.40;
-  const _over      = mismatchDirection === 'OVERWEIGHT';
-  const _under     = mismatchDirection === 'UNDERWEIGHT';
-  const _appropriate = mismatchDirection === 'APPROPRIATELY_POSITIONED';
-  const _substantial = mismatchClass === 'SUBSTANTIAL';
-  const _mature    = durabilityClass === 'MATURE';
-
-  // H: ANY_REGIME + SUBSTANTIAL_MISMATCH + LOW_CONFIDENCE (check first — highest priority)
-  if (_substantial && _lowConf) return 'H';
-  // I: LATE_CYCLE_WARNING — MATURE RISK_ON (simplified: no horizonAlignment in v9 Sprint 4)
-  if (_mature && _bullish && _over) return 'I';
-  // A: CONFIRMED_BULLISH + OVERWEIGHT
-  if (_bullish && _confirmed && _over) return 'A';
-  // B: CONFIRMED_BULLISH + UNDERWEIGHT
-  if (_bullish && _confirmed && _under) return 'B';
-  // C: FRESH_BULLISH + ANY
-  if (_bullish && _fresh) return 'C';
-  // F: CONFIRMED_BEARISH + OVERWEIGHT
-  if (_bearish && _confirmed && _over) return 'F';
-  // G: CONFIRMED_BEARISH + APPROPRIATE/UNDERWEIGHT
-  if (_bearish && _confirmed && (_appropriate || _under)) return 'G';
-  // D: NEUTRAL + OVERWEIGHT SIGNIFICANT+
-  if (_neutral && _over && ['SIGNIFICANT','SUBSTANTIAL'].includes(mismatchClass)) return 'D';
-  // E: NEUTRAL + APPROPRIATELY_POSITIONED (or any remaining neutral)
-  return 'E';
-}
-
-function aclGetIntensityAndPacing(scenario, durabilityClass) {
-  const _mature = durabilityClass === 'MATURE';
-  const _established = durabilityClass === 'ESTABLISHED';
-  switch (scenario) {
-    case 'A': return { intensity: 'MAINTAIN',             pacing: null };
-    case 'B': return { intensity: _established||_mature ? 'ACT' : 'CONSIDER',
-                       pacing: _mature ? { tranches:2, periodWeeks:3 } : _established ? { tranches:4, periodWeeks:4 } : { tranches:7, periodWeeks:7 } };
-    case 'C': return { intensity: 'OBSERVE',              pacing: null };
-    case 'D': return { intensity: 'CONSIDER',             pacing: { tranches:7, periodWeeks:7 } };
-    case 'E': return { intensity: 'MAINTAIN',             pacing: null };
-    case 'F': return { intensity: 'PRIORITISE_REDUCTION', pacing: { tranches:2, periodWeeks:3 } };
-    case 'G': return { intensity: 'MAINTAIN',             pacing: null };
-    case 'H': return { intensity: 'OBSERVE',              pacing: null };
-    case 'I': return { intensity: 'ACT',                  pacing: { tranches:2, periodWeeks:3 } };
-    default:  return { intensity: 'OBSERVE',              pacing: null };
-  }
-}
-
-const ACL_POSTURE_TEMPLATES = {
-  A: 'Regime supports equity positioning. Portfolio is well-deployed. Maintain current allocation and monitor for late-cycle signals.',
-  B: 'Confirmed regime supports increased equity allocation. Gradual deployment appropriate given conviction level.',
-  C: 'Regime signal is present but unconfirmed. Await durability confirmation before adjusting allocation.',
-  D: 'Market regime is neutral. Elevated equity exposure creates unnecessary risk. Gradual reduction towards target range is appropriate.',
-  E: 'Market regime is neutral and portfolio is appropriately positioned. Maintain current allocation.',
-  F: 'Defensive regime confirmed. Portfolio is over-exposed to equity risk. Prioritise reduction towards target range.',
-  G: 'Defensive regime confirmed. Portfolio is appropriately positioned or defensively oriented. Maintain defensive posture.',
-  H: 'Significant positioning gap detected under low confidence conditions. Validate data quality before acting.',
-  I: 'Regime is mature and portfolio is over-positioned. Late-cycle discipline suggests selective and measured approach.'
-};
-
-const ACL_STRESS_TABLE = {
-  Conservative: '3-7% historical drawdown range observed in similar conditions.',
-  Moderate:     '7-15% historical drawdown range observed in similar conditions.',
-  Aggressive:   '12-22% historical drawdown range observed in similar conditions.'
-};
-
-function aclComputeAdvisoryPosture(marketState, portfolioState, convictionScore, convictionClass) {
-  // Input validation
-  if (!marketState || !marketState.regime) { return { valid: false, error: 'ACL_MARKET_STATE_UNAVAILABLE', aclEligibility: false, degradationStatus: 'MARKET_STATE_UNAVAILABLE' }; }
-  if (!portfolioState || !portfolioState.provided) { return { valid: false, error: 'ACL_NO_PORTFOLIO_CONTEXT', aclEligibility: false, degradationStatus: 'NO_PORTFOLIO_CONTEXT' }; }
-  if (!portfolioState.valid) { return { valid: false, error: 'ACL_INVALID_PORTFOLIO_INPUT', aclEligibility: false, degradationStatus: 'INVALID_PORTFOLIO_INPUT' }; }
-
-  const { regime, durabilityClass, confidence } = marketState;
-  const { mismatchDirection, mismatchClass, riskProfile } = portfolioState;
-
-  const scenario    = aclClassifyScenario(regime, durabilityClass, mismatchDirection, mismatchClass, confidence || 0.50);
-  const { intensity, pacing } = aclGetIntensityAndPacing(scenario, durabilityClass);
-  const postureStatement = ACL_POSTURE_TEMPLATES[scenario] || ACL_POSTURE_TEMPLATES['E'];
-
-  // portfolioPostureValidation — constitutional safety check
-  const _violations = [];
-  if (/[0-9]+%/.test(postureStatement))      _violations.push('AMOUNT_IN_STATEMENT');
-  if (/fund|scheme|stock|bond/i.test(postureStatement)) _violations.push('SECURITY_NAMED');
-  if (/suitable|appropriate for you/i.test(postureStatement)) _violations.push('SUITABILITY_CLAIM');
-  if (_violations.length > 0) {
-    return { valid: false, error: 'ACL_GOVERNANCE_VIOLATION', violations: _violations };
-  }
-
-  // stressAwarenessNote — RISK_OFF ESTABLISHED/MATURE only
-  let stressAwarenessNote = null;
-  const _bearishConfirmed = ['RISK_OFF','STRONG_RISK_OFF'].includes(regime) && ['ESTABLISHED','MATURE'].includes(durabilityClass);
-  if (_bearishConfirmed && riskProfile && ACL_STRESS_TABLE[riskProfile]) {
-    stressAwarenessNote = 'Historical analogue (not a projection): ' + ACL_STRESS_TABLE[riskProfile];
-  }
-
-  const _govDowngrades = [];
-  let _cappedIntensity = intensity;
-  const _capsApplied = [];
-  const _convScore = (typeof convictionScore === 'number') ? convictionScore : 0.50;
-  if (_convScore < 0.30 && ['ACT','CONSIDER','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'OBSERVE'; _capsApplied.push('LOW_CONVICTION_CAP'); _govDowngrades.push('conviction<0.30->OBSERVE'); }
-  if (durabilityClass === 'EMERGING' && ['ACT','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'CONSIDER'; _capsApplied.push('EMERGING_DURABILITY_CAP'); _govDowngrades.push('EMERGING->CONSIDER'); }
-  if ((confidence || 0) < 0.40 && ['ACT','CONSIDER','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'OBSERVE'; _capsApplied.push('LOW_CONFIDENCE_CAP'); _govDowngrades.push('conf<0.40->OBSERVE'); }
-  // RF-1: fallback durability governance cap
-  const _durScore_acl = (marketState && typeof marketState.durabilityScore === 'number') ? marketState.durabilityScore : 0.15;
-  const _durIsFallback = (_durScore_acl === 0.15);
-  if (_durIsFallback && ['ACT','CONSIDER','PRIORITISE_REDUCTION'].indexOf(_cappedIntensity) >= 0) { _cappedIntensity = 'OBSERVE'; _capsApplied.push('FALLBACK_DURABILITY_CAP'); _govDowngrades.push('fallback_durability->OBSERVE'); }
-  return {
-    valid: true,
-    scenarioType:        scenario,
-    adjustmentIntensity: _cappedIntensity,
-    mismatchDirection,
-    mismatchClass,
-    deploymentPacing:    pacing,
-    postureStatement,
-    stressAwarenessNote,
-    horizonQualification: null,
-    advisoryBasisTrace: {
-      regimeInput:             regime,
-      durabilityInput:         durabilityClass,
-      mismatchInput:           mismatchDirection + '_' + mismatchClass,
-      convictionInput:         convictionClass || null,
-      convictionScoreInput:    typeof convictionScore === 'number' ? convictionScore : null,
-      scenarioResolution:      scenario,
-      scenarioResolutionMethod: ['A','B','C','D','F','G','H','I'].indexOf(scenario) >= 0 ? 'EXPLICIT' : 'FALLTHROUGH'
-    },
-    computedAt:              Date.now(),
-    portfolioContextProvided: true,
-    requestedIntensity:   intensity,
-    cappedIntensity:      _cappedIntensity,
-    capsApplied:          _capsApplied,
-    governanceDowngrades: _govDowngrades,
-    aclEligibility:       true,
-    degradationStatus:    _capsApplied.length > 0 ? 'GOVERNANCE_CAPPED' : 'CLEAN'
-  };
-}
-
-////////////////////////////////////////////////////////
 // SECTION-19B : REGIME ENGINE (AUTHORITATIVE)
 ////////////////////////////////////////////////////////
 
@@ -5198,99 +3088,35 @@ class RegimeEngine {
     const MODULE_WEIGHTS = { equity:0.30, technical:0.20, global_:0.20, derivatives:0.15, debt:0.10, sector:0.05 };
     const modules = { equity, technical, global_, derivatives, debt, sector };
 
-    // P2-A: Dynamic weight redistribution (v8 DEF-NEW-002)
-    // Modules on fallback (score=50 placeholder) have their base weight
-    // redistributed proportionally to live modules so fallback gravity
-    // toward NEUTRAL does not suppress decisive directional signals.
-    // Invariant: MODULE_WEIGHTS unchanged. Redistribution is runtime-only.
-    const _isFallback = (mod) =>
-      mod.fallbackActive === true ||
-      mod.sourceOrigin === "hardcoded-fallback" ||
-      mod.sourceOrigin === "bootstrap-fallback";
-
-    // Compute live base weight sum for redistribution denominator
-    let _liveBaseWeight = 0;
-    for (const [name, mod] of Object.entries(modules)) {
-      if (mod.score === null || mod.score === undefined) continue;
-      if (_isFallback(mod)) continue;
-      _liveBaseWeight += MODULE_WEIGHTS[name];
-    }
-
     let weightedSum = 0, activeWeightSum = 0;
-    const _redistributionLog = {};
     for (const [name, mod] of Object.entries(modules)) {
       if (mod.score === null || mod.score === undefined) continue;
       const conf = mod.confidence || 0;
       const m = conf >= 0.60 ? 1.00 : conf >= 0.40 ? 0.70 : 0.00;
       if (m === 0.00) continue;
-      // Skip fallback modules — do not contribute deadweight score=50
-      if (_isFallback(mod) && _liveBaseWeight > 0) {
-        _redistributionLog[name] = { skipped: true, reason: mod.sourceOrigin || "fallback" };
-        continue;
-      }
-      // Redistribute: scale this module weight up by 1/_liveBaseWeight
-      const baseW = MODULE_WEIGHTS[name];
-      const redistributedW = _liveBaseWeight > 0 ? baseW / _liveBaseWeight : baseW;
-      const ew = redistributedW * m;
+      const ew = MODULE_WEIGHTS[name] * m;
       weightedSum += mod.score * ew;
       activeWeightSum += ew;
-      _redistributionLog[name] = { baseW: Math.round(baseW*100)/100, redistributedW: Math.round(redistributedW*1000)/1000, ew: Math.round(ew*1000)/1000 };
     }
 
     const compositeScore = activeWeightSum > 0
       ? Math.round((weightedSum / activeWeightSum) * 10) / 10
       : 50;
 
-    // P2-B: FRED/BLS/FedRSS macro modifier (v8 FSD Section 8 Priority 2c)
-    // Bounded ±8pt adjustment applied after weighted module average.
-    // Prevents US macro layer from dominating India-specific signals.
-    const _fred = this._cache.get("macro:fred") || {};
-    const _bls  = this._cache.get("macro:bls")  || {};
-    const _rss  = this._cache.get("macro:fedrss") || {};
-    let _macroMod = 0;
-    const _macroModLog = [];
-    // Yield curve signal (FRED T10Y2Y)
-    const _spread = _fred.yieldSpread10_2 ?? null;
-    if (_spread !== null) {
-      if (_spread < -0.20) { _macroMod -= 5; _macroModLog.push("YIELD_INVERTED:-5"); }
-      else if (_spread > 0.50) { _macroMod += 3; _macroModLog.push("YIELD_STEEP:+3"); }
-    }
-    // Fed funds rate (FRED FEDFUNDS)
-    const _fedRate = _fred.fedFundsRate ?? null;
-    if (_fedRate !== null) {
-      if (_fedRate >= 5.00) { _macroMod -= 3; _macroModLog.push("FED_RESTRICTIVE:-3"); }
-      else if (_fedRate < 2.00) { _macroMod += 3; _macroModLog.push("FED_ACCOMMODATIVE:+3"); }
-    }
-    // Labor signal (BLS UNRATE — prefer BLS, fallback to FRED)
-    const _unemp = _bls.usUnemployment ?? _fred.usUnemployment ?? null;
-    if (_unemp !== null) {
-      if (_unemp <= 4.0) { _macroMod += 2; _macroModLog.push("LABOR_STRONG:+2"); }
-      else if (_unemp > 5.5) { _macroMod -= 3; _macroModLog.push("LABOR_WEAK:-3"); }
-    }
-    // Fed tone (FedRSS)
-    const _fedTone = _rss.overallTone ?? null;
-    if (_fedTone === "HAWKISH") { _macroMod -= 2; _macroModLog.push("FED_HAWKISH:-2"); }
-    else if (_fedTone === "DOVISH") { _macroMod += 2; _macroModLog.push("FED_DOVISH:+2"); }
-    // Hard cap ±8 — macro cannot dominate India signals
-    _macroMod = Math.max(-8, Math.min(8, _macroMod));
-    const compositeScoreRaw = compositeScore;
-    const compositeScoreFinal = Math.round((compositeScore + _macroMod) * 10) / 10;
-
-
-    const regime = compositeScoreFinal >= 70 ? "STRONG_RISK_ON"
-                 : compositeScoreFinal >= 55 ? "RISK_ON"
-                 : compositeScoreFinal >= 45 ? "NEUTRAL"
-                 : compositeScoreFinal >= 30 ? "RISK_OFF"
+    const regime = compositeScore >= 70 ? "STRONG_RISK_ON"
+                 : compositeScore >= 55 ? "RISK_ON"
+                 : compositeScore >= 45 ? "NEUTRAL"
+                 : compositeScore >= 30 ? "RISK_OFF"
                  : "STRONG_RISK_OFF";
 
-    const regimeLabel = compositeScoreFinal >= 70 ? "STRONGLY BULLISH"
-                      : compositeScoreFinal >= 55 ? "BULLISH"
-                      : compositeScoreFinal >= 45 ? "CAUTIOUSLY NEUTRAL"
-                      : compositeScoreFinal >= 30 ? "BEARISH"
+    const regimeLabel = compositeScore >= 70 ? "STRONGLY BULLISH"
+                      : compositeScore >= 55 ? "BULLISH"
+                      : compositeScore >= 45 ? "CAUTIOUSLY NEUTRAL"
+                      : compositeScore >= 30 ? "BEARISH"
                       : "STRONGLY BEARISH";
 
-    const actionBias = compositeScoreFinal >= 55 ? "Overweight equities; reduce cash"
-                     : compositeScoreFinal >= 45 ? "Balanced; await confirmation"
+    const actionBias = compositeScore >= 55 ? "Overweight equities; reduce cash"
+                     : compositeScore >= 45 ? "Balanced; await confirmation"
                      : "Tilt toward debt and gold; reduce equity";
 
     const includedModules = Object.entries(modules)
@@ -5298,8 +3124,7 @@ class RegimeEngine {
       .map(([name]) => name.replace("global_", "global"));
 
     const result = {
-      compositeScore: compositeScoreFinal, regime, regimeLabel, actionBias, includedModules,
-      compositeScoreRaw, macroModifier: _macroMod, macroModifierLog: _macroModLog,
+      compositeScore, regime, regimeLabel, actionBias, includedModules,
       activeWeightSum: Math.round(activeWeightSum * 1000) / 1000,
       moduleScores: {
         equity: equity.score, technical: technical.score, global: global_.score,
@@ -5985,15 +3810,13 @@ function formatNumber(value, digits = 2) {
     });
   }
 
-    const levels=[...support.map(l=>({...l,type:"support"})),...resistance.map(l=>({...l,type:"resistance"}))].sort((a,b)=>a.value-b.value);
-return {
+  return {
 
     regime,
 
     support,
 
     resistance,
-    levels,
 
     meta: {
 
@@ -6838,7 +4661,7 @@ value:
 		// VIX — use cached value (fetched by refreshEquityMacroCaches every 15min)
 		// =====================================
 
-		const vixValue = marketCache.vixValue || null;
+		const vixValue = marketCache.vixValue || DSSCache.get("nse:index")?.vixValue || null;
 
 		// =====================================
 		// CACHE UPDATE
@@ -6953,30 +4776,14 @@ value:
 
 		// ✅ START SCHEDULER (ONLY ONCE)
 		setInterval(runNSEIndexJob, NSE_POLL_INTERVAL);
-          // FedRSS scheduler — every 4h (infrequent Fed releases)
-          setInterval(async () => { try { await fetchFedRSS(); } catch(e) {} }, 14400000);
-          // BLS scheduler — daily refresh (monthly data, no need for frequent polling)
-          setInterval(async () => { try { await fetchBLSMacro(); } catch(e) {} }, 86400000);
-		          // FRED scheduler — first run 30s, then every 4h
-          setTimeout(async () => {
-            try { await fetchFREDMacro(); } catch(e) { logger.warn({err:e.message},"FRED initial fetch failed"); }
-            setInterval(async () => { try { await fetchFREDMacro(); } catch(e) {} }, 14400000);
-          }, 30000);
-          // LLM narrative scheduler — 90s first run, then every 15min
-          setTimeout(async () => {
-            if(typeof refreshNarrativeCache==="function"){
-              await refreshNarrativeCache();
-              setInterval(()=>refreshNarrativeCache().catch(()=>{}),900000);
-            }
-          }, 90000);
-setTimeout(async () => { await runNSEIndexJob(); }, 60000);
+		setTimeout(async () => { await runNSEIndexJob(); }, 60000);
 		setTimeout(() => {
 		  refreshSectorCache();
 		  setInterval(() => refreshSectorCache(), 600000);
 		}, 180000);
 		// refreshDebtCache setTimeout moved to 1-tab scope (scope fix)
 		setTimeout(async () => { await fetchAMFISIPData(); }, 600000);
-		setTimeout(async () => { await refreshEquityMacroCaches(); }, 45000);
+		setTimeout(async () => { await refreshEquityMacroCaches(); }, 660000);
 		
 		let macroRefreshRunning = false;
 		
@@ -7094,57 +4901,6 @@ setTimeout(() => {
 }, 60000);
 // ── END narrative-gen job ──
 
-// ── brain-auto scheduler (v8 P3-5) ──
-// Populates brain:latest every 60s from RegimeEngine read()
-// Phase 7 Step 1: cache population only — no route rewiring
-setTimeout(() => {
-  const runScheduledBrain = () => {
-    try {
-      const _brainRegime = regimeEngine.read();
-      if (!_brainRegime || _brainRegime.compositeScore === null) return;
-      const _brainPayload = {
-        compositeScore:    _brainRegime.compositeScore,
-        regime:            _brainRegime.regime,
-        regimeLabel:       _brainRegime.regimeLabel,
-        actionBias:        _brainRegime.actionBias,
-        moduleScores:      _brainRegime.moduleScores,
-        macroModifier:     _brainRegime.macroModifier     ?? null,
-        compositeScoreRaw: _brainRegime.compositeScoreRaw ?? null,
-        macroModifierLog:  _brainRegime.macroModifierLog  ?? [],
-        activeWeightSum:   _brainRegime.activeWeightSum   ?? null,
-        confidence:        (DSSCache.get('score:equity')?.confidence ?? null),
-        scheduledAt:       Date.now(),
-        source:            'brain-scheduled',
-        ...(() => { try {
-          const _d = computeRegimeDurability(MEMORY, _brainRegime.moduleScores);
-          return { durabilityScore: _d.durabilityScore, durabilityClass: _d.durabilityClass, cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0 };
-        } catch(e) { return { durabilityScore: 0.15, durabilityClass: 'EMERGING', cyclesSinceChange: 0 }; } })(),
-        // v9 Sprint 2: Conviction Engine
-        ...(() => { try {
-          const _durScore  = (() => { try { return computeRegimeDurability(MEMORY, _brainRegime.moduleScores).durabilityScore; } catch(e) { return 0.15; } })();
-          const _rawConv   = computeConviction(_brainRegime.confidence ?? (DSSCache.get('score:equity')?.confidence ?? 0.50), _durScore, 0.50);
-          const _nowTs = Date.now();
-          if (_lastConvictionTs && (_nowTs - _lastConvictionTs) > 300000) { _lastConvictionScore = null; }
-          const _smoothed  = smoothConviction(_lastConvictionScore, _rawConv.convictionScore);
-          _lastConvictionScore = _smoothed;
-          _lastConvictionTs = _nowTs;
-          const _trajectory = updateConvictionTrajectory(_smoothed);
-          return { convictionScore: _smoothed, convictionClass: _rawConv.convictionClass, convictionComponents: _rawConv.convictionComponents, convictionTrajectory: _trajectory };
-        } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null, convictionTrajectory: null }; } })(),
-      };
-      DSSCache.set('brain:latest', _brainPayload);
-      DSSCache.set('brain:ts', Date.now());
-      logger.info({ job: 'brain-scheduled', score: _brainPayload.compositeScore, regime: _brainPayload.regime }, 'brain:latest updated');
-    } catch(e) {
-      logger.warn({ err: e.message }, 'scheduled brain failed');
-    }
-  };
-  runScheduledBrain();
-  setInterval(runScheduledBrain, 60000);
-}, 90000); // 30s after RegimeEngine first run (45s)
-// ── END brain-auto scheduler ──
-
-
         // ── equity/global/derivatives bootstrap (Session 20I) ──
         DSSCache.set("score:equity", {
           score: 50, confidence: 0.45,
@@ -7205,15 +4961,7 @@ setTimeout(() => {
             }
           }, 20 * 60 * 1000);
         }, 30000);
-        
-        // SPRINT 4A: LLM narrative cache — initial + 15min refresh
-        setTimeout(async () => {
-          if (typeof refreshNarrativeCache === "function") {
-            await refreshNarrativeCache();
-            setInterval(() => refreshNarrativeCache().catch(()=>{}), 900000);
-          }
-        }, 90000);
-// ── END debt-bootstrap job ──
+        // ── END debt-bootstrap job ──
 
 
 
@@ -7320,7 +5068,7 @@ setTimeout(() => {
 				glow: bull === true ? "rgba(0,224,164,0.06)" : bull === false ? "rgba(255,95,135,0.06)" : "rgba(159,179,200,0.04)"
 			  });
 			  rotation.push({ sector: sector.replaceAll("_", " "), phase, bull });
-			  flows.push({ sector: sector.replaceAll("_", " "), value: `${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`, bull: flowObj.direction === "inflow", valueCr: flowObj.valueCr });
+			  flows.push([sector.replaceAll("_", " "), `${flowObj.valueCr >= 0 ? "+" : "-"}₹${Math.abs(flowObj.valueCr)} Cr`, flowObj.direction === "inflow"]);
 			  themes.push(themeObj);
 			}
 
@@ -7332,8 +5080,6 @@ setTimeout(() => {
 			  logger.warn({ got: heatmap.length }, "buildSectorPayload: partial sector payload — persisting degraded cache");
 			}
 
-			const _maxCr=Math.max(1,...flows.map(f=>Math.abs(f.valueCr||0)));
-			flows.forEach(f=>{f.flowPct=Math.min(100,Math.round(Math.abs(f.valueCr||0)/_maxCr*100));});
 			return {
 			  heatmap,
 			  rotation,
@@ -7602,10 +5348,8 @@ async function buildDebtPayload() {
 		// ── SESSION 18 STEP 2: score:debt + signals:debt ──
 		safeExecute(() => {
 		  const _ov       = payload.overview || {};
-                  const _fredD    = DSSCache.get("macro:fred") || {};
-                  // FRED: prefer DGS10 over Yahoo for US10Y in debt scoring
 		  const _realRate = _ov.realRate || null;
-                  const _us10Y    = _fredD.us10YYield || _ov.us10Y || null;
+		  const _us10Y    = _ov.us10Y    || null;
 		  const _dxy      = _ov.dxy      || null;
 		  const _gsecLive = payload.gsecLive === true;
 
@@ -7617,11 +5361,11 @@ async function buildDebtPayload() {
 		  if (_dxy   !== null) { if (_dxy < 102)   _dScore += 5;  else if (_dxy > 106)   _dScore -= 5;  }
 		  _dScore = Math.max(0, Math.min(100, _dScore));
 
-                  const _dConf = _gsecLive ? 0.75 : _fredD.us10YYield ? 0.60 : 0.45;
+		  const _dConf = _gsecLive ? 0.75 : 0.45;
 
 		  DSSCache.set("score:debt", {
 		    score: _dScore, confidence: _dConf,
-                    sourceOrigin: _gsecLive ? "te-live" : _fredD.us10YYield ? "fred-partial" : "hardcoded-fallback",
+		    sourceOrigin: _gsecLive ? "te-live" : "hardcoded-fallback",
 		    fallbackActive: !_gsecLive,
 		    staleReason: !_gsecLive ? "DEF-004: G-Sec yields hardcoded — confidence penalised" : null,
 		    fetchedAt: Date.now(), cacheAgeMin: 0
@@ -7675,7 +5419,7 @@ async function buildDebtPayload() {
 
 
 	// Trigger first debt refresh after 5min (staggered after sector job to avoid Yahoo 429 collision)
-// refreshDebtCache 300s duplicate removed — handled in app.listen startup
+	setTimeout(() => refreshDebtCache(), 300000);
 
 
 		
@@ -7743,15 +5487,6 @@ async function buildDebtPayload() {
 			});
 		  }
 
-		  // DEF-009: merge score:debt provenance
-		  const _scoreDebt = DSSCache.get("score:debt") || {};
-		  const _debtData = Object.assign({}, cached, {
-		    sourceOrigin:   _scoreDebt.sourceOrigin   || cached.sourceOrigin   || null,
-		    fallbackActive: _scoreDebt.fallbackActive != null ? _scoreDebt.fallbackActive : (cached.fallbackActive != null ? cached.fallbackActive : null),
-		    staleReason:    _scoreDebt.staleReason    || cached.staleReason    || null,
-		    fetchedAt:      _scoreDebt.fetchedAt      || cached.fetchedAt      || null,
-		  });
-
 		  return res.json({
 
 			status: "OK",
@@ -7760,7 +5495,13 @@ async function buildDebtPayload() {
 
 			dataStatus,
 
-			data: _debtData
+			data: {
+				...cached,
+				sourceOrigin: cached.sourceOrigin || (function(){ var s = DSSCache.get("score:debt"); return s ? s.sourceOrigin : null; })() || null,
+				staleReason: cached.staleReason || (function(){ var s = DSSCache.get("score:debt"); return s ? s.staleReason : null; })() || null,
+				fallbackActive: cached.fallbackActive != null ? cached.fallbackActive : (function(){ var s = DSSCache.get("score:debt"); return s && s.fallbackActive != null ? s.fallbackActive : null; })(),
+				fetchedAt: cached.fetchedAt || (function(){ var s = DSSCache.get("score:debt"); return s ? s.fetchedAt : null; })() || null,
+			}
 		  });
 
 		} catch (err) {
@@ -7966,19 +5707,14 @@ class OverviewEngine {
 
     // --- Composite score block ---
     const compositeScore = {
-      score:              regime.compositeScore,
-      label:              regime.regimeLabel,
-      actionBias:         regime.actionBias,
-      regime:             regime.regime,
-      includedModules:    regime.includedModules,
-      moduleScores:       regime.moduleScores,
-      dataStatus:         regime.dataStatus,
-      computedAt:         regime.computedAt,
-      // P3-3: macro modifier observability passthrough
-      compositeScoreRaw:  regime.compositeScoreRaw  ?? null,
-      macroModifier:      regime.macroModifier       ?? null,
-      macroModifierLog:   regime.macroModifierLog    ?? [],
-      activeWeightSum:    regime.activeWeightSum      ?? null,
+      score:           regime.compositeScore,
+      label:           regime.regimeLabel,
+      actionBias:      regime.actionBias,
+      regime:          regime.regime,
+      includedModules: regime.includedModules,
+      moduleScores:    regime.moduleScores,
+      dataStatus:      regime.dataStatus,
+      computedAt:      regime.computedAt,
     };
 
     // --- Fear & Greed (Appendix B.6) ---
@@ -8017,24 +5753,44 @@ class OverviewEngine {
       dataStatus: fiiNet !== null ? DATA_STATUS_ENUM.LIVE : DATA_STATUS_ENUM.UNAVAILABLE,
     };
 
-    // --- Module health (PARITY: weight/weightPct/included/contribution) ---
+    // --- Module health ---
     const ms = regime.moduleScores || {};
-    const _MW = { equity:0.30, technical:0.20, global:0.20, derivatives:0.15, debt:0.10, sector:0.05 };
-    const _inc = regime.includedModules || [];
-    const _mkMod = (key, label, score, extra) => ({
-      label, score, status: this._moduleStatus(score),
-      weight: _MW[key]||0, weightPct: Math.round((_MW[key]||0)*100),
-      included: _inc.includes(key),
-      contribution: (score!=null && _inc.includes(key)) ? Math.round(score*(_MW[key]||0)*10)/10 : null,
-      ...extra,
-    });
     const modules = {
-      equity:      _mkMod("equity",      "Equity",       ms.equity,      { niftyLtp: equity.niftyLtp||null, niftyChangePct: equity.niftyChangePct||null }),
-      technical:   _mkMod("technical",   "Technical",    ms.technical,   { topSignal: signalStrip[0]||null }),
-      sector:      _mkMod("sector",      "Sectors",      ms.sector,      { leading: sectors.topSector||null, lagging: sectors.bottomSector||null }),
-      debt:        _mkMod("debt",        "Debt / Rates", ms.debt,        { repoRate: debt.repoRate||null, realRate: debt.realRate||null }),
-      global:      _mkMod("global",      "Global Macro", ms.global,      { dxy: (global_.signals||[]).find(s=>s.name==="DXY (Dollar Index)")?.value||null, crude: (global_.signals||[]).find(s=>s.name==="Crude Oil (Brent)")?.value||null }),
-      derivatives: _mkMod("derivatives", "Derivatives",  ms.derivatives, { vix: equity.vixValue||null, pcr: flows.pcr||null }),
+      equity: {
+        label: "Equity", score: ms.equity,
+        status: this._moduleStatus(ms.equity),
+        niftyLtp: equity.niftyLtp || null,
+        niftyChangePct: equity.niftyChangePct || null,
+      },
+      technical: {
+        label: "Technical", score: ms.technical,
+        status: this._moduleStatus(ms.technical),
+        topSignal: signalStrip[0] || null,
+      },
+      sector: {
+        label: "Sectors", score: ms.sector,
+        status: this._moduleStatus(ms.sector),
+        leading: sectors.topSector    || null,
+        lagging: sectors.bottomSector || null,
+      },
+      debt: {
+        label: "Debt / Rates", score: ms.debt,
+        status: this._moduleStatus(ms.debt),
+        repoRate: debt.repoRate || null,
+        realRate: debt.realRate || null,
+      },
+      global: {
+        label: "Global Macro", score: ms.global,
+        status: this._moduleStatus(ms.global),
+        dxy:   (global_.signals || []).find(s => s.name === "DXY (Dollar Index)")?.value || null,
+        crude: (global_.signals || []).find(s => s.name === "Crude Oil (Brent)")?.value  || null,
+      },
+      derivatives: {
+        label: "Derivatives", score: ms.derivatives,
+        status: this._moduleStatus(ms.derivatives),
+        vix: equity.vixValue || null,
+        pcr: flows.pcr       || null,
+      },
     };
 
     const _staleReasons = Object.entries(regime.moduleScores || {})
@@ -8049,7 +5805,6 @@ class OverviewEngine {
       includedModules: regime.includedModules || [],
       staleReasons:    _staleReasons,
     };
-    const systemConf = computeSystemConfidence(this._cache);
     const result = {
       compositeScore,
       fearGreed,
@@ -8057,7 +5812,6 @@ class OverviewEngine {
       breadth,
       modules,
       provenance,
-      confidence: systemConf,
       dataStatus: regime.dataStatus,
       timestamp:  Date.now(),
     };
@@ -9090,43 +6844,13 @@ const narrativeEngine = new NarrativeEngine(DSSCache, regimeEngine, logger);
 
 		app.get("/api/v1/overview", (req, res) =>
   safeExecuteAsync(async () => {
-    // FSD 11.3: Phase 7 — overview reads brain:latest for intelligence layer
     const cached = DSSCache.get("overview:compiled");
     const payload = cached || overviewEngine.build();
-    const _brainLatest = DSSCache.get("brain:latest") || null;
-    const _brainTs     = DSSCache.get("brain:ts")     || null;
-    const _intelligence = _brainLatest ? {
-      compositeScore:    _brainLatest.compositeScore,
-      regime:            _brainLatest.regime,
-      regimeLabel:       _brainLatest.regimeLabel,
-      actionBias:        _brainLatest.actionBias,
-      macroModifier:     _brainLatest.macroModifier     ?? null,
-      compositeScoreRaw: _brainLatest.compositeScoreRaw ?? null,
-      macroModifierLog:  _brainLatest.macroModifierLog  ?? [],
-      activeWeightSum:   _brainLatest.activeWeightSum   ?? null,
-      scheduledAt:       _brainLatest.scheduledAt       ?? null,
-      source:            "brain-scheduled",
-      freshnessMs:       _brainTs ? Date.now() - _brainTs : null,
-      durabilityScore:   _brainLatest.durabilityScore   ?? null,
-      durabilityClass:   _brainLatest.durabilityClass   ?? null,
-      cyclesSinceChange: _brainLatest.cyclesSinceChange ?? null,
-      // v9 Sprint 2: Conviction
-      convictionScore:      _brainLatest.convictionScore      ?? null,
-      convictionClass:      _brainLatest.convictionClass      ?? null,
-      convictionComponents: _brainLatest.convictionComponents ?? null,
-      convictionTrajectory: _brainLatest.convictionTrajectory ?? null,
-    } : null;
-    // Priority 9: validate overview payload before serving
-    const _ovValidation = validateOverviewResponse({ compositeScore: payload.compositeScore, confidence: payload.confidence });
-    if (!_ovValidation.valid) {
-      logger.warn({ violations: _ovValidation.violations }, "Overview payload validation failed — serving last-good cache");
-    }
     return res.json({
       status:     "OK",
       timestamp:  Date.now(),
       dataStatus: payload.dataStatus,
-      data:       { ...payload, intelligence: _intelligence },
-      _validation: { valid: _ovValidation.valid, violations: _ovValidation.violations },
+      data:       payload,
     });
   }, null)
 );
@@ -9239,438 +6963,12 @@ app.get("/api/v1/derivatives", (req, res) =>
           fiiFuturesOI: fiiFuturesOI,
         },
         vixRegime: {
-          regime:    vixRegimeLabel,
-          vix:       indiaVix,
-          zone:      indiaVix===null?null:indiaVix<12?0:indiaVix<18?1:indiaVix<25?2:3,
-          zoneLabel: indiaVix===null?"UNAVAILABLE":indiaVix<12?"LOW FEAR":indiaVix<18?"MODERATE FEAR":indiaVix<25?"HIGH FEAR":"PANIC / CRISIS",
-          strategy:  indiaVix===null?null:indiaVix<12?"Trend following · Momentum long · Buy dips · Low hedging needed":indiaVix<18?"Staggered entry · SIP preferred · Hedge 30-40% portfolio · Avoid leverage":indiaVix<25?"Contrarian buy zone · Lumpsum deployment · Quality stocks · Cover shorts":"Aggressive lumpsum · Multi-year opportunity · Maximum deployment zone",
+          regime: vixRegimeLabel,
+          vix:    indiaVix,
         },
         oiLevels:        oiLevels,
         signals:         signals,
         derivativesScore: scoreDeriv.score != null ? scoreDeriv.score : null,
-      },
-    });
-  }, res)
-);
-
-
-// ===============================
-// SECTION-26: GET /api/v1/global
-// Cache-read-only. Reads: equity:global, score:global, signals:global
-// Exposes: kpis (dxy, us10Y, crude, fedPolicy), signals, score, provenance
-// dataStatus: live (>=2 live quotes), stale (1 quote), unavailable (0)
-// ===============================
-app.get("/api/v1/global", (req, res) =>
-  safeExecuteAsync(async () => {
-    const raw        = DSSCache.get("equity:global")   || {};
-    const scoreGlob  = DSSCache.get("score:global")    || { score: null, confidence: 0 };
-    const sigGlob    = DSSCache.get("signals:global")  || {};
-    const _fredGR    = DSSCache.get("macro:fred")      || {};
-
-    const dxy      = raw.dxy      != null ? raw.dxy      : (sigGlob.dxyProxy    != null ? sigGlob.dxyProxy    : null);
-    const us10Y    = _fredGR.us10YYield != null ? _fredGR.us10YYield : raw.us10Y    != null ? raw.us10Y    : (sigGlob.us10YYield  != null ? sigGlob.us10YYield  : null);
-    const crude    = raw.crudeOil != null ? raw.crudeOil : (sigGlob.crudeBrent  != null ? sigGlob.crudeBrent  : null);
-    const fedPolicy = raw.fedPolicy || sigGlob.fedPolicy || null;
-
-    const liveCount = [dxy, us10Y, crude].filter(v => v !== null).length;
-    const dataStatus = liveCount >= 2 ? "live" : liveCount === 1 ? "stale" : "unavailable";
-
-    const transmission = [];
-    if (crude !== null) {
-      const crudeImpact = crude > 90 ? "HEADWIND" : crude < 75 ? "TAILWIND" : "NEUTRAL";
-      transmission.push({ factor: "Crude Oil (Brent)", value: crude, impact: crudeImpact, reason: crude > 90 ? "High crude elevates India import bill and CPI" : crude < 75 ? "Low crude supports CAD and reduces inflationary pressure" : "Crude within neutral band — limited macro transmission" });
-    }
-    if (dxy !== null) {
-      const dxyImpact = dxy > 106 ? "HEADWIND" : dxy < 102 ? "TAILWIND" : "NEUTRAL";
-      transmission.push({ factor: "DXY (Dollar Index)", value: dxy, impact: dxyImpact, reason: dxy > 106 ? "Strong dollar pressures EM — FII outflow risk elevated" : dxy < 102 ? "Weak dollar supports EM inflows and INR stability" : "Dollar in range — neutral EM transmission" });
-    }
-    if (us10Y !== null) {
-      const yieldImpact = us10Y > 4.5 ? "HEADWIND" : us10Y < 4.0 ? "TAILWIND" : "NEUTRAL";
-      transmission.push({ factor: "US 10Y Yield", value: us10Y, impact: yieldImpact, reason: us10Y > 4.5 ? "Elevated US yields raise global risk-free rate — EM risk premium rises" : us10Y < 4.0 ? "Falling US yields supportive for EM valuations and debt flows" : "US yields in neutral range — limited direct transmission" });
-    }
-
-    const provenance = {
-      sourceOrigin:   scoreGlob.sourceOrigin   || (_fredGR.us10YYield ? 'fred-partial' : liveCount > 0 ? 'yahoo-live' : 'unavailable'),
-      fallbackActive: scoreGlob.fallbackActive != null ? scoreGlob.fallbackActive : (liveCount < 3),
-      staleReason:    scoreGlob.staleReason    || null,
-      fetchedAt:      scoreGlob.fetchedAt      || (raw.timestamp || null),
-      score:          scoreGlob.score          != null ? scoreGlob.score : null,
-      confidence:     scoreGlob.confidence     != null ? scoreGlob.confidence : 0,
-    };
-
-    return res.json({
-      status:     "OK",
-      timestamp:  Date.now(),
-      dataStatus,
-      data: {
-        kpis: { dxy, us10YYield: us10Y, crudeBrent: crude, fedPolicy: fedPolicy || null },
-        signals:      sigGlob.signals || [],
-        transmission,
-        globalScore:  scoreGlob.score != null ? scoreGlob.score : null,
-        provenance,
-      fredEnriched: _fredGR.us10YYield ? { us10Y:_fredGR.us10YYield, us2Y:_fredGR.us2YYield||null, yieldSpread:_fredGR.yieldSpread10_2||null, yieldCurve:_fredGR.yieldCurveSignal||null, fedFundsRate:_fredGR.fedFundsRate||null, fedStance:_fredGR.fedStance||null, unemployment:_fredGR.usUnemployment||null, source:"FRED", fetchedAt:_fredGR.fetchedAt||null } : null,
-        dataStatus,
-        timestamp:    Date.now(),
-      },
-    });
-  }, res)
-);
-
-
-// ===============================
-// SECTION-27: GET /api/v1/history
-// Reads SQLite decisions table — Sprint 3 frontend charts
-// ===============================
-app.get("/api/v1/history", (req, res) =>
-  safeExecuteAsync(async () => {
-    const limit=Math.min(parseInt(req.query.limit||"200"),500);
-    const bucket=req.query.bucket||"1h";
-    return new Promise((resolve) => {
-      db.all("SELECT regime, score, confidence, timestamp, overall_confidence, conf_class FROM decisions ORDER BY timestamp DESC LIMIT ?",[limit],(err,rows)=>{
-        if(err||!rows){res.status(500).json({status:"ERROR",error:err?.message});return resolve();}
-        rows.reverse();
-        let bucketed=rows;
-        if(bucket==="1h"||bucket==="1d"){
-          const ms=bucket==="1h"?3600000:86400000;
-          const map=new Map();
-          for(const r of rows){const key=Math.floor(r.timestamp/ms)*ms;if(!map.has(key))map.set(key,[]);map.get(key).push(r);}
-          bucketed=Array.from(map.entries()).map(([ts,g])=>({timestamp:ts,regime:g[g.length-1].regime,score:Math.round(g.reduce((s,r)=>s+r.score,0)/g.length*10)/10,confidence:Math.round(g.reduce((s,r)=>s+r.confidence,0)/g.length),overall_confidence:g.filter(r=>r.overall_confidence!=null).length?Math.round(g.filter(r=>r.overall_confidence!=null).reduce((s,r)=>s+(r.overall_confidence||0),0)/g.filter(r=>r.overall_confidence!=null).length*100)/100:null,conf_class:g[g.length-1].conf_class||null,count:g.length}));
-        }
-        const timeline=[];let prev=null;
-        for(const r of bucketed){if(!prev||prev.regime!==r.regime){if(prev)prev.endTs=r.timestamp;timeline.push({regime:r.regime,startTs:r.timestamp,endTs:null,score:r.score});prev=timeline[timeline.length-1];}}
-        if(prev)prev.endTs=Date.now();
-        const scores=bucketed.map(r=>r.score).filter(Boolean);
-        const stats=scores.length?{min:Math.min(...scores),max:Math.max(...scores),avg:Math.round(scores.reduce((a,b)=>a+b,0)/scores.length*10)/10,last:scores[scores.length-1],trend:scores.length>=10?(scores.slice(-5).reduce((a,b)=>a+b,0)/5>scores.slice(-10,-5).reduce((a,b)=>a+b,0)/5?"UP":"DOWN"):"FLAT"}:{};
-        res.json({status:"OK",timestamp:Date.now(),dataStatus:"live",data:{points:bucketed,timeline,stats,meta:{count:bucketed.length,bucket,from:bucketed[0]?.timestamp||null,to:bucketed[bucketed.length-1]?.timestamp||null}}});
-        resolve();
-      });
-    });
-  }, res)
-);
-
-
-// ===============================
-// SPRINT 4A: POST /api/v1/narrative/generate
-// On-demand LLM narrative — governed, circuit-broken, fallback-safe
-// ===============================
-app.post("/api/v1/narrative/generate", (req, res) =>
-  safeExecuteAsync(async () => {
-    const audience = (req.body && req.body.audience) || "IFA Advisory Pitch";
-    const riskProfile = (req.body && req.body.riskProfile) || "Moderate";
-    const VALID_RISK = ["Conservative","Moderate","Aggressive"];
-    if (!VALID_RISK.includes(riskProfile)) return res.status(400).json({ status: "ERROR", error: "Invalid riskProfile" });
-    const VALID = ["IFA Advisory Pitch","Wealth Manager Synthesis","Family Office Risk Brief","Private Banker Advisory","Advanced Investor Dashboard","Retail Investor","HNI Investor","Conservative Retiree","Aggressive Growth Investor","Institutional Strategy Desk"];
-    if (!VALID.includes(audience)) {
-      return res.status(400).json({ status: "ERROR", error: "Invalid audience. Valid: " + VALID.join(", ") });
-    }
-    const result = await generateNarrative(audience, riskProfile);
-    return res.json({
-      status: "OK",
-      timestamp: Date.now(),
-      dataStatus: result.narrativeMeta && result.narrativeMeta.fallbackUsed ? "fallback" : "live",
-      data: result,
-    });
-  }, res)
-);
-
-
-// ===============================
-// SPRINT 3: POST /api/v1/portfolio/context
-// Stateless PCE — session-scoped, never persisted
-// Constitutional: no allocation values in logs
-// ===============================
-app.post("/api/v1/portfolio/context", (req, res) =>
-  safeExecuteAsync(async () => {
-    const { equityPct, debtPct, goldPct, riskProfile } = req.body || {};
-    if (typeof equityPct !== 'number' || typeof debtPct !== 'number' || !riskProfile) {
-      return res.status(400).json({ status: "ERROR", error: "PCE_INVALID_INPUT", message: "equityPct, debtPct, riskProfile required" });
-    }
-    const _brainLatest = DSSCache.get("brain:latest") || {};
-    const _regime = _brainLatest.regime || "NEUTRAL";
-    const _durClass = _brainLatest.durabilityClass || "EMERGING";
-    const _durScore = _brainLatest.durabilityScore || 0.15;
-    const _conf = _brainLatest.confidence || 0.50;
-    const pceResult = pceComputePortfolioContext(equityPct, debtPct, goldPct ?? null, riskProfile, _regime, _durClass);
-    if (!pceResult.valid) {
-      return res.status(400).json({ status: "ERROR", error: pceResult.error, reason: pceResult.reason || null });
-    }
-    // Compute conviction with live portfolioAlignmentScore
-    const _convResult = (() => { try {
-      const _c = computeConviction(_conf, _durScore, pceResult.portfolioAlignmentScore);
-      return { convictionScore: _c.convictionScore, convictionClass: _c.convictionClass, convictionComponents: _c.convictionComponents };
-    } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null }; } })();
-    // Privacy: observability records mismatchClass only — never numeric allocation values
-    logger.info({ job: "pce", regime: _regime, durabilityClass: _durClass, mismatchClass: pceResult.mismatchClass, mismatchDirection: pceResult.mismatchDirection }, "PCE computed");
-    return res.json({
-      status: "OK",
-      timestamp: Date.now(),
-      data: {
-        portfolioContext: pceResult,
-        conviction: _convResult,
-        marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf }
-      }
-    });
-  }, res)
-);
-
-
-// ===============================
-// SPRINT 4: POST /api/v1/advisory/posture
-// ACL endpoint — requires portfolio context in request body
-// Constitutional: no securities, no amounts, deterministic
-// ===============================
-app.post("/api/v1/advisory/posture", (req, res) =>
-  safeExecuteAsync(async () => {
-    const { equityPct, debtPct, goldPct, riskProfile } = req.body || {};
-    if (typeof equityPct !== 'number' || typeof debtPct !== 'number' || !riskProfile) {
-      return res.status(400).json({ status: 'ERROR', error: 'ACL_NO_PORTFOLIO_CONTEXT', aclEligibility: false, degradationStatus: 'NO_PORTFOLIO_CONTEXT' });
-    }
-    const _bl = DSSCache.get('brain:latest') || {};
-    const _regime      = _bl.regime         || 'NEUTRAL';
-    const _durClass    = _bl.durabilityClass || 'EMERGING';
-    const _durScore    = _bl.durabilityScore || 0.15;
-    const _conf        = _bl.confidence      || 0.50;
-    const _convScore   = _bl.convictionScore  || null;
-    const _convClass   = _bl.convictionClass  || null;
-    const pce = pceComputePortfolioContext(equityPct, debtPct, goldPct ?? null, riskProfile, _regime, _durClass);
-    if (!pce.valid) {
-      return res.status(400).json({ status: 'ERROR', error: pce.error, reason: pce.reason || null });
-    }
-    const marketState = { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf };
-    const acl = aclComputeAdvisoryPosture(marketState, pce, _convScore, _convClass);
-    if (!acl.valid) {
-      return res.status(400).json({ status: 'ERROR', error: acl.error, violations: acl.violations || null });
-    }
-    // Recompute conviction with portfolio alignment
-    const _convFull = (() => { try {
-      const _c = computeConviction(_conf, _durScore, pce.portfolioAlignmentScore);
-      return { convictionScore: _c.convictionScore, convictionClass: _c.convictionClass, convictionComponents: _c.convictionComponents };
-    } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null }; } })();
-    // Privacy: log mismatchClass only
-    logger.info({ job: 'acl', regime: _regime, durabilityClass: _durClass, scenario: acl.scenarioType, intensity: acl.adjustmentIntensity, mismatchClass: pce.mismatchClass }, 'ACL posture computed');
-    return res.json({
-      status: 'OK',
-      timestamp: Date.now(),
-      data: {
-        advisoryPosture: acl,
-        portfolioContext: pce,
-        conviction: _convFull,
-        marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf }
-      }
-    });
-  }, res)
-);
-
-
-// ===============================
-// SPRINT 6: POST /api/v1/advisory/brief
-// Full v9 pipeline: isRegimeReady → PCE → ACL → Conviction → Narrative → FGS
-// Degrades cleanly to v8-equivalent when no portfolio context provided
-// Constitutional: session-only portfolio context, never persisted
-// ===============================
-const ADVISORY_BRIEF_AUDIENCES = [
-  'IFA Advisory Pitch','Wealth Manager Synthesis','Family Office Risk Brief',
-  'Private Banker Advisory','Advanced Investor Dashboard','Retail Investor',
-  'HNI Investor','Conservative Retiree','Aggressive Growth Investor','Institutional Strategy Desk'
-];
-
-app.post("/api/v1/advisory/brief", (req, res) =>
-  safeExecuteAsync(async () => {
-    const t0 = Date.now();
-    const { audience, riskProfile, equityPct, debtPct, goldPct, sessionId } = req.body || {};
-
-    // Input validation
-    if (!audience || !ADVISORY_BRIEF_AUDIENCES.includes(audience)) {
-      return res.status(400).json({ status: 'ERROR', error: 'INVALID_AUDIENCE',
-        message: 'Valid audiences: ' + ADVISORY_BRIEF_AUDIENCES.join(', ') });
-    }
-    const VALID_PROFILES = ['Conservative','Moderate','Aggressive'];
-    if (!riskProfile || !VALID_PROFILES.includes(riskProfile)) {
-      return res.status(400).json({ status: 'ERROR', error: 'INVALID_RISK_PROFILE' });
-    }
-    const _hasPortfolio = typeof equityPct === 'number' && typeof debtPct === 'number';
-    if (_hasPortfolio && (!isFinite(equityPct) || !isFinite(debtPct))) {
-      return res.status(400).json({ status: 'ERROR', error: 'PCE_INVALID_INPUT', aclEligibility: false });
-    }
-
-    // Cold start guard
-    if (!isRegimeReady(DSSCache)) {
-      const _coldNarrative = await generateNarrative(audience, riskProfile);
-      return res.json({ status: 'OK', timestamp: Date.now(),
-        dataStatus: 'cold-start', data: { ..._coldNarrative,
-          portfolioContext: null, advisoryPosture: null, conviction: null,
-          marketContext: null, degradationStatus: { advisoryCognition: 'SKIPPED', portfolioContext: 'NOT_PROVIDED', reason: 'COLD_START' }
-        }
-      });
-    }
-
-    const _bl = DSSCache.get('brain:latest') || {};
-    const _regime      = _bl.regime         || 'NEUTRAL';
-    const _durClass    = _bl.durabilityClass || 'EMERGING';
-    const _durScore    = _bl.durabilityScore || 0.15;
-    const _conf        = _bl.confidence      || 0.50;
-    const _convScore   = _bl.convictionScore  || null;
-    const _convClass   = _bl.convictionClass  || null;
-
-    // PCE — portfolio context (optional)
-    let _pce = null;
-    let _pceError = null;
-    if (_hasPortfolio) {
-      try {
-        _pce = pceComputePortfolioContext(equityPct, debtPct, goldPct ?? null, riskProfile, _regime, _durClass);
-        if (!_pce.valid) { _pceError = _pce.error; _pce = null; }
-      } catch(e) { _pceError = 'PCE_ERROR'; _pce = null; }
-    }
-
-    // ACL — advisory posture (only if PCE valid)
-    let _acl = null;
-    let _aclError = null;
-    if (_pce && _pce.valid) {
-      try {
-        const _marketState = { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf };
-        _acl = aclComputeAdvisoryPosture(_marketState, _pce, _convScore, _convClass);
-        if (!_acl.valid) { _aclError = _acl.error; _acl = null; }
-      } catch(e) { _aclError = 'ACL_ERROR'; _acl = null; }
-    }
-
-    // Conviction — recomputed with portfolio alignment if available
-    let _convFull = null;
-    try {
-      const _alignScore = _pce ? _pce.portfolioAlignmentScore : 0.50;
-      const _cv = computeConviction(_conf, _durScore, _alignScore);
-      _convFull = { convictionScore: _cv.convictionScore, convictionClass: _cv.convictionClass,
-        convictionComponents: _cv.convictionComponents, convictionDataQuality: _cv.convictionDataQuality };
-    } catch(e) { _convFull = null; }
-
-    // Generate narrative (existing v8-compatible path)
-    const _narrative = await generateNarrative(audience, riskProfile);
-
-    // degradationStatus
-    const _degradation = {
-      marketIntelligence: _bl.compositeScore ? 'OK' : 'FALLBACK',
-      portfolioContext:   _hasPortfolio ? (_pce ? 'OK' : 'INVALID_INPUT') : 'NOT_PROVIDED',
-      advisoryCognition: _acl ? 'OK' : (_hasPortfolio && _pce ? 'ERROR' : 'SKIPPED'),
-      convictionEngine:  _convFull ? 'OK' : 'FALLBACK',
-      durabilityEngine:  _durScore > 0.15 ? 'OK' : 'FALLBACK'
-    };
-
-    // Privacy: log mismatchClass only, never allocation values
-    logger.info({ job: 'advisory-brief', audience, riskProfile,
-      regime: _regime, durabilityClass: _durClass,
-      portfolioProvided: _hasPortfolio,
-      mismatchClass: _pce ? _pce.mismatchClass : null,
-      scenario: _acl ? _acl.scenarioType : null,
-      latencyMs: Date.now() - t0
-    }, 'Advisory brief generated');
-
-    return res.json({
-      status: 'OK',
-      timestamp: Date.now(),
-      dataStatus: _narrative.narrativeMeta && _narrative.narrativeMeta.fallbackUsed ? 'fallback' : 'live',
-      data: {
-        // Narrative (v8-compatible fields)
-        summary:            _narrative.summary,
-        marketTone:         _narrative.marketTone,
-        keyDrivers:         _narrative.keyDrivers,
-        riskFlags:          _narrative.riskFlags,
-        tacticalView:       _narrative.tacticalView,
-        macroContext:       _narrative.macroContext        || null,
-        confidenceNote:     _narrative.confidenceNote     || null,
-        // v9 portfolio fields
-        portfolioPostureNote: _acl ? _acl.postureStatement : null,
-        durabilityNote:     _durClass ? 'Regime durability: ' + _durClass + ' (' + (_bl.cyclesSinceChange || 0) + ' cycles)' : null,
-        convictionQualifier: _convFull ? 'Advisory conviction: ' + _convFull.convictionClass + ' (' + _convFull.convictionScore + ')' : null,
-        deploymentPacingNote: _acl && _acl.deploymentPacing ? _acl.deploymentPacing.tranches + ' tranches over ' + _acl.deploymentPacing.periodWeeks + ' weeks' : null,
-        stressAwarenessNote: _acl ? _acl.stressAwarenessNote : null,
-        advisoryIntensity:  _acl ? _acl.cappedIntensity : null,
-        // Context objects
-        portfolioContext:   _pce,
-        advisoryPosture:    _acl,
-        conviction:         _convFull,
-        marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf },
-        degradationStatus:  _degradation,
-        // Full observability
-        narrativeMeta: {
-          ..._narrative.narrativeMeta,
-          portfolioContextProvided: _hasPortfolio,
-          mismatchClass:     _pce ? _pce.mismatchClass     : null,
-          mismatchDirection: _pce ? _pce.mismatchDirection : null,
-          adjustmentIntensity: _acl ? _acl.cappedIntensity : null,
-          scenarioType:      _acl ? _acl.scenarioType      : null,
-          advisoryBasisTrace: _acl ? _acl.advisoryBasisTrace : null,
-          degradationStatus: _degradation,
-          sessionId:         sessionId || null
-        },
-        governanceApplied: true
-      }
-    });
-  }, res)
-);
-
-
-// ===============================
-// GET /api/v1/macro
-// Unified macro intelligence endpoint — FRED + BLS
-// ===============================
-app.get("/api/v1/macro", (req, res) =>
-  safeExecuteAsync(async () => {
-    const fred   = DSSCache.get("macro:fred")   || {};
-    const bls    = DSSCache.get("macro:bls")    || {};
-    const fedrss = DSSCache.get("macro:fedrss") || {};
-    const hasData = fred.fetchedAt || bls.fetchedAt;
-    return res.json({
-      status:    "OK",
-      timestamp: Date.now(),
-      dataStatus: hasData ? "live" : "unavailable",
-      data: {
-        fred: fred.fetchedAt ? {
-          us10YYield:       fred.us10YYield,
-          us2YYield:        fred.us2YYield,
-          yieldSpread10_2:  fred.yieldSpread10_2,
-          yieldCurveSignal: fred.yieldCurveSignal,
-          fedFundsRate:     fred.fedFundsRate,
-          fedStance:        fred.fedStance,
-          usUnemployment:   fred.usUnemployment,
-          usCpiIndex:       fred.usCpiIndex,
-          dates:            fred.dates,
-          source:           "FRED",
-          fetchedAt:        fred.fetchedAt,
-          staleDurationMin: Math.round((Date.now()-fred.fetchedAt)/60000),
-        } : null,
-        bls: bls.fetchedAt ? {
-          usCpiIndex:       bls.usCpiIndex,
-          usCoreCpi:        bls.usCoreCpi,
-          usUnemployment:   bls.usUnemployment,
-          usPayrolls:       bls.usPayrolls,
-          usWages:          bls.usWages,
-          laborSignal:      bls.laborSignal,
-          payrollSignal:    bls.payrollSignal,
-          dates:            bls.dates,
-          source:           "BLS",
-          fetchedAt:        bls.fetchedAt,
-          staleDurationMin: Math.round((Date.now()-bls.fetchedAt)/60000),
-        } : null,
-        fedrss: fedrss.fetchedAt ? {
-          overallTone:  fedrss.overallTone,
-          latestTitle:  fedrss.latestTitle,
-          latestDate:   fedrss.latestDate,
-          fomcItems:    fedrss.fomcItems,
-          topItems:     fedrss.items?.slice(0,3),
-          source:       "FedRSS",
-          fetchedAt:    fedrss.fetchedAt,
-          staleDurationMin: Math.round((Date.now()-fedrss.fetchedAt)/60000),
-        } : null,
-        synthesis: {
-          us10Y:        fred.us10YYield        || null,
-          fedStance:    fred.fedStance         || null,
-          yieldCurve:   fred.yieldCurveSignal  || null,
-          unemployment: bls.usUnemployment     || fred.usUnemployment || null,
-          laborSignal:  bls.laborSignal        || null,
-          payrollSignal:bls.payrollSignal      || null,
-          cpi:          bls.usCpiIndex         || fred.usCpiIndex || null,
-          fedTone:      fedrss.overallTone     || null,
-          latestFedNews:fedrss.latestTitle     || null,
-        },
       },
     });
   }, res)
@@ -9699,10 +6997,7 @@ app.get("/health", (req, res) => {
 			  NSE: { keys: ["nse:index", "nse:optionchain", "equity:flows", "nse:sector"], ttl: 30000 },
 			  RBI: { keys: ["equity:macro"], ttl: 3600000 },
 			  Yahoo: { keys: ["equity:global", "nse:debt"], ttl: 120000 },
-			  MOSPI: { keys: ["equity:fundamental"], ttl: 21600000 },
-			  FRED: { keys: ["macro:fred"], ttl: 14400000 },
-			  BLS:  { keys: ["macro:bls"],  ttl: 86400000 },
-			  FedRSS:{ keys: ["macro:fedrss"],ttl: 14400000 }
+			  MOSPI: { keys: ["equity:fundamental"], ttl: 21600000 }
 			};
 
 			const sources = {};
@@ -9752,26 +7047,31 @@ app.get("/health", (req, res) => {
 			  }
 			}
 
-                        const _enhSrc={};
-                        for(const[_sn,_si]of Object.entries(sources)){
-                          const _sm=_si.staleFor?Math.round(_si.staleFor/60000):null;
-                          const _phr=(typeof ProviderHealthRegistry!=="undefined")?ProviderHealthRegistry.getSummary()[_sn]:null;
-                          _enhSrc[_sn]={status:_si.status,dataStatus:_si.status==="OK"?"live":_si.status==="STALE"?"stale":_si.status==="DOWN"?"disconnected":"unavailable",lastFetch:_si.lastFetch,staleFor:_si.staleFor,staleDurationMin:_sm,staleLabel:_sm===null?"Never fetched":_sm<2?"Just updated":_sm<60?`${_sm}m ago`:`${Math.round(_sm/60)}h ago`,successRate:_phr?.successRate??null,avgLatencyMs:_phr?.avgLatencyMs??null,consecutiveFailures:_phr?.failureCount??null,fallbackActive:_si.status==="DOWN"||_si.status==="STALE"};
-                        }
-                        const _sc2=(typeof computeSystemConfidence!=="undefined")?computeSystemConfidence(DSSCache):null;
-                        const _reg2=DSSCache.get("regime:composite")||{};
-                        const _inc2=(_reg2.includedModules||[]).length;
-                        const _st2=Object.values(_enhSrc).filter(s=>s.status==="STALE"||s.status==="DOWN").length;
-                        return res.json({
-                          status:overallStatus,version:VERSION,release:RELEASE_TAG,
-                          uptime:Math.round(process.uptime()),timestamp:now,
-                          sources:_enhSrc,
-                          confidence:_sc2?{overall:_sc2.overall,classification:_sc2.classification,fallbackModules:_sc2.fallbackModules,staleModules:_sc2.staleModules,drivers:_sc2.drivers}:null,
-                          metrics:{modulesIncluded:_inc2,modulesTotal:6,modulesCoverage:Math.round((_inc2/6)*100),staleSources:_st2,compositeScore:_reg2.compositeScore||null,regime:_reg2.regime||null,activeWeightSum:_reg2.activeWeightSum||null,uptimeMin:Math.round(process.uptime()/60),overallConfidence:_sc2?.overall||null,confClassification:_sc2?.classification||null},
-                          startupStatus: DSSCache.get("startup:status") || null,
-                          monetaryPolicy: DSSCache.get("monetary:policy") ? { repoRate: DSSCache.get("monetary:policy").repoRate, stance: DSSCache.get("monetary:policy").stance, lastUpdated: DSSCache.get("monetary:policy").lastUpdated, isStale: DSSCache.get("monetary:policy").isStale, dataStatus: DSSCache.get("monetary:policy").dataStatus } : null,
-                          deprecated_endpoints:[],alerts
-                        });
+			return res.json({
+			  status: overallStatus,
+			  version: VERSION,
+			  release: RELEASE_TAG,
+			  uptime: Math.round(process.uptime()),
+			  timestamp: now,
+			  sources,
+			  metrics: {
+				fetchSuccessRate1h: (function(){
+				  const ss = Object.values(sources);
+				  const ok = ss.filter(s => s.status === "OK").length;
+				  return ss.length ? Math.round((ok / ss.length) * 100) / 100 : null;
+				})(),
+				cacheHitRatio1h: (function(){
+				  const ss = Object.values(sources);
+				  const fresh = ss.filter(s => s.status === "OK").length;
+				  return ss.length ? Math.round((fresh / ss.length) * 100) / 100 : null;
+				})(),
+				staleDataEvents1h: Object.values(sources).filter(s => s.status === "STALE" || s.status === "DOWN").length,
+				signalErrors1h: 0,
+				note: "fetchSuccessRate1h and cacheHitRatio1h derived from current source states; full rolling counters Phase F"
+			  },
+			  deprecated_endpoints: [],
+			  alerts
+			});
 		  } catch (err) {
 			return res.json({ status: "DOWN", timestamp: Date.now(), error: err.message });
 		  }
@@ -9957,9 +7257,6 @@ app.get("/health", (req, res) => {
 		// ── END SESSION 20C P2 ──
 		// D27.1 regime tracking
 		if (regime !== MEMORY.lastSnapshot?.regime) { MEMORY.lastRegimeChangeTs = Date.now(); MEMORY.cyclesSinceChange = 0; } else { MEMORY.cyclesSinceChange += 1; }
-		// v9 Sprint 1 fix: compute durability here where cyclesSinceChange is live
-		const _durabilityResult = (() => { try { return computeRegimeDurability(MEMORY, _rd2.moduleScores); } catch(e) { return { durabilityScore: 0.15, durabilityClass: 'EMERGING' }; } })();
-		MEMORY._lastDurability = _durabilityResult;
 
 		  const portfolioStateData = portfolioState;
 		  
@@ -10254,19 +7551,6 @@ app.get("/health", (req, res) => {
 
 		try {
 		  saveMemory(MEMORY);
-		  // v9 Sprint 1 fix: push fresh durability into brain:latest from POST cycle
-		  try {
-		    const _bl = DSSCache.get('brain:latest') || {};
-		    const _cv = (() => { try { const _d = MEMORY._lastDurability ? MEMORY._lastDurability.durabilityScore : 0.15; const _c = computeConviction(_bl.confidence ?? 0.50, _d, 0.50); const _nowTs2 = Date.now(); if (_lastConvictionTs && (_nowTs2 - _lastConvictionTs) > 300000) { _lastConvictionScore = null; } const _s = smoothConviction(_lastConvictionScore, _c.convictionScore); _lastConvictionScore = _s; _lastConvictionTs = _nowTs2; const _t = updateConvictionTrajectory(_s); return { convictionScore: _s, convictionClass: _c.convictionClass, convictionTrajectory: _t }; } catch(e) { return { convictionScore: null, convictionClass: null, convictionTrajectory: null }; } })();
-		    DSSCache.set('brain:latest', { ..._bl,
-		      durabilityScore:   MEMORY._lastDurability?.durabilityScore   ?? 0.15,
-		      durabilityClass:   MEMORY._lastDurability?.durabilityClass   ?? 'EMERGING',
-		      cyclesSinceChange: MEMORY.cyclesSinceChange ?? 0,
-		      convictionScore:   _cv.convictionScore,
-		      convictionClass:   _cv.convictionClass,
-		      convictionTrajectory: _cv.convictionTrajectory
-		    });
-		  } catch(e) { /* non-fatal */ }
 		} catch (err) {
 		  logger.error({ err }, "Memory save failed");
 		}
@@ -10289,9 +7573,9 @@ app.get("/health", (req, res) => {
 		// Save decision
 		safeExecute(() => {
 		  db.run(
-                        `INSERT INTO decisions (regime, score, confidence, timestamp, module_coverage, fallback_count, stale_count, overall_confidence, conf_class)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                        (() => { const _sc = (typeof computeSystemConfidence === "function") ? computeSystemConfidence(DSSCache) : {}; return [regime, compositeScore, confidence, timestamp, _sc.moduleCoverage||null, (_sc.fallbackModules||[]).length, (_sc.staleModules||[]).length, _sc.overall||null, _sc.classification||null]; })(),
+			`INSERT INTO decisions (regime, score, confidence, timestamp)
+			 VALUES (?, ?, ?, ?)`,
+			[regime, compositeScore, confidence, timestamp],
 			(err) => {
 			  if (err) {
 				logger.error({ err }, "DB insert error (decision)");
@@ -10347,117 +7631,6 @@ app.get("/health", (req, res) => {
 // SECTION-27 : PM2 + STARTUP
 // Single Express error handler (4-arg middleware)
 // process.on uncaughtException + unhandledRejection guards
-
-// ══════════════════════════════════════════════════════════════════
-// NARRATIVE RELIABILITY LAYER — Admin Endpoints (R2, R5, R6, R7)
-// All admin endpoints require internal network or admin auth in prod
-// ══════════════════════════════════════════════════════════════════
-
-// R5: GET /api/v1/admin/narrative/regression — run regression tests
-app.get("/api/v1/admin/narrative/regression", (req, res) => {
-  try {
-    const results = runNarrativeRegressionTests();
-    return res.json({ status: "OK", timestamp: Date.now(), data: results });
-  } catch(e) {
-    return res.status(500).json({ status: "ERROR", error: e.message });
-  }
-});
-
-// R1: GET /api/v1/admin/narrative/provenance — last N provenance entries
-app.get("/api/v1/admin/narrative/provenance", (req, res) => {
-  try {
-    const n = Math.min(parseInt(req.query.n || '20'), 50);
-    const entries = PROVENANCE_LOG.getLast(n);
-    return res.json({ status: "OK", timestamp: Date.now(), data: { count: entries.length, entries } });
-  } catch(e) {
-    return res.status(500).json({ status: "ERROR", error: e.message });
-  }
-});
-
-// R2: GET /api/v1/admin/narrative/replay — list replay store entries
-app.get("/api/v1/admin/narrative/replay", (req, res) => {
-  try {
-    const entries = REPLAY_STORE.getAll().map(e => ({
-      replayId: e.replayId,
-      storedAt: e.storedAt,
-      audience: e.audience,
-      riskProfile: e.riskProfile,
-      provider: e.provider,
-      regime: e.contextSnapshot.regime,
-      confidence: e.contextSnapshot.confidence,
-      marketTone: e.narrativeStructure.marketTone,
-      contradictions: e.contradictions.length,
-      calibrationApplied: e.calibrationApplied,
-    }));
-    return res.json({ status: "OK", timestamp: Date.now(), data: { count: entries.length, entries } });
-  } catch(e) {
-    return res.status(500).json({ status: "ERROR", error: e.message });
-  }
-});
-
-// R2: GET /api/v1/admin/narrative/replay/:id — get full replay entry
-app.get("/api/v1/admin/narrative/replay/:id", (req, res) => {
-  try {
-    const entry = REPLAY_STORE.getById(req.params.id);
-    if (!entry) return res.status(404).json({ status: "NOT_FOUND", error: "Replay entry not found" });
-    return res.json({ status: "OK", timestamp: Date.now(), data: entry });
-  } catch(e) {
-    return res.status(500).json({ status: "ERROR", error: e.message });
-  }
-});
-
-// R6: POST /api/v1/admin/narrative/simulate-degradation — degradation harness
-app.post("/api/v1/admin/narrative/simulate-degradation", (req, res) =>
-  safeExecuteAsync(async () => {
-    const scenario = (req.body && req.body.scenario) || "PARTIAL_FALLBACK";
-    if (!DEGRADATION_SCENARIOS[scenario]) {
-      return res.status(400).json({ status: "ERROR", error: "Unknown scenario. Valid: " + Object.keys(DEGRADATION_SCENARIOS).join(", ") });
-    }
-    const scenarioCfg = DEGRADATION_SCENARIOS[scenario];
-    const audience = (req.body && req.body.audience) || "IFA Advisory Pitch";
-    const riskProfile = (req.body && req.body.riskProfile) || "Moderate";
-
-    // Simulate: if LLM timeout scenario, temporarily open circuit breaker
-    const wasOpen = LLMCircuitBreaker.isOpen();
-    if (scenarioCfg.simulateLLMTimeout) {
-      // Force circuit breaker open for this generation only
-      for (let i = 0; i < 4; i++) LLMCircuitBreaker.recordFailure();
-    }
-
-    const result = await generateNarrative(audience, riskProfile);
-
-    // Report degradation behavior
-    return res.json({
-      status: "OK",
-      timestamp: Date.now(),
-      scenario,
-      scenarioConfig: scenarioCfg,
-      data: {
-        provider: result.narrativeMeta?.provider,
-        fallbackUsed: result.narrativeMeta?.fallbackUsed,
-        fallbackReason: result.narrativeMeta?.fallbackReason,
-        marketTone: result.marketTone,
-        contradictions: result.narrativeMeta?.contradictions || [],
-        calibrationApplied: result.narrativeMeta?._calibrationApplied || false,
-        circuitBreakerState: LLMCircuitBreaker.getState(),
-        replayId: result.narrativeMeta?.replayId,
-        hasSummary: !!result.summary,
-        hasConfidenceNote: !!result.confidenceNote,
-        governanceViolations: result.narrativeMeta?.governanceViolations || [],
-      }
-    });
-  }, res)
-);
-
-
-// R5: Run narrative regression tests on startup
-try {
-  const _regResult = runNarrativeRegressionTests();
-  logger.info({ job: 'narrative-regression-startup', passed: _regResult.passed, total: _regResult.total, failed: _regResult.failed }, 'Narrative regression suite on startup');
-} catch(e) {
-  logger.warn({ job: 'narrative-regression-startup', err: e.message }, 'Narrative regression startup failed');
-}
-
 // app.listen — server start
 ////////////////////////////////////////////////////////
 
@@ -10512,112 +7685,10 @@ try {
 
 		app.listen(PORT, async () => {
 		  logger.info(`DSS running on port ${PORT} (${VERSION})`);
-
-		  // P7: Governed Monetary Policy Configuration Layer
-		  // Loads monetary-policy.json at startup — authoritative source for India repo rate.
-		  // No reliable zero-cost programmatic source exists from EC2 — governed config is correct architectural choice.
-		  try {
-		    const _mpRaw = require("fs").readFileSync("/home/ubuntu/dss-system/data/monetary-policy.json", "utf8");
-		    const _mpParsed = JSON.parse(_mpRaw);
-		    const _mpIndia = _mpParsed.india || {};
-		    const _mpAgeDays = (Date.now() - new Date(_mpIndia.lastUpdated || "2026-01-01").getTime()) / 86400000;
-		    const _mpIsStale = _mpAgeDays > (_mpIndia.staleAfterDays || 60);
-		    const _mpConf = _mpIsStale ? 0.65 : (_mpIndia.confidence || 0.95);
-		    const _mpPayload = {
-		      repoRate:        _mpIndia.repoRate        || 6.0,
-		      reverseRepoRate: _mpIndia.reverseRepoRate || 3.35,
-		      crr:             _mpIndia.crr             || 4.0,
-		      stance:          _mpIndia.stance          || "NEUTRAL",
-		      rateDirection:   _mpIndia.rateDirection   || "UNKNOWN",
-		      lastChanged:     _mpIndia.lastChanged     || null,
-		      lastUpdated:     _mpIndia.lastUpdated     || null,
-		      policyNote:      _mpIndia.policyNote      || null,
-		      source:          _mpIndia.source          || "governed-config",
-		      ageDays:         Math.round(_mpAgeDays),
-		      isStale:         _mpIsStale,
-		      confidence:      _mpConf,
-		      dataStatus:      _mpIsStale ? "governed-config-stale" : "governed-config",
-		    };
-		    DSSCache.set("monetary:policy", _mpPayload);
-		    logger.info({ repoRate: _mpPayload.repoRate, stance: _mpPayload.stance, ageDays: Math.round(_mpAgeDays), isStale: _mpIsStale }, "Monetary policy config loaded from governed-config");
-		  } catch(e) {
-		    logger.warn({ err: e.message }, "Monetary policy config load failed — hardcoded fallback 6.0");
-		    DSSCache.set("monetary:policy", { repoRate: 6.0, stance: "NEUTRAL", confidence: 0.70, dataStatus: "hardcoded", source: "hardcoded-fallback" });
-		  }
-
-
-		  // P3-4: STARTUP_STATUS — tracks each startup step for observability
-		  const STARTUP_STATUS = {
-		    startedAt:   Date.now(),
-		    version:     VERSION,
-		    yahoo:       'pending',
-		    fred:        'pending',
-		    bls:         'pending',
-		    fedrss:      'pending',
-		    globalMacro: 'pending',
-		    debt:        'pending',
-		    regime:      'pending',
-		    overview:    'pending',
-		    narrative:   'pending',
-		  };
-		  DSSCache.set('startup:status', STARTUP_STATUS);
-		  logger.info({ job: 'startup' }, 'STARTUP_STATUS initialised');
-
 		  // Pre-establish Yahoo session cookie before scheduler jobs fire
 		  try {
 			await getYahooCookie();
 			logger.info("Yahoo session cookie pre-established at startup");
-		  STARTUP_STATUS.yahoo = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'yahoo' }, 'STARTUP_STATUS: yahoo complete');
-                  // FRED: fetch immediately at startup
-                  try {
-                    if (typeof fetchFREDMacro === "function") {
-                      await fetchFREDMacro();
-                      logger.info("FRED macro fetched at startup");
-		  STARTUP_STATUS.fred = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'fred' }, 'STARTUP_STATUS: fred complete');
-                  // BLS: fetch at startup, then daily (monthly data)
-                  try {
-                    if (typeof fetchBLSMacro === "function") {
-                      await fetchBLSMacro();
-                      logger.info("BLS macro fetched at startup");
-		  STARTUP_STATUS.bls = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'bls' }, 'STARTUP_STATUS: bls complete');
-                  // FedRSS: fetch at startup
-                  try {
-                    if (typeof fetchFedRSS === "function") {
-                      await fetchFedRSS();
-                      logger.info("Fed RSS fetched at startup");
-		  STARTUP_STATUS.fedrss = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'fedrss' }, 'STARTUP_STATUS: fedrss complete');
-                  // Global macro: run at startup to populate DXY/crude with floor values
-                  try {
-                    if (typeof buildGlobalMacroPayload === "function") {
-                      await buildGlobalMacroPayload();
-                      logger.info("Global macro payload built at startup");
-		  STARTUP_STATUS.globalMacro = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'globalMacro' }, 'STARTUP_STATUS: globalMacro complete');
-                  // Debt cache: run at startup for immediate population
-                  try {
-                    if (typeof refreshDebtCache === "function") {
-                      await refreshDebtCache();
-                      logger.info("Debt cache built at startup");
-		  STARTUP_STATUS.debt = 'complete'; DSSCache.set('startup:status', STARTUP_STATUS); logger.info({ job: 'startup', step: 'debt' }, 'STARTUP_STATUS: debt complete');
-                    }
-                  } catch(e) {
-                    logger.warn({ err: e.message }, "Debt startup build failed");
-                  }
-                    }
-                  } catch(e) {
-                    logger.warn({ err: e.message }, "Global macro startup build failed");
-                  }
-                    }
-                  } catch(e) {
-                    logger.warn({ err: e.message }, "FedRSS startup fetch failed");
-                  }
-                    }
-                  } catch(e) {
-                    logger.warn({ err: e.message }, "BLS startup fetch failed");
-                  }
-                    }
-                  } catch(e) {
-                    logger.warn({ err: e.message }, "FRED startup fetch failed");
-                  }
 			// Small warm-up delay — let Yahoo session settle before data requests
 			await new Promise(r => setTimeout(r, 10000));
 			// Candle cache now restored from disk (candles-cache.json) — startup Yahoo fetch removed

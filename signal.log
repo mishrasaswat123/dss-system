@@ -1,0 +1,4 @@
+[Signal Engine] Starting...
+[Bus] Subscribing to RAW_TICK
+[Redis] Publisher connected
+[Redis] Subscriber connected

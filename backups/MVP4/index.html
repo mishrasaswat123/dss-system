@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Advisor Brain Terminal</title>
+
+<style>
+body {
+  font-family: Arial;
+  background: #0b1f3a;
+  color: white;
+  padding: 20px;
+}
+
+h1 { margin-bottom: 20px; }
+
+.card {
+  background: #1e3557;
+  padding: 20px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+}
+
+button {
+  width: 100%;
+  padding: 15px;
+  background: linear-gradient(to right,#4facfe,#00f2fe);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 16px;
+}
+
+select {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #a8c6ff;
+}
+
+.summary {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.signal-box {
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 6px;
+  background: #13294b;
+}
+
+.pos { color: #00ffcc; }
+.neg { color: #ff6b6b; }
+.neu { color: #cccccc; }
+</style>
+</head>
+
+<body>
+
+<h1>Advisor Brain Terminal</h1>
+
+<div class="card">
+<h3>Signal Inputs</h3>
+
+<label>Interest Rates</label>
+<select id="rates">
+<option value="rising">rising</option>
+<option value="falling">falling</option>
+</select>
+
+<label>Liquidity</label>
+<select id="liquidity">
+<option value="supportive">supportive</option>
+<option value="tight">tight</option>
+</select>
+
+<label>Crude Oil</label>
+<select id="crude">
+<option value="rising">rising</option>
+<option value="falling" selected>falling</option>
+</select>
+
+<label>FII Flows</label>
+<select id="fii">
+<option value="buying">buying</option>
+<option value="selling">selling</option>
+</select>
+
+<label>VIX</label>
+<select id="vix">
+<option value="low">low</option>
+<option value="high">high</option>
+</select>
+
+<label>Market Trend</label>
+<select id="trend">
+<option value="bullish">bullish</option>
+<option value="bearish">bearish</option>
+<option value="neutral" selected>neutral</option>
+</select>
+
+<button onclick="run()">Run Intelligence</button>
+</div>
+
+<div class="card">
+<h3>Market Summary</h3>
+<div id="summary" class="summary"></div>
+</div>
+
+<div class="card">
+<h3>Signal Heatmap</h3>
+<div id="heatmap"></div>
+</div>
+
+<div class="card">
+<h3>Allocation</h3>
+<div id="allocation"></div>
+</div>
+
+<div class="card">
+<h3>Attribution</h3>
+<div id="attribution"></div>
+</div>
+
+<div class="card">
+<h3>Market Outlook</h3>
+<div id="outlook"></div>
+</div>
+
+<script>
+async function run() {
+
+const payload = {
+rates: document.getElementById("rates").value,
+liquidity: document.getElementById("liquidity").value,
+crude: document.getElementById("crude").value,
+fii: document.getElementById("fii").value,
+vix: document.getElementById("vix").value,
+trend: document.getElementById("trend").value
+};
+
+try {
+
+const res = await fetch("/brain-auto", {
+method: "POST",
+headers: { "Content-Type": "application/json" },
+body: JSON.stringify(payload)
+});
+
+const data = await res.json();
+
+// SUMMARY
+document.getElementById("summary").innerHTML =
+"Regime: " + data.regime + "<br>" +
+"Score: " + data.compositeScore + "<br>" +
+"Confidence: " + data.confidence + "%";
+
+// HEATMAP
+let h = "";
+Object.keys(data.signals || {}).forEach(k => {
+  const s = data.signals[k] || {};
+  let cls = "neu";
+  if (s.score === 1) cls = "pos";
+  if (s.score === -1) cls = "neg";
+
+  h += `
+  <div class="signal-box">
+    <b>${k.toUpperCase()}</b><br>
+    Value: ${s.value}<br>
+    Score: <span class="${cls}">${s.score}</span><br>
+    Weight: ${s.weight}
+  </div>`;
+});
+document.getElementById("heatmap").innerHTML = h;
+
+// ALLOCATION
+let a = "";
+for (let k in data.output) {
+  a += k + " (" + data.output[k] + "%)<br>";
+}
+document.getElementById("allocation").innerHTML = a;
+
+// ATTRIBUTION (FIXED)
+let at = "";
+for (let s in data.attribution) {
+  at += s.toUpperCase() + ": Impact " + data.attribution[s].impact + "<br>";
+}
+document.getElementById("attribution").innerHTML = at;
+
+// OUTLOOK
+document.getElementById("outlook").innerText = data.outlook;
+
+} catch(e) {
+alert("API ERROR: " + e.message);
+}
+
+}
+</script>
+
+</body>
+</html>

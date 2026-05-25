@@ -1,0 +1,47 @@
+server {
+    server_name advisiq.in www.advisiq.in;
+
+    root /var/www/html;
+    index index.html;
+
+    # FRONTEND
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # BACKEND API
+    location /brain-auto {
+        proxy_pass http://127.0.0.1:3000/brain-auto;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/advisiq.in/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/advisiq.in/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+}
+server {
+    if ($host = www.advisiq.in) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = advisiq.in) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name advisiq.in www.advisiq.in;
+    return 404; # managed by Certbot
+
+
+
+
+}

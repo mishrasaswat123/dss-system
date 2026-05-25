@@ -1,0 +1,22 @@
+0|dss      | [12:59:26.150] INFO (379964): fetchNSESectorData: sectors fetched from allIndices
+0|dss      | [13:06:26.713] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:06:33.764] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:06:40.250] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:09:26.141] INFO (379964): fetchNSESectorData: sectors fetched from allIndices
+0|dss      | [13:19:26.143] INFO (379964): fetchNSESectorData: sectors fetched from allIndices
+0|dss      |               at async fetchNSEFlows (/home/ubuntu/dss-system/server.js:1610:2)
+0|dss      | [13:26:26.601] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:26:29.415] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:26:33.757] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:29:26.166] INFO (379964): fetchNSESectorData: sectors fetched from allIndices
+0|dss      | [13:39:26.350] INFO (379964): fetchNSESectorData: sectors fetched from allIndices
+0|dss      | [13:41:56.614] ERROR (379964): safeFetchText failed
+0|dss      |               at async fetchNSEFlows (/home/ubuntu/dss-system/server.js:1610:2)
+0|dss      | [13:41:58.372] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:42:01.140] WARN (379964): fetchWithRetry attempt failed
+0|dss      | [13:42:01.303] WARN (379964): fetchWithRetry attempt failed
+0|dss      | [13:42:04.216] WARN (379964): Crude fetch failed
+0|dss      | [13:46:26.597] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:46:29.434] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:46:33.771] WARN (379964): fetchYahooQuote: no result — serving cache
+0|dss      | [13:46:40.257] WARN (379964): fetchYahooQuote: no result — serving cache
