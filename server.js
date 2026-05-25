@@ -174,6 +174,103 @@ const PROMPT_VERSION = "v1.0.0";
 // NARRATIVE RELIABILITY LAYER — v1.0.0
 // R1: Prompt Provenance Logging
 // R2: Narrative Replay Store (in-memory, admin-only, last 20 entries)
+
+// ── A1/R1: Provenance ring buffer (last 50, no portfolio values) ──
+const PROVENANCE_LOG = (() => {
+  const MAX = 50, buf = [];
+  return {
+    push(e) { buf.push({ ...e, loggedAt: Date.now() }); if (buf.length > MAX) buf.shift(); },
+    getLast(n=10) { return buf.slice(-Math.min(n, MAX)); },
+    getAll() { return [...buf]; },
+    size() { return buf.length; },
+  };
+})();
+
+// ── A2/R2: Replay store (last 20, context snapshots only) ────────
+const REPLAY_STORE = (() => {
+  const MAX = 20, buf = [];
+  return {
+    push(e) { buf.push(e); if (buf.length > MAX) buf.shift(); },
+    getAll() { return [...buf]; },
+    getById(id) { return buf.find(e => e.replayId === id) || null; },
+    size() { return buf.length; },
+  };
+})();
+
+// ── R1: Deterministic replay ID hash ─────────────────────────────
+function narrativeContextHash(ctx, audience, riskProfile, promptVersion) {
+  const s = JSON.stringify({
+    regime: ctx.regime,
+    compositeScore: ctx.compositeScore,
+    confidence: ctx.confidence ? Math.round(ctx.confidence * 1000) / 1000 : null,
+    confidenceClass: ctx.confidenceClass,
+    fallbackModules: (ctx.fallbackModules || []).slice().sort(),
+    degradedModules: (ctx.degradedModules || []).slice().sort(),
+    audience, riskProfile, promptVersion,
+  });
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+  return 'nr_' + h.toString(16).padStart(8, '0');
+}
+
+// ── A2: Circuit breaker persistence helpers ───────────────────────
+function persistCBState(failures, isOpen) {
+  try {
+    db.run('UPDATE circuit_breaker_state SET failures=?,is_open=?,last_failure=?,updated_at=? WHERE id=1',
+      [failures, isOpen?1:0, isOpen?Date.now():null, Date.now()],
+      (err) => { if (err) logger.warn({ err: err.message }, 'CB state persist failed'); });
+  } catch(e) { logger.warn({ err: e.message }, 'CB persist threw'); }
+}
+function loadCBState() {
+  return new Promise((resolve) => {
+    db.get('SELECT * FROM circuit_breaker_state WHERE id=1', (err, row) => {
+      if (err||!row) { resolve({ failures:0, isOpen:false }); return; }
+      resolve({ failures: row.failures||0, isOpen: !!row.is_open });
+    });
+  });
+}
+
+// ── A1: Log provenance — in-memory + SQLite ───────────────────────
+function logNarrativeProvenance(e) {
+  const entry = {
+    replayId: e.replayId, audience: e.audience, riskProfile: e.riskProfile,
+    provider: e.provider, model: e.model||'rulebased', promptVersion: e.promptVersion,
+    regime: e.regime, confidenceClass: e.confidenceClass,
+    fallbackUsed: !!e.fallbackUsed, fallbackReason: e.fallbackReason||null,
+    latencyMs: Math.round(e.latencyMs||0),
+    governanceViolations: e.governanceViolations||[],
+    contradictions: e.contradictions||[],
+    uncertaintyActive: !!e.uncertaintyActive, reversalActive: !!e.reversalActive,
+    fgsSanitizations: e.fgsSanitizations||0, degradationActive: !!e.degradationActive,
+    calibrationApplied: !!e.calibrationApplied,
+  };
+  PROVENANCE_LOG.push(entry);
+  logger.info({ job:'narrative-provenance', replayId:entry.replayId, provider:entry.provider,
+    fallback:entry.fallbackUsed, contradictions:entry.contradictions.length,
+    latencyMs:entry.latencyMs }, 'Narrative provenance logged');
+  try {
+    db.run(
+      `INSERT INTO narrative_provenance
+       (replay_id,audience,risk_profile,provider,model,prompt_version,regime,
+        confidence_class,fallback_used,fallback_reason,latency_ms,
+        contradiction_count,contradiction_ids,uncertainty_active,reversal_active,
+        fgs_sanitizations,degradation_active,calibration_applied,logged_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [entry.replayId,entry.audience||null,entry.riskProfile||null,
+       entry.provider||null,entry.model||'rulebased',entry.promptVersion||null,
+       entry.regime||null,entry.confidenceClass||null,entry.fallbackUsed?1:0,
+       entry.fallbackReason||null,entry.latencyMs,
+       (entry.contradictions||[]).length,
+       JSON.stringify((entry.contradictions||[]).map(c=>c.id||c)),
+       entry.uncertaintyActive?1:0,entry.reversalActive?1:0,
+       entry.fgsSanitizations||0,entry.degradationActive?1:0,
+       entry.calibrationApplied?1:0,Date.now()],
+      (err) => { if (err) logger.warn({ err:err.message }, 'Provenance SQLite write failed'); }
+    );
+  } catch(err) { logger.warn({ err:err.message }, 'Provenance SQLite write threw'); }
+  return entry;
+}
+
 // A5: Hardened Contradiction Detection (7 rules, expanded keyword sets)
 const CONTRADICTION_RULES = [
   { id: 'C1_BULLISH_CAUTIOUS_MISMATCH',
