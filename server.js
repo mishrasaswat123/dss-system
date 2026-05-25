@@ -896,7 +896,7 @@ MARKET STATE:
 - Action Bias: ${ctx.actionBias||"Balanced"} | Volatility: ${ctx.volatilityState||"unknown"}
 - Signal Basis: ${ctx.reasoningChain||"insufficient data"}
 - Risk Flags: ${(ctx.riskFlags||[]).join(", ")||"none"}
-- Macro: Repo ${ctx.macroState?.repoRate||"n/a"}% | US 10Y ${ctx.macroState?.us10Y||"n/a"}% | DXY ${ctx.macroState?.dxy||"n/a"} | Brent $${ctx.macroState?.crudeBrent||"n/a"} | Fed ${ctx.macroState?.fedStance||"n/a"} | Yield Curve ${ctx.macroState?.yieldCurve||"n/a"}
+- Macro: ${[ctx.macroState?.repoRate!=null?"Repo "+ctx.macroState.repoRate+"%":null, ctx.macroState?.us10Y!=null?"US 10Y "+ctx.macroState.us10Y+"%":null, ctx.macroState?.dxy!=null?"DXY "+ctx.macroState.dxy:null, ctx.macroState?.crudeBrent!=null?"Brent $"+ctx.macroState.crudeBrent:null, ctx.macroState?.fedStance?"Fed "+ctx.macroState.fedStance:null, ctx.macroState?.yieldCurve?"Yield Curve "+ctx.macroState.yieldCurve:null].filter(Boolean).join(" | ")||"Macro data limited"}
 ${degradedNote}
 
 REGIME FRAME: ${regimeFrame}${ctx.stabilityHint || ""}
