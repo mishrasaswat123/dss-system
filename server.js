@@ -2093,6 +2093,24 @@ const _AO_CONFIG = {
   baseUrl: 'https://apiconnect.angelone.in',
 };
 const _aoSession = { jwtToken:null, refreshToken:null, feedToken:null, expiresAt:0, loginInProgress:false };
+// T4: SmartAPI observability tracking
+const _aoObs = {
+  loginStatus: 'NOT_ATTEMPTED',   // NOT_ATTEMPTED | SUCCESS | FAILED
+  lastLoginAt: null,
+  lastLoginFailAt: null,
+  lastLoginFailReason: null,
+  loginAttempts: 0,
+  quoteStatus: 'UNKNOWN',         // UNKNOWN | OK | FAILED
+  lastQuoteAt: null,
+  lastQuoteFailAt: null,
+  optionChainStatus: 'UNKNOWN',
+  lastOptionChainAt: null,
+  lastOptionChainFailAt: null,
+  pcrStatus: 'UNKNOWN',
+  lastPcrAt: null,
+  india10yStatus: 'UNKNOWN',
+  lastIndia10yAt: null,
+};
 function _aoGenerateTotp() { return _aoSpeakeasy.totp({ secret:_AO_CONFIG.totpSecret, encoding:'base32' }); }
 async function _aoLogin() {
   if (_aoSession.loginInProgress) { await new Promise(r=>setTimeout(r,3000)); return _aoSession.jwtToken!==null; }
@@ -2109,6 +2127,7 @@ async function _aoLogin() {
     if(data.status===true&&data.data&&data.data.jwtToken){
       _aoSession.jwtToken=data.data.jwtToken; _aoSession.refreshToken=data.data.refreshToken;
       _aoSession.feedToken=data.data.feedToken; _aoSession.expiresAt=Date.now()+55*60*1000;
+      _aoObs.loginStatus='SUCCESS'; _aoObs.lastLoginAt=Date.now(); _aoObs.loginAttempts++;
       logger.info({job:'ao-login',status:'SUCCESS',ts:Date.now()});
       return true;
     }
@@ -4867,8 +4886,15 @@ function fgsSanitize(narrative, narrativeMeta, brainLatest) {
 ////////////////////////////////////////////////////////
 
 function computeRegimeDurability(memory, moduleScores) {
-  if (!memory || !Array.isArray(memory.signalsHistory) || memory.signalsHistory.length < 3) {
-    return { durabilityScore: 0.15, durabilityClass: 'EMERGING' };
+  // T5: Proportional degradation — insufficient history returns graduated score, not binary 0.15
+  if (!memory || !Array.isArray(memory.signalsHistory)) {
+    return { durabilityScore: 0.10, durabilityClass: 'EMERGING', durabilityFallback: true, fallbackReason: 'NO_MEMORY' };
+  }
+  if (memory.signalsHistory.length < 3) {
+    // Proportional: 0 entries = 0.10, 1 entry = 0.13, 2 entries = 0.16
+    const partialScore = 0.10 + (memory.signalsHistory.length * 0.03);
+    return { durabilityScore: Math.round(partialScore * 1000)/1000, durabilityClass: 'EMERGING',
+      durabilityFallback: true, fallbackReason: 'INSUFFICIENT_HISTORY_' + memory.signalsHistory.length };
   }
   const cycles = typeof memory.cyclesSinceChange === 'number' ? memory.cyclesSinceChange : 0;
   const ageScore = Math.min(1.0, cycles / 20);
@@ -4901,7 +4927,7 @@ function computeRegimeDurability(memory, moduleScores) {
   else if (durabilityScore >= 0.50) durabilityClass = 'ESTABLISHED';
   else if (durabilityScore >= 0.25) durabilityClass = 'CONFIRMING';
   else                              durabilityClass = 'EMERGING';
-  return { durabilityScore, durabilityClass };
+  return { durabilityScore, durabilityClass, durabilityFallback: false, fallbackReason: null };
 }
 
 ////////////////////////////////////////////////////////
@@ -9579,7 +9605,7 @@ app.post("/api/v1/advisory/brief", (req, res) =>
       portfolioContext:   _hasPortfolio ? (_pce ? 'OK' : 'INVALID_INPUT') : 'NOT_PROVIDED',
       advisoryCognition: _acl ? 'OK' : (_hasPortfolio && _pce ? 'ERROR' : 'SKIPPED'),
       convictionEngine:  _convFull ? 'OK' : 'FALLBACK',
-      durabilityEngine:  _durScore > 0.15 ? 'OK' : 'FALLBACK'
+      durabilityEngine:  _durScore > 0.20 ? 'OK' : _durScore > 0.10 ? 'PARTIAL_DEGRADED' : 'FALLBACK'
     };
 
     // Privacy: log mismatchClass only, never allocation values
@@ -9792,6 +9818,19 @@ app.get("/health", (req, res) => {
                         const _st2=Object.values(_enhSrc).filter(s=>s.status==="STALE"||s.status==="DOWN").length;
                         return res.json({
                           status:overallStatus,version:VERSION,release:RELEASE_TAG,
+                          smartapi:{
+                            loginStatus: _aoObs.loginStatus,
+                            jwtActive: !!(_aoSession.jwtToken && Date.now() < _aoSession.expiresAt),
+                            jwtExpiresAt: _aoSession.expiresAt || null,
+                            quoteStatus: _aoObs.quoteStatus,
+                            optionChainStatus: _aoObs.optionChainStatus,
+                            pcrStatus: _aoObs.pcrStatus,
+                            india10yStatus: _aoObs.india10yStatus,
+                            lastLoginAt: _aoObs.lastLoginAt,
+                            lastLoginFailAt: _aoObs.lastLoginFailAt,
+                            lastLoginFailReason: _aoObs.lastLoginFailReason,
+                            loginAttempts: _aoObs.loginAttempts,
+                          },
                           uptime:Math.round(process.uptime()),timestamp:now,
                           sources:_enhSrc,
                           confidence:_sc2?{overall:_sc2.overall,classification:_sc2.classification,fallbackModules:_sc2.fallbackModules,staleModules:_sc2.staleModules,drivers:_sc2.drivers}:null,
@@ -10527,6 +10566,32 @@ LLMCircuitBreaker.restoreFromDB().then(() => {
   logger.info({ job:'startup', cbState:LLMCircuitBreaker.getState() }, 'CB state restored from DB');
 }).catch(e => logger.warn({ err:e.message }, 'CB restore failed'));
 
+
+// ── T2: SmartAPI credential startup validation ───────────────────
+(function validateSmartAPICredentials() {
+  const required = {
+    AO_API_KEY:    process.env.AO_API_KEY,
+    AO_CLIENT_ID:  process.env.AO_CLIENT_ID,
+    AO_MPIN:       process.env.AO_MPIN,
+    AO_TOTP_SECRET: process.env.AO_TOTP_SECRET,
+  };
+  const missing = Object.entries(required).filter(([k,v]) => !v || v.trim() === '').map(([k]) => k);
+  if (missing.length > 0) {
+    logger.error({ job: 'startup-validation', missing, severity: 'CRITICAL' },
+      'CRITICAL: SmartAPI credentials missing — derivatives/PCR/options data will be unavailable. Set: ' + missing.join(', '));
+  } else {
+    // Governance validation: AO_API_KEY must be short web API key, NOT a UUID
+    const apiKey = process.env.AO_API_KEY;
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(apiKey);
+    if (isUUID) {
+      logger.error({ job: 'startup-validation', severity: 'CRITICAL' },
+        'CRITICAL: AO_API_KEY appears to be a UUID — this is NOT a valid SmartAPI web API key. SmartAPI requires the short web API key (e.g. Wx8NxgDH), NOT the application UUID.');
+    } else {
+      logger.info({ job: 'startup-validation', keyLength: apiKey.length }, 'SmartAPI credentials present and valid format');
+    }
+  }
+})();
+
 // app.listen — server start
 ////////////////////////////////////////////////////////
 
@@ -10636,6 +10701,9 @@ process.on("uncaughtException", (err) => {
 		    regime:      'pending',
 		    overview:    'pending',
 		    narrative:   'pending',
+		    repoRateSource: (() => { const mp = DSSCache.get('monetary:policy'); return mp ? mp.source : 'not-loaded'; })(),
+		    repoRate:       (() => { const mp = DSSCache.get('monetary:policy'); return mp ? mp.repoRate : null; })(),
+		    repoRateStale:  (() => { const mp = DSSCache.get('monetary:policy'); return mp ? mp.isStale : null; })(),
 		  };
 		  DSSCache.set('startup:status', STARTUP_STATUS);
 		  logger.info({ job: 'startup' }, 'STARTUP_STATUS initialised');
