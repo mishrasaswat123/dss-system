@@ -9787,13 +9787,26 @@ app.get("/health", (req, res) => {
 			  };
 			}
 
-			// Overall status derived from sources
+			// Overall status — datasource hierarchy-aware severity governance
+			// Primary: NSE, RBI, MOSPI, FRED, BLS, FedRSS (authoritative)
+			// Secondary: Yahoo (fallback-grade — staleness does not escalate to DEGRADED)
+			const PRIMARY_SOURCES = ['NSE','RBI','MOSPI','FRED','BLS','FedRSS'];
+			const SECONDARY_SOURCES = ['Yahoo'];
 			const sourceStatuses = Object.values(sources).map(s => s.status);
+			const primarySourceStatuses = PRIMARY_SOURCES.map(n => (sources[n] && sources[n].status) || 'UNKNOWN');
+			const secondarySourceStatuses = SECONDARY_SOURCES.map(n => (sources[n] && sources[n].status) || 'UNKNOWN');
+			const primaryDown = primarySourceStatuses.filter(s => s === 'DOWN').length;
+			const primaryStale = primarySourceStatuses.filter(s => s === 'STALE').length;
+			const secondaryDegraded = secondarySourceStatuses.some(s => s === 'DOWN' || s === 'STALE');
 			let overallStatus = "OK";
-			if (sourceStatuses.every(s => s === "DOWN" || s === "UNKNOWN")) {
+			if (primarySourceStatuses.every(s => s === "DOWN" || s === "UNKNOWN")) {
 			  overallStatus = "DOWN";
-			} else if (sourceStatuses.some(s => s === "DOWN" || s === "STALE")) {
+			} else if (primaryDown >= 2 || (primaryDown >= 1 && primaryStale >= 1)) {
 			  overallStatus = "DEGRADED";
+			} else if (primaryDown === 1 || primaryStale >= 2) {
+			  overallStatus = "PARTIAL_DEGRADED";
+			} else if (primaryStale === 1 || secondaryDegraded) {
+			  overallStatus = "HEALTHY_WITH_WARNINGS";
 			}
 
 			// Alerts — simple rule-based
@@ -9802,7 +9815,8 @@ app.get("/health", (req, res) => {
 			  if (info.status === "DOWN") {
 				alerts.push({ code: "FETCH_FAILURE_REPEATED", severity: "CRITICAL", source: sourceName });
 			  } else if (info.status === "STALE") {
-				alerts.push({ code: "STALE_THRESHOLD_BREACH", severity: "HIGH", source: sourceName });
+				const _alertSev = SECONDARY_SOURCES.includes(sourceName) ? "LOW" : "HIGH";
+				alerts.push({ code: "STALE_THRESHOLD_BREACH", severity: _alertSev, source: sourceName });
 			  }
 			}
 
