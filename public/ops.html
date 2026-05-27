@@ -2,233 +2,287 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="theme-color" content="#080c14">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#06080f">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>ADVISIQ · OPS</title>
+<title>ADVISIQ OPS</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@400;500;600;700&display=swap');
-:root{--bg:#080c14;--s1:#0d1220;--s2:#121829;--b1:#1e2a3a;--b2:#2a3a50;--tx:#e2e8f0;--tm:#94a3b8;--td:#4a5568;--ac:#3b82f6;--ad:#1d4ed8;--ab:#0f1f3d;--gn:#10b981;--gb:#062318;--am:#f59e0b;--ax:#1f1500;--rd:#ef4444;--rb:#1f0a0a;--pu:#a855f7;--pb:#1a0f2a;--mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif}
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:14px;line-height:1.5;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+:root{
+  --bg:#06080f;--s1:#0a0e1a;--s2:#0f1424;--s3:#141928;
+  --b1:#1a2235;--b2:#223050;--b3:#2d3f65;
+  --tx:#dde4f0;--t2:#8898b8;--t3:#4a5878;
+  --ac:#4080ff;--ac2:#2860e0;--acb:#0a1835;
+  --gn:#18c97a;--gnb:#081f12;--gn2:#0fa860;
+  --am:#f0a020;--amb:#1a1000;--am2:#c88010;
+  --rd:#e03040;--rdb:#1a0508;
+  --pu:#8050e0;--pub:#110828;
+  --mono:'SF Mono','Fira Code','JetBrains Mono',monospace;
+  --ui:'SF Pro Display',-apple-system,'Helvetica Neue',sans-serif;
+  --r:10px;--r2:14px;--r3:20px;
+  --sh:0 4px 24px rgba(0,0,0,.4);
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-family:var(--ui);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
 
-/* AUTH */
-#auth{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;z-index:1000}
-.auth-logo{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--td);margin-bottom:40px}.auth-logo span{color:var(--ac)}
-.auth-title{font-size:20px;font-weight:600;margin-bottom:6px;text-align:center}.auth-sub{font-size:12px;color:var(--td);margin-bottom:28px;text-align:center;font-family:var(--mono)}
-.auth-in{width:100%;max-width:320px;background:var(--s1);border:1px solid var(--b2);border-radius:8px;padding:14px 16px;font-family:var(--mono);font-size:14px;color:var(--tx);outline:none;margin-bottom:10px}
-.auth-in:focus{border-color:var(--ac)}.auth-btn{width:100%;max-width:320px;background:var(--ac);border:none;border-radius:8px;padding:14px;font-family:var(--sans);font-size:14px;font-weight:600;color:white;cursor:pointer}
-.auth-err{color:var(--rd);font-family:var(--mono);font-size:11px;margin-top:8px}
+/* ── CLIPBOARD HELPER ── */
+#_cp{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0}
 
-/* APP */
-#app{display:none;height:100vh;flex-direction:column;overflow:hidden}
+/* ── AUTH ── */
+#auth{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 28px;z-index:999}
+.auth-mark{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--t3);margin-bottom:48px}
+.auth-mark b{color:var(--ac)}
+.auth-h{font-size:22px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px}
+.auth-s{font-family:var(--mono);font-size:11px;color:var(--t3);margin-bottom:36px}
+.auth-in{width:100%;max-width:300px;background:var(--s2);border:1.5px solid var(--b2);border-radius:var(--r2);padding:15px 18px;font-family:var(--mono);font-size:14px;color:var(--tx);outline:none;letter-spacing:.08em;margin-bottom:10px}
+.auth-in:focus{border-color:var(--ac)}
+.auth-btn{width:100%;max-width:300px;height:52px;background:var(--ac);border:none;border-radius:var(--r2);font-family:var(--ui);font-size:15px;font-weight:700;color:#fff;cursor:pointer;letter-spacing:.01em}
+.auth-btn:active{background:var(--ac2)}
+.auth-err{font-family:var(--mono);font-size:11px;color:var(--rd);margin-top:10px;min-height:18px}
+
+/* ── LAYOUT ── */
+#app{display:none;height:100%;flex-direction:column}
 #app.on{display:flex}
+.bar{flex-shrink:0;height:52px;background:var(--s1);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 14px;gap:8px}
+.bar-logo{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--t3);flex:1}
+.bar-logo b{color:var(--ac)}
+.bar-time{font-family:var(--mono);font-size:11px;color:var(--t3)}
+.bar-btn{height:34px;padding:0 12px;background:var(--s2);border:1px solid var(--b2);border-radius:8px;font-family:var(--mono);font-size:10px;color:var(--t2);cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:5px;letter-spacing:.04em}
+.bar-btn:active{background:var(--b1)}
+.bar-btn.primary{background:var(--acb);border-color:var(--ac2);color:var(--ac);font-weight:600}
+.bar-btn.primary:active{background:var(--b1)}
 
-/* TOPBAR */
-.topbar{display:flex;align-items:center;padding:10px 14px 8px;border-bottom:1px solid var(--b1);background:var(--bg);flex-shrink:0;gap:8px}
-.topbar-logo{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--td);flex:1}.topbar-logo span{color:var(--ac)}
-.topbar-time{font-family:var(--mono);font-size:11px;color:var(--td)}
-.tbtn{background:none;border:1px solid var(--b2);border-radius:6px;padding:5px 9px;font-family:var(--mono);font-size:10px;color:var(--td);cursor:pointer;flex-shrink:0}
-.tbtn:active{background:var(--s1)}
-.tbtn-daily{background:var(--ab);border-color:var(--ad);color:var(--ac)}
-
-/* TABS */
-.tabs{display:flex;border-bottom:1px solid var(--b1);background:var(--bg);flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+/* ── TABS ── */
+.tabs{flex-shrink:0;background:var(--s1);border-bottom:1px solid var(--b1);display:flex;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tab{flex:1;min-width:60px;padding:9px 3px 7px;display:flex;flex-direction:column;align-items:center;gap:2px;font-family:var(--mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--td);cursor:pointer;border-bottom:2px solid transparent;transition:color .15s,border-color .15s;white-space:nowrap}
-.tab.on{color:var(--ac);border-bottom-color:var(--ac)}.tab-ico{font-size:15px}
-.tab-badge{background:var(--rd);color:white;font-size:9px;font-weight:700;border-radius:8px;padding:1px 5px;min-width:16px;text-align:center;display:none}
-.tab-badge.on{display:inline-block}
+.tab{flex:1;min-width:56px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);border-bottom:2px solid transparent;cursor:pointer;transition:color .12s,border-color .12s;position:relative;padding:0 4px}
+.tab.on{color:var(--ac);border-bottom-color:var(--ac)}
+.tab-ico{font-size:14px;line-height:1}
+.badge{position:absolute;top:6px;right:6px;background:var(--rd);color:#fff;font-size:8px;font-weight:700;border-radius:6px;padding:1px 4px;min-width:14px;text-align:center;display:none}
+.badge.on{display:block}
 
-/* SCROLL */
-.pane{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 0 80px}
+/* ── SCROLL BODY ── */
+.body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:72px}
 
-/* SECTION HEAD */
-.sh{padding:12px 12px 6px;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--td);display:flex;align-items:center;justify-content:space-between}
-.sc{background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:2px 7px;font-size:10px;color:var(--tm)}
+/* ── SECTION ── */
+.sec{padding:12px 12px 4px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;justify-content:space-between}
+.sec-ct{background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:2px 6px;font-size:9px;color:var(--t2)}
 
-/* BRIEF CARD */
-.brief{margin:10px 10px 0;background:var(--ab);border:1px solid var(--ad);border-radius:12px;padding:14px}
-.brief-date{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ac);margin-bottom:10px}
-.brief-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
-.bst{background:rgba(0,0,0,.3);border-radius:8px;padding:9px 6px;text-align:center}
-.bst-v{font-family:var(--mono);font-size:20px;font-weight:700;line-height:1;color:var(--tx)}.bst-v.rd{color:var(--rd)}.bst-v.gn{color:var(--gn)}.bst-v.am{color:var(--am)}
-.bst-l{font-family:var(--mono);font-size:9px;color:var(--td);margin-top:2px;letter-spacing:.06em;text-transform:uppercase}
-.brief-lines{display:flex;flex-direction:column;gap:3px}
-.brief-line{font-family:var(--mono);font-size:11px;color:var(--tm);padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)}
-.brief-line:last-child{border-bottom:none}
+/* ── BRIEF CARD ── */
+.brief{margin:10px 10px 0;background:var(--acb);border:1px solid var(--b2);border-radius:var(--r2);padding:14px}
+.brief-day{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--ac);margin-bottom:10px}
+.brief-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.bstat{background:rgba(0,0,0,.25);border-radius:8px;padding:10px 8px;text-align:center}
+.bstat-n{font-family:var(--mono);font-size:22px;font-weight:700;line-height:1;color:var(--tx)}
+.bstat-n.red{color:var(--rd)}.bstat-n.grn{color:var(--gn)}.bstat-n.amb{color:var(--am)}
+.bstat-l{font-family:var(--mono);font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-top:3px}
+.brief-lines{border-top:1px solid rgba(255,255,255,.06);padding-top:8px;display:flex;flex-direction:column;gap:3px}
+.brief-line{font-family:var(--mono);font-size:10px;color:var(--t2)}
 
-/* QUEUE/FEED CARDS */
-.qcard{margin:6px 10px 0;border-radius:10px;overflow:hidden;position:relative;transform:translateX(0);transition:transform .2s,opacity .2s}
-.qcard.sw-r{transform:translateX(100%);opacity:0}.qcard.sw-l{transform:translateX(-100%);opacity:0}
-.qcard-body{padding:11px 12px 8px;display:flex;align-items:flex-start;gap:10px}
-.qcard-ico{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:1px}
-.qcard-info{flex:1;min-width:0}
-.qcard-title{font-size:13px;font-weight:600;color:var(--tx);line-height:1.3;margin-bottom:2px}
-.qcard-sub{font-family:var(--mono);font-size:10px;color:var(--td);letter-spacing:.03em}
-.qcard-note{padding:0 12px 6px;font-size:12px;color:var(--td);line-height:1.4;font-style:italic}
-/* chips row */
-.qcard-chips{padding:0 12px 8px;display:flex;gap:5px;flex-wrap:wrap}
-.qchip{font-family:var(--mono);font-size:10px;padding:5px 11px;border-radius:5px;border:1px solid;cursor:pointer;white-space:nowrap;min-height:32px;display:inline-flex;align-items:center;letter-spacing:.04em}
-.qchip:active{opacity:.7}
-.qc-copy{background:var(--ab);color:var(--ac);border-color:var(--ad)}
-.qc-open{background:rgba(245,158,11,.1);color:var(--am);border-color:#92400e}
-.qc-both{background:var(--ab);color:var(--ac);border-color:var(--ad)}
-.qc-sent{background:var(--gb);color:var(--gn);border-color:#065f46}
-.qc-accepted{background:var(--gb);color:var(--gn);border-color:#065f46}
-.qc-demo{background:var(--ax);color:var(--am);border-color:#92400e}
-.qc-close{background:var(--rb);color:var(--rd);border-color:#7f1d1d}
-.qc-snooze{background:transparent;color:var(--td);border-color:var(--b1)}
-/* urgency */
-.uc-urgent{background:var(--rb);border:1px solid #7f1d1d}
-.uc-today{background:var(--s1);border:1px solid var(--b2)}
-.uc-cohort{background:var(--gb);border:1px solid #065f46}
-.uc-intel{background:var(--pb);border:1px solid #6b21a8}
-.uc-passive{background:var(--s2);border:1px solid var(--b1)}
-.ico-urgent{background:rgba(200,60,60,.2)}.ico-action{background:rgba(45,95,138,.25)}.ico-cohort{background:rgba(20,100,70,.2)}
+/* ── CARDS ── */
+.card{margin:6px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);overflow:hidden}
+.card.urgent{background:var(--rdb);border-color:#5a1020}
+.card.cohort{background:var(--gnb);border-color:#0a4020}
+.card.intel{background:var(--pub);border-color:#2a1060}
+.card-top{padding:12px 14px 8px;display:flex;align-items:flex-start;gap:10px}
+.card-av{width:34px;height:34px;border-radius:9px;background:var(--acb);border:1px solid var(--b2);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ac);flex-shrink:0}
+.card-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.card-ic-urgent{background:rgba(200,40,60,.2)}.card-ic-action{background:var(--acb)}.card-ic-cohort{background:rgba(10,100,50,.2)}
+.card-info{flex:1;min-width:0}
+.card-name{font-size:14px;font-weight:600;color:var(--tx);line-height:1.3;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-sub{font-family:var(--mono);font-size:10px;color:var(--t3);letter-spacing:.03em}
+.card-stage{font-family:var(--mono);font-size:9px;padding:3px 7px;border-radius:4px;flex-shrink:0;white-space:nowrap;align-self:flex-start}
+.cs-src{background:var(--s3);color:var(--t2);border:1px solid var(--b1)}
+.cs-sent{background:var(--acb);color:var(--ac);border:1px solid var(--ac2)}
+.cs-demo{background:var(--amb);color:var(--am);border:1px solid #604008}
+.cs-beta{background:var(--gnb);color:var(--gn);border:1px solid #085030}
+.cs-done{background:var(--s3);color:var(--t3);border:1px solid var(--b1)}
+.card-note{padding:0 14px 8px;font-size:12px;color:var(--t3);line-height:1.4;font-style:italic}
+.card-warn{margin:0 14px 8px;background:rgba(240,160,32,.08);border:1px solid rgba(240,160,32,.25);border-radius:6px;padding:6px 10px;font-family:var(--mono);font-size:10px;color:var(--am)}
 
-/* PLACEHOLDER WARNING */
-.ph-warn{margin:0 12px 8px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:7px 10px;font-family:var(--mono);font-size:10px;color:var(--am);display:none}
-.ph-warn.on{display:block}
+/* ── ACTION STRIP ── */
+.actions{padding:0 14px 12px;display:flex;gap:6px;flex-wrap:wrap}
+/* All action buttons min 44px height for thumb certainty */
+.btn{min-height:44px;padding:0 14px;border-radius:8px;border:1px solid;cursor:pointer;font-family:var(--mono);font-size:11px;letter-spacing:.04em;display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;-webkit-user-select:none;user-select:none}
+.btn:active{opacity:.75;transform:scale(.97)}
+.btn-copy{background:var(--acb);color:var(--ac);border-color:var(--ac2)}
+.btn-open{background:var(--amb);color:var(--am);border-color:#604008}
+.btn-both{background:var(--acb);color:var(--ac);border-color:var(--ac);font-weight:700}
+.btn-done{background:var(--gnb);color:var(--gn);border-color:#085030;font-weight:600}
+.btn-adv{background:var(--gnb);color:var(--gn);border-color:#085030}
+.btn-snooze{background:var(--s3);color:var(--t2);border-color:var(--b1)}
+.btn-close{background:var(--rdb);color:var(--rd);border-color:#5a1020}
+.btn-note{background:var(--pub);color:var(--pu);border-color:#3a1880}
+.btn-full{flex:1}
 
-/* RECENT COPY TRAY */
-#copy-tray{position:fixed;bottom:68px;left:8px;right:8px;background:var(--s2);border:1px solid var(--b2);border-radius:10px;padding:10px 12px;z-index:150;display:none;box-shadow:0 8px 32px rgba(0,0,0,.5)}
-#copy-tray.on{display:block}
-.ct-head{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--td);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
-.ct-close{cursor:pointer;color:var(--td);font-size:16px;line-height:1}
-.ct-item{background:var(--s1);border:1px solid var(--b1);border-radius:6px;padding:8px 10px;margin-bottom:5px;display:flex;align-items:center;gap:8px;cursor:pointer}
-.ct-item:last-child{margin-bottom:0}
-.ct-item:active{background:var(--ab)}
-.ct-label{font-family:var(--mono);font-size:10px;color:var(--ac);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.ct-recopy{font-family:var(--mono);font-size:10px;color:var(--td);flex-shrink:0}
+/* ── SWIPE ── */
+.swipeable{transition:transform .18s ease,opacity .18s ease}
+.sw-out-r{transform:translateX(110%);opacity:0}
+.sw-out-l{transform:translateX(-110%);opacity:0}
+.swipe-hint{padding:2px 14px 0;font-family:var(--mono);font-size:9px;color:var(--t3);display:flex;justify-content:space-between;letter-spacing:.05em;opacity:.6}
 
-/* NOTES MODAL */
-#notes-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:flex-end}
-#notes-modal.on{display:flex}
-.notes-sheet{background:var(--s1);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;border-top:1px solid var(--b2)}
-.notes-title{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ac);margin-bottom:12px}
-.notes-in{width:100%;background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:12px;color:var(--tx);font-family:var(--mono);font-size:13px;outline:none;resize:none;height:80px}
-.notes-in:focus{border-color:var(--ac)}
-.notes-btns{display:flex;gap:8px;margin-top:10px}
-.notes-save{flex:1;background:var(--ac);border:none;border-radius:7px;padding:12px;font-family:var(--sans);font-size:13px;font-weight:600;color:white;cursor:pointer}
-.notes-cancel{background:transparent;border:1px solid var(--b2);border-radius:7px;padding:12px 16px;font-family:var(--mono);font-size:12px;color:var(--td);cursor:pointer}
-
-/* DAILY MODE */
-#daily-mode{position:fixed;inset:0;background:var(--bg);z-index:300;display:none;flex-direction:column}
-#daily-mode.on{display:flex}
-.dm-bar{background:var(--s1);border-bottom:1px solid var(--b1);padding:12px 16px;display:flex;align-items:center;gap:10px}
-.dm-title{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ac);flex:1}
-.dm-exit{font-family:var(--mono);font-size:10px;background:transparent;border:1px solid var(--b2);border-radius:6px;padding:6px 12px;color:var(--td);cursor:pointer}
-.dm-progress{height:3px;background:var(--b1);flex-shrink:0}
-.dm-prog-fill{height:100%;background:var(--ac);transition:width .3s ease}
-.dm-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px}
-.dm-label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--td);margin-bottom:8px}
-.dm-count{font-family:var(--mono);font-size:14px;color:var(--tm);margin-bottom:24px}
-.dm-card{background:var(--s1);border:1px solid var(--b2);border-radius:12px;width:100%;max-width:400px;overflow:hidden}
-.dm-card-head{padding:14px 16px;border-bottom:1px solid var(--b1)}
-.dm-name{font-size:16px;font-weight:600;color:var(--tx)}
-.dm-meta{font-family:var(--mono);font-size:11px;color:var(--td);margin-top:3px}
-.dm-note{padding:10px 16px;font-size:13px;color:var(--td);border-bottom:1px solid var(--b1);font-style:italic}
-.dm-actions{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
-.dm-copy{background:var(--ac);border:none;border-radius:8px;padding:13px;font-family:var(--sans);font-size:14px;font-weight:600;color:white;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
-.dm-open{background:rgba(245,158,11,.1);border:1px solid #92400e;border-radius:8px;padding:11px;font-family:var(--mono);font-size:12px;color:var(--am);cursor:pointer;text-align:center}
-.dm-row{display:flex;gap:8px}
-.dm-sent{flex:1;background:var(--gb);border:1px solid #065f46;border-radius:8px;padding:11px;font-family:var(--mono);font-size:12px;color:var(--gn);cursor:pointer;text-align:center}
-.dm-skip{background:transparent;border:1px solid var(--b2);border-radius:8px;padding:11px 16px;font-family:var(--mono);font-size:12px;color:var(--td);cursor:pointer}
-.dm-done{padding:32px 16px;text-align:center}
-.dm-done-ico{font-size:40px;margin-bottom:12px}
-.dm-done-title{font-size:18px;font-weight:600;color:var(--gn);margin-bottom:6px}
-.dm-done-sub{font-family:var(--mono);font-size:11px;color:var(--td);line-height:1.6}
-/* LOW ENERGY MODE */
-.dm-low{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:11px;font-family:var(--mono);font-size:11px;color:var(--am);cursor:pointer;text-align:center;margin-bottom:12px}
-
-/* TEMPLATE ENGINE */
-.tpl-group{margin:6px 10px 0;background:var(--s1);border:1px solid var(--b2);border-radius:10px;overflow:hidden}
-.tpl-group-head{padding:9px 14px;background:var(--ab);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--b2)}
-.tpl-group-title{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ac);letter-spacing:.08em;text-transform:uppercase}
-.tpl-group-count{font-family:var(--mono);font-size:10px;color:var(--td)}
-.tpl-item{padding:11px 14px;border-bottom:1px solid var(--b1);display:flex;align-items:flex-start;gap:10px}
-.tpl-item:last-child{border-bottom:none}
+/* ── TEMPLATE ENGINE ── */
+.tpl-grp{margin:6px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);overflow:hidden}
+.tpl-grp-h{background:var(--acb);padding:9px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--b1);cursor:pointer}
+.tpl-grp-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--ac);letter-spacing:.1em;text-transform:uppercase}
+.tpl-grp-meta{font-family:var(--mono);font-size:10px;color:var(--t3);display:flex;gap:8px;align-items:center}
+.tpl-grp-arrow{font-size:12px;transition:transform .2s}
+.tpl-grp-arrow.open{transform:rotate(180deg)}
+.tpl-items{display:none}
+.tpl-items.open{display:block}
+.tpl-row{padding:10px 14px;border-bottom:1px solid var(--b1);display:flex;align-items:center;gap:10px}
+.tpl-row:last-child{border-bottom:none}
 .tpl-info{flex:1;min-width:0}
-.tpl-label{font-family:var(--mono);font-size:10px;color:var(--ac);margin-bottom:4px;letter-spacing:.06em;text-transform:uppercase}
-.tpl-preview{font-size:12px;color:var(--tm);line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.tpl-copy-btn{font-family:var(--mono);font-size:10px;padding:6px 11px;border-radius:5px;background:var(--ab);color:var(--ac);border:1px solid var(--ad);cursor:pointer;white-space:nowrap;flex-shrink:0;min-height:32px;display:flex;align-items:center}
+.tpl-label{font-family:var(--mono);font-size:10px;color:var(--ac);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+.tpl-tag{font-family:var(--mono);font-size:9px;background:var(--amb);color:var(--am);border:1px solid rgba(240,160,32,.3);padding:1px 5px;border-radius:3px}
+.tpl-preview{font-size:12px;color:var(--t2);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 
-/* SOURCE GUIDE */
-.sguide{margin:6px 10px 0;background:var(--s1);border:1px solid var(--b2);border-radius:10px;overflow:hidden}
-.sguide-h{padding:9px 14px;background:rgba(16,185,129,.08);border-bottom:1px solid var(--b2);display:flex;align-items:center;gap:8px}
-.sguide-title{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--gn);letter-spacing:.08em;text-transform:uppercase}
-.sguide-item{padding:11px 14px;border-bottom:1px solid var(--b1)}
-.sguide-item:last-child{border-bottom:none}
-.sguide-label{font-family:var(--mono);font-size:10px;color:var(--gn);margin-bottom:4px;letter-spacing:.06em}
-.sguide-query{font-family:var(--mono);font-size:12px;color:var(--tx);line-height:1.5;margin-bottom:6px}
-.sguide-note{font-size:12px;color:var(--td);line-height:1.4}
+/* ── SOURCE ── */
+.src-card{margin:6px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);overflow:hidden}
+.src-head{background:rgba(24,201,122,.06);border-bottom:1px solid var(--b2);padding:9px 14px;display:flex;align-items:center;gap:8px}
+.src-head-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--gn);letter-spacing:.1em;text-transform:uppercase}
+.src-item{padding:12px 14px;border-bottom:1px solid var(--b1)}
+.src-item:last-child{border-bottom:none}
+.src-label{font-family:var(--mono);font-size:10px;color:var(--gn);letter-spacing:.06em;margin-bottom:4px}
+.src-query{font-family:var(--mono);font-size:12px;color:var(--tx);line-height:1.5;margin-bottom:6px}
+.src-note{font-size:12px;color:var(--t3);line-height:1.4;margin-bottom:8px}
+.src-btns{display:flex;gap:6px}
 
-/* TRAFFIC */
-.tcard{margin:6px 10px 0;background:var(--s1);border:1px solid var(--b2);border-radius:10px;padding:14px}
-.tcard-title{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--td);margin-bottom:12px}
-.tgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:12px}
-.tst{background:var(--s2);border-radius:7px;padding:10px 12px}.tst-v{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--tx);line-height:1}.tst-l{font-family:var(--mono);font-size:9px;color:var(--td);margin-top:3px;letter-spacing:.06em;text-transform:uppercase}
-.sbars{display:flex;flex-direction:column;gap:6px}
-.sbar{display:flex;align-items:center;gap:8px}
-.sbar-l{font-family:var(--mono);font-size:10px;color:var(--td);width:68px;flex-shrink:0}
-.sbar-t{flex:1;height:6px;background:var(--b1);border-radius:3px;overflow:hidden}
-.sbar-f{height:100%;border-radius:3px;transition:width .5s ease}
-.fl{background:var(--ac)}.fw{background:var(--gn)}.fd{background:var(--td)}.fo{background:var(--am)}
-.sbar-v{font-family:var(--mono);font-size:10px;color:var(--tm);width:20px;text-align:right;flex-shrink:0}
+/* ── TRAFFIC ── */
+.t-card{margin:6px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);padding:14px}
+.t-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px}
+.t-stat{background:var(--s3);border-radius:8px;padding:11px 14px}
+.t-stat-n{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--tx);line-height:1}
+.t-stat-l{font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:3px;letter-spacing:.08em;text-transform:uppercase}
+.t-bars{display:flex;flex-direction:column;gap:7px}
+.t-bar{display:flex;align-items:center;gap:10px}
+.t-bar-l{font-family:var(--mono);font-size:10px;color:var(--t3);width:64px;flex-shrink:0}
+.t-bar-track{flex:1;height:5px;background:var(--b1);border-radius:3px;overflow:hidden}
+.t-bar-fill{height:100%;border-radius:3px;transition:width .5s ease}
+.tf-li{background:var(--ac)}.tf-wa{background:var(--gn)}.tf-di{background:var(--t3)}.tf-ot{background:var(--am)}
+.t-bar-n{font-family:var(--mono);font-size:10px;color:var(--t2);width:18px;text-align:right;flex-shrink:0}
 
-/* ADD FORM */
-.aform{margin:6px 10px 0;background:var(--s1);border:1px solid var(--b2);border-radius:10px;padding:14px}
-.aform-title{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--td);margin-bottom:12px}
-.ff{margin-bottom:10px}
-.fl-label{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--td);margin-bottom:4px;display:block}
-.fi,.fsel{width:100%;background:var(--s2);border:1px solid var(--b2);border-radius:7px;padding:10px 12px;color:var(--tx);font-family:var(--mono);font-size:12px;outline:none}
-.fi:focus,.fsel:focus{border-color:var(--ac)}.fsel{appearance:none;cursor:pointer}
-.fsel-wrap{position:relative}.fsel-wrap::after{content:'▾';position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--td);pointer-events:none;font-size:12px}
-.fbtn{width:100%;background:var(--ac);border:none;border-radius:7px;padding:13px;font-family:var(--sans);font-size:13px;font-weight:600;color:white;cursor:pointer;margin-top:4px}
-.fbtn:active{background:var(--ad)}
+/* ── ADD FORM ── */
+.form{margin:6px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);padding:14px}
+.form-title{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin-bottom:14px}
+.ff{margin-bottom:12px}
+.ff-label{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:5px;display:block}
+.ff-in,.ff-sel{width:100%;background:var(--s3);border:1.5px solid var(--b2);border-radius:8px;padding:11px 13px;color:var(--tx);font-family:var(--mono);font-size:13px;outline:none;min-height:44px}
+.ff-in:focus,.ff-sel:focus{border-color:var(--ac)}
+.ff-sel{appearance:none;cursor:pointer}
+.ff-wrap{position:relative}.ff-wrap::after{content:'▾';position:absolute;right:13px;top:50%;transform:translateY(-50%);color:var(--t3);pointer-events:none}
+.form-btn{width:100%;min-height:50px;background:var(--ac);border:none;border-radius:10px;font-family:var(--ui);font-size:15px;font-weight:700;color:#fff;cursor:pointer;margin-top:4px;letter-spacing:.01em}
+.form-btn:active{background:var(--ac2)}
 
-/* STICKY */
-.sticky{position:fixed;bottom:0;left:0;right:0;background:rgba(13,18,32,.95);border-top:1px solid var(--b2);padding:9px 14px;display:none;align-items:center;gap:10px;z-index:50;backdrop-filter:blur(12px)}
-.sticky.on{display:flex}
-.sticky-txt{flex:1;font-size:12px;color:var(--tm);font-family:var(--mono)}
-.sticky-cta{background:var(--ac);border:none;border-radius:7px;padding:8px 14px;font-family:var(--sans);font-size:12px;font-weight:600;color:white;cursor:pointer;white-space:nowrap}
+/* ── DAILY MODE ── */
+#daily{position:fixed;inset:0;background:var(--bg);z-index:200;display:none;flex-direction:column}
+#daily.on{display:flex}
+.dm-bar{height:52px;background:var(--s1);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 14px;gap:10px;flex-shrink:0}
+.dm-title{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ac);flex:1;font-weight:600}
+.dm-exit{height:34px;padding:0 14px;background:var(--s2);border:1px solid var(--b2);border-radius:8px;font-family:var(--mono);font-size:10px;color:var(--t2);cursor:pointer}
+.dm-exit:active{background:var(--b1)}
+.dm-prog-wrap{height:3px;background:var(--b1);flex-shrink:0}
+.dm-prog{height:100%;background:var(--ac);transition:width .3s ease;will-change:width}
+.dm-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:24px 16px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.dm-meta{font-family:var(--mono);font-size:10px;color:var(--t3);margin-bottom:6px;letter-spacing:.06em}
+.dm-step{font-family:var(--mono);font-size:12px;color:var(--t2);margin-bottom:20px}
+.dm-card{background:var(--s2);border:1px solid var(--b2);border-radius:var(--r2);width:100%;max-width:440px;overflow:hidden;box-shadow:var(--sh);margin-bottom:16px}
+.dm-card-top{padding:16px 16px 10px}
+.dm-card-name{font-size:17px;font-weight:700;color:var(--tx);margin-bottom:3px}
+.dm-card-meta{font-family:var(--mono);font-size:11px;color:var(--t3)}
+.dm-card-note{padding:0 16px 10px;font-size:13px;color:var(--t3);font-style:italic;line-height:1.4}
+.dm-card-warn{margin:0 16px 10px;background:rgba(240,160,32,.08);border:1px solid rgba(240,160,32,.25);border-radius:6px;padding:8px 12px;font-family:var(--mono);font-size:10px;color:var(--am)}
+.dm-actions{padding:0 16px 16px;display:flex;flex-direction:column;gap:8px}
+.dm-btn{width:100%;min-height:52px;border-radius:10px;border:none;font-family:var(--ui);font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.01em}
+.dm-btn:active{opacity:.8;transform:scale(.98)}
+.dm-btn-copy{background:var(--ac);color:#fff}
+.dm-btn-open{background:var(--amb);color:var(--am);border:1.5px solid #604008;font-size:14px}
+.dm-btn-both{background:var(--ac);color:#fff}
+.dm-btn-adv{background:var(--gn);color:#041a0c}
+.dm-btn-skip{background:var(--s3);color:var(--t2);border:1px solid var(--b2);font-size:13px}
+.dm-row{display:flex;gap:8px}
+.dm-row .dm-btn{flex:1}
+.dm-done{padding:48px 24px;text-align:center;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dm-done-ico{font-size:48px;margin-bottom:16px}
+.dm-done-h{font-size:20px;font-weight:700;color:var(--gn);margin-bottom:8px}
+.dm-done-s{font-family:var(--mono);font-size:12px;color:var(--t3);line-height:1.7}
+.dm-low-btn{width:100%;max-width:440px;min-height:44px;background:rgba(240,160,32,.07);border:1px solid rgba(240,160,32,.2);border-radius:10px;font-family:var(--mono);font-size:11px;color:var(--am);cursor:pointer;margin-bottom:16px;letter-spacing:.04em}
+.dm-low-btn:active{background:rgba(240,160,32,.15)}
 
-/* TOAST */
-#toast{position:fixed;bottom:66px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:9px 16px;font-family:var(--mono);font-size:11px;color:var(--tx);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;white-space:nowrap;z-index:400}
+/* ── NOTES SHEET ── */
+#notes-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:300;display:none;align-items:flex-end}
+#notes-overlay.on{display:flex}
+.notes-sheet{background:var(--s1);border-radius:20px 20px 0 0;padding:20px 16px 36px;width:100%;border-top:1px solid var(--b2)}
+.notes-h{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ac);margin-bottom:12px}
+.notes-ta{width:100%;background:var(--s2);border:1.5px solid var(--b2);border-radius:10px;padding:12px 14px;color:var(--tx);font-family:var(--mono);font-size:13px;outline:none;resize:none;height:90px;min-height:44px}
+.notes-ta:focus{border-color:var(--ac)}
+.notes-btns{display:flex;gap:8px;margin-top:10px}
+.notes-save{flex:1;min-height:48px;background:var(--ac);border:none;border-radius:10px;font-family:var(--ui);font-size:14px;font-weight:700;color:#fff;cursor:pointer}
+.notes-cancel{min-height:48px;padding:0 18px;background:var(--s2);border:1px solid var(--b2);border-radius:10px;font-family:var(--mono);font-size:12px;color:var(--t2);cursor:pointer}
+
+/* ── COPY TRAY ── */
+#tray{position:fixed;bottom:72px;left:10px;right:10px;background:var(--s1);border:1px solid var(--b2);border-radius:var(--r2);padding:12px 14px;z-index:100;display:none;box-shadow:var(--sh)}
+#tray.on{display:block}
+.tray-h{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:8px;display:flex;justify-content:space-between}
+.tray-x{color:var(--t3);cursor:pointer;font-size:16px;line-height:1}
+.tray-item{background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:9px 12px;margin-bottom:5px;display:flex;align-items:center;gap:8px;cursor:pointer;min-height:44px}
+.tray-item:last-child{margin-bottom:0}
+.tray-item:active{background:var(--acb)}
+.tray-label{font-family:var(--mono);font-size:11px;color:var(--ac);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tray-recopy{font-family:var(--mono);font-size:10px;color:var(--t3)}
+
+/* ── STICKY NEXT ── */
+#sticky{position:fixed;bottom:0;left:0;right:0;background:rgba(10,14,26,.96);border-top:1px solid var(--b2);padding:10px 14px;display:none;align-items:center;gap:10px;z-index:50;backdrop-filter:blur(16px)}
+#sticky.on{display:flex}
+.sticky-txt{flex:1;font-family:var(--mono);font-size:11px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sticky-act{min-height:40px;padding:0 16px;background:var(--ac);border:none;border-radius:8px;font-family:var(--ui);font-size:13px;font-weight:700;color:#fff;cursor:pointer;white-space:nowrap}
+.sticky-act:active{background:var(--ac2)}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--s1);border:1px solid var(--b2);border-radius:10px;padding:10px 18px;font-family:var(--mono);font-size:11px;color:var(--tx);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;white-space:nowrap;z-index:500;box-shadow:var(--sh)}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
-.loading{padding:32px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--td);letter-spacing:.08em}
-.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--b2);border-top-color:var(--ac);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:8px}
+
+/* ── LOADING / EMPTY ── */
+.loading{padding:40px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--t3);letter-spacing:.08em}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--b2);border-top-color:var(--ac);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
-.empty{padding:44px 24px;text-align:center}
-.empty-ico{font-size:32px;margin-bottom:12px;opacity:.4}.empty-title{font-size:15px;font-weight:600;color:var(--tm);margin-bottom:6px}
-.empty-sub{font-family:var(--mono);font-size:11px;color:var(--td);line-height:1.6}
-.swipe-hint{display:flex;align-items:center;justify-content:space-between;padding:3px 12px;font-family:var(--mono);font-size:9px;color:var(--td);letter-spacing:.06em;opacity:.5}
+.empty{padding:52px 28px;text-align:center}
+.empty-ico{font-size:36px;margin-bottom:14px;opacity:.35}
+.empty-h{font-size:16px;font-weight:600;color:var(--t2);margin-bottom:6px}
+.empty-s{font-family:var(--mono);font-size:11px;color:var(--t3);line-height:1.7}
+.empty-action{display:inline-block;margin-top:16px;min-height:44px;padding:0 20px;background:var(--acb);border:1px solid var(--ac2);border-radius:8px;font-family:var(--mono);font-size:11px;color:var(--ac);cursor:pointer;line-height:44px}
+.swipe-hint{padding:3px 14px 0;font-family:var(--mono);font-size:9px;color:var(--t3);display:flex;justify-content:space-between;letter-spacing:.05em;opacity:.55}
 </style>
 </head>
 <body>
 
+<textarea id="_cp" tabindex="-1" aria-hidden="true" style="position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;border:none;padding:0;margin:0;resize:none;outline:none;background:transparent;color:transparent;font-size:16px"></textarea>
+
 <!-- AUTH -->
 <div id="auth">
-  <div class="auth-logo"><span>ADVISIQ</span> · OPS</div>
-  <div class="auth-title">Commercialization Console</div>
-  <div class="auth-sub">founder access only</div>
-  <input class="auth-in" type="password" id="auth-pw" placeholder="ops password" autocomplete="current-password">
+  <div class="auth-mark"><b>ADVISIQ</b> · OPS</div>
+  <div class="auth-h">Commercialization Console</div>
+  <div class="auth-s">founder access only</div>
+  <input id="auth-pw" class="auth-in" type="password" placeholder="ops password" autocomplete="current-password">
   <button class="auth-btn" onclick="doAuth()">Access Console</button>
   <div class="auth-err" id="auth-err"></div>
 </div>
 
-<!-- RECENT COPY TRAY -->
-<div id="copy-tray">
-  <div class="ct-head">Recent Copies <span class="ct-close" onclick="document.getElementById('copy-tray').classList.remove('on')">×</span></div>
-  <div id="copy-tray-items"></div>
+<!-- DAILY MODE -->
+<div id="daily">
+  <div class="dm-bar">
+    <div class="dm-title">▶ Daily Session</div>
+    <button class="dm-exit" onclick="exitDaily()">Exit ×</button>
+  </div>
+  <div class="dm-prog-wrap"><div class="dm-prog" id="dm-prog" style="width:0%"></div></div>
+  <div class="dm-body" id="dm-body"><div class="loading"><span class="spin"></span>Loading queue...</div></div>
 </div>
 
-<!-- NOTES MODAL -->
-<div id="notes-modal">
+<!-- NOTES SHEET -->
+<div id="notes-overlay">
   <div class="notes-sheet">
-    <div class="notes-title">Post-Demo Field Note</div>
-    <textarea class="notes-in" id="notes-in" placeholder="Key objection · strongest reaction · follow-up commitment..."></textarea>
+    <div class="notes-h">Post-Demo Field Note</div>
+    <textarea class="notes-ta" id="notes-ta" placeholder="Key objection · strongest reaction · follow-up commitment..."></textarea>
     <div class="notes-btns">
       <button class="notes-cancel" onclick="closeNotes()">Cancel</button>
       <button class="notes-save" onclick="saveNotes()">Save Note</button>
@@ -236,597 +290,679 @@ html,body{height:100%;background:var(--bg);color:var(--tx);font-family:var(--san
   </div>
 </div>
 
-<!-- DAILY MODE -->
-<div id="daily-mode">
-  <div class="dm-bar">
-    <div class="dm-title">Daily Execution Session</div>
-    <button class="dm-exit" onclick="exitDaily()">Exit ×</button>
-  </div>
-  <div class="dm-progress"><div class="dm-prog-fill" id="dm-prog" style="width:0%"></div></div>
-  <div class="dm-body" id="dm-body">
-    <div class="loading"><span class="spin"></span>Loading queue...</div>
-  </div>
+<!-- COPY TRAY -->
+<div id="tray">
+  <div class="tray-h">Recent Copies <span class="tray-x" onclick="hideTray()">×</span></div>
+  <div id="tray-items"></div>
 </div>
 
 <!-- MAIN APP -->
 <div id="app">
-  <div class="topbar">
-    <div class="topbar-logo"><span>ADVISIQ</span> · OPS</div>
-    <div class="topbar-time" id="clock"></div>
-    <button class="tbtn tbtn-daily" onclick="startDaily()">▶ Daily</button>
-    <button class="tbtn" onclick="toggleTray()">📋</button>
-    <button class="tbtn" onclick="loadAll()">↻</button>
+  <div class="bar">
+    <div class="bar-logo"><b>ADVISIQ</b> · OPS</div>
+    <div class="bar-time" id="clock"></div>
+    <button class="bar-btn primary" onclick="startDaily(false)">▶ Daily</button>
+    <button class="bar-btn" onclick="toggleTray()" id="tray-btn">📋</button>
+    <button class="bar-btn" onclick="loadAll()">↻</button>
   </div>
-
-  <div class="tabs">
-    <div class="tab on" data-tab="feed" onclick="go('feed')">
-      <span class="tab-ico">📡</span><span>Feed</span>
-      <span class="tab-badge" id="b-feed"></span>
-    </div>
-    <div class="tab" data-tab="queue" onclick="go('queue')">
-      <span class="tab-ico">→</span><span>Queue</span>
-      <span class="tab-badge" id="b-queue"></span>
-    </div>
-    <div class="tab" data-tab="templates" onclick="go('templates')">
-      <span class="tab-ico">📋</span><span>Msgs</span>
-    </div>
-    <div class="tab" data-tab="source" onclick="go('source')">
-      <span class="tab-ico">🔍</span><span>Source</span>
-    </div>
-    <div class="tab" data-tab="prospects" onclick="go('prospects')">
-      <span class="tab-ico">◎</span><span>Pipeline</span>
-      <span class="tab-badge" id="b-prospects"></span>
-    </div>
-    <div class="tab" data-tab="traffic" onclick="go('traffic')">
-      <span class="tab-ico">↗</span><span>Traffic</span>
-    </div>
-    <div class="tab" data-tab="add" onclick="go('add')">
-      <span class="tab-ico">+</span><span>Add</span>
-    </div>
+  <div class="tabs" id="tabs">
+    <div class="tab on" data-tab="feed" onclick="go('feed')"><div class="tab-ico">📡</div>Feed<div class="badge" id="b-feed"></div></div>
+    <div class="tab" data-tab="queue" onclick="go('queue')"><div class="tab-ico">→</div>Queue<div class="badge" id="b-queue"></div></div>
+    <div class="tab" data-tab="msgs" onclick="go('msgs')"><div class="tab-ico">📋</div>Msgs</div>
+    <div class="tab" data-tab="source" onclick="go('source')"><div class="tab-ico">🔍</div>Source</div>
+    <div class="tab" data-tab="pipeline" onclick="go('pipeline')"><div class="tab-ico">◎</div>Pipeline<div class="badge" id="b-pipeline"></div></div>
+    <div class="tab" data-tab="traffic" onclick="go('traffic')"><div class="tab-ico">↗</div>Traffic</div>
+    <div class="tab" data-tab="add" onclick="go('add')"><div class="tab-ico">+</div>Add</div>
   </div>
-
-  <div class="pane" id="pane-feed"><div class="loading"><span class="spin"></span>loading...</div></div>
-  <div class="pane" id="pane-queue" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
-  <div class="pane" id="pane-templates" style="display:none"></div>
-  <div class="pane" id="pane-source" style="display:none"></div>
-  <div class="pane" id="pane-prospects" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
-  <div class="pane" id="pane-traffic" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
-  <div class="pane" id="pane-add" style="display:none"></div>
-
-  <div class="sticky" id="sticky">
-    <div class="sticky-txt" id="sticky-txt">Next action pending</div>
-    <button class="sticky-cta" id="sticky-cta">Act →</button>
-  </div>
+  <div class="body" id="pane-feed"><div class="loading"><span class="spin"></span>loading...</div></div>
+  <div class="body" id="pane-queue" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
+  <div class="body" id="pane-msgs" style="display:none"></div>
+  <div class="body" id="pane-source" style="display:none"></div>
+  <div class="body" id="pane-pipeline" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
+  <div class="body" id="pane-traffic" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
+  <div class="body" id="pane-add" style="display:none"></div>
+  <div id="sticky"><div class="sticky-txt" id="sticky-txt"></div><button class="sticky-act" id="sticky-act">Act →</button></div>
 </div>
 
 <div id="toast"></div>
 
 <script>
-const API='';let AUTH='';let CUR='feed';
-// Recent copies — last 3
+// ══════════════════════════
+// CORE
+// ══════════════════════════
+const API='';
+let AUTH='';
+let CUR='feed';
 let recentCopies=[];
-// Notes state
-let noteProspectId=null;
-// Daily mode state
-let dailyItems=[],dailyIdx=0,dailyLow=false;
-// Last tab for session recovery
-function saveTab(t){try{sessionStorage.setItem('ops_tab',t);}catch(e){}}
-function getLastTab(){try{return sessionStorage.getItem('ops_tab')||'feed';}catch(e){return'feed';}}
+let notesPid=null;
+let dailyItems=[];
+let dailyIdx=0;
 
-// ── AUTH ──
-function doAuth(){
-  const pw=document.getElementById('auth-pw').value;if(!pw)return;AUTH=pw;
-  fx('/api/v1/ops/brief').then(d=>{
-    if(d.status==='OK'){
-      document.getElementById('auth').style.display='none';
-      document.getElementById('app').classList.add('on');
-      const lt=getLastTab();loadAll();go(lt);tick();setInterval(tick,30000);
-    }else showErr('Invalid password');
-  }).catch(()=>showErr('Connection failed'));
+// ── CLIPBOARD: single reliable method for Android Chrome ──
+// Uses a visible-but-offscreen textarea + execCommand.
+// Must be called synchronously from a user gesture.
+function doCopy(text){
+  var el=document.getElementById('_cp');
+  el.value=text;
+  el.focus();
+  el.select();
+  try{document.execCommand('copy');}catch(e){}
 }
-function showErr(m){document.getElementById('auth-err').textContent=m;AUTH='';}
-document.getElementById('auth-pw').addEventListener('keydown',e=>{if(e.key==='Enter')doAuth();});
-function tick(){const n=new Date();document.getElementById('clock').textContent=n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});}
 
-// ── FETCH ──
-function fx(url,opts={}){return fetch(API+url,{...opts,headers:{'x-ops-auth':AUTH,'Content-Type':'application/json',...(opts.headers||{})}}).then(r=>r.json());}
+function doOpen(url){
+  if(!url||!url.startsWith('http'))return;
+  const a=document.createElement('a');
+  a.href=url;a.target='_blank';a.rel='noopener noreferrer';
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>document.body.removeChild(a),100);
+}
 
-// ── TOAST ──
-function toast(m,ms=1800){const t=document.getElementById('toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),ms);}
-
-// ── COPY WITH PLACEHOLDER GUARD ──
-function cp(text,label,liUrl){
-  const hasPlaceholder=/\[[A-Z_ ]+\]/.test(text);
-  if(hasPlaceholder){
-    const ok=confirm('Message contains unfilled placeholders:\n'+text.match(/\[[A-Z_ ]+\]/g).join(', ')+'\n\nCopy anyway?');
+// cp: OPEN first (sync), COPY second (sync) — both in same gesture
+function cp(text,label,url){
+  const hasPH=/\[[A-Z][A-Z _]+\]/.test(text);
+  if(hasPH){
+    const ok=window.confirm('Placeholders remain: '+text.match(/\[[A-Z][A-Z _]+\]/g).join(', ')+'\n\nCopy anyway?');
     if(!ok)return;
   }
-  navigator.clipboard.writeText(text).then(()=>{
-    afterCopy(text,label);
-    if(liUrl)setTimeout(()=>openLI(liUrl),300);
-    else toast('📋 Copied — '+label);
-  }).catch(()=>{
-    const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);
-    afterCopy(text,label);
-    if(liUrl)setTimeout(()=>openLI(liUrl),300);
-    else toast('📋 Copied — '+label);
-  });
+  if(url)doOpen(url);  // open LinkedIn first — synchronous with gesture
+  doCopy(text);        // copy immediately after — still in gesture
+  pushTray(text,label);
+  toast('📋 '+label);
 }
-function afterCopy(text,label){
-  // Add to recent copies tray (max 3)
+
+function cpOnly(text,label){
+  const hasPH=/\[[A-Z][A-Z _]+\]/.test(text);
+  if(hasPH){
+    const ok=window.confirm('Placeholders: '+text.match(/\[[A-Z][A-Z _]+\]/g).join(', ')+'\n\nCopy anyway?');
+    if(!ok)return;
+  }
+  doCopy(text);
+  pushTray(text,label);
+  toast('📋 '+label);
+}
+
+function openOnly(url){doOpen(url);toast('Opening LinkedIn ↗');}
+
+// ── TOAST ──
+let toastTimer;
+function toast(m,ms=1800){
+  const t=document.getElementById('toast');
+  t.textContent=m;t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('on'),ms);
+}
+
+// ── TRAY ──
+function pushTray(text,label){
   recentCopies=recentCopies.filter(r=>r.label!==label);
   recentCopies.unshift({text,label});
   if(recentCopies.length>3)recentCopies.pop();
   renderTray();
-  if(!document.getElementById('copy-tray').classList.contains('on'))toast('📋 Copied — '+label);
 }
-function openLI(url){if(url&&url.startsWith('http'))window.open(url,'_blank');}
-
-// ── COPY TRAY ──
-function toggleTray(){document.getElementById('copy-tray').classList.toggle('on');renderTray();}
+function toggleTray(){
+  const t=document.getElementById('tray');
+  t.classList.toggle('on');
+  if(t.classList.contains('on'))renderTray();
+}
+function hideTray(){document.getElementById('tray').classList.remove('on');}
 function renderTray(){
-  const el=document.getElementById('copy-tray-items');
-  if(!recentCopies.length){el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--td);text-align:center;padding:8px">No recent copies</div>';return;}
-  el.innerHTML=recentCopies.map((r,i)=>`<div class="ct-item" onclick="reCopy(${i})"><div class="ct-label">${r.label}</div><div class="ct-recopy">Re-copy</div></div>`).join('');
+  const el=document.getElementById('tray-items');
+  if(!recentCopies.length){el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);padding:6px 0">No recent copies</div>';return;}
+  el.innerHTML=recentCopies.map((r,i)=>`<div class="tray-item" onclick="reCopy(${i})"><div class="tray-label">${r.label}</div><div class="tray-recopy">Re-copy</div></div>`).join('');
 }
 function reCopy(i){
   const r=recentCopies[i];if(!r)return;
-  navigator.clipboard.writeText(r.text).catch(()=>{const ta=document.createElement('textarea');ta.value=r.text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);});
+  doCopy(r.text);
   toast('📋 Re-copied — '+r.label);
-  document.getElementById('copy-tray').classList.remove('on');
+  hideTray();
 }
+
+// ── CLOCK ──
+function tick(){const n=new Date();document.getElementById('clock').textContent=n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});}
+
+// ── FETCH ──
+function fx(url,opts={}){
+  return fetch(API+url,{...opts,headers:{'x-ops-auth':AUTH,'Content-Type':'application/json',...(opts.headers||{})}}).then(r=>r.json());
+}
+
+// ── AUTH ──
+function doAuth(){
+  const pw=document.getElementById('auth-pw').value.trim();
+  if(!pw)return;
+  AUTH=pw;
+  fx('/api/v1/ops/brief').then(d=>{
+    if(d.status==='OK'){
+      document.getElementById('auth').style.display='none';
+      document.getElementById('app').classList.add('on');
+      tick();setInterval(tick,30000);
+      const lt=getSaved('ops_tab')||'feed';
+      loadAll();go(lt);
+    }else{AUTH='';document.getElementById('auth-err').textContent='Invalid password';}
+  }).catch(()=>{AUTH='';document.getElementById('auth-err').textContent='Connection failed';});
+}
+document.getElementById('auth-pw').addEventListener('keydown',e=>{if(e.key==='Enter')doAuth();});
+
+// ── SESSION STORAGE ──
+function save(k,v){try{sessionStorage.setItem(k,v);}catch(e){}}
+function getSaved(k){try{return sessionStorage.getItem(k);}catch(e){return null;}}
 
 // ── NAV ──
 function go(tab){
-  CUR=tab;saveTab(tab);
+  CUR=tab;save('ops_tab',tab);
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===tab));
-  document.querySelectorAll('.pane').forEach(p=>p.style.display='none');
+  document.querySelectorAll('.body').forEach(p=>p.style.display='none');
   document.getElementById('pane-'+tab).style.display='block';
   document.getElementById('sticky').classList.remove('on');
-  document.getElementById('copy-tray').classList.remove('on');
+  hideTray();
   if(tab==='feed')loadFeed();
   else if(tab==='queue')loadQueue();
-  else if(tab==='templates')renderTemplates();
+  else if(tab==='msgs')renderMsgs();
   else if(tab==='source')renderSource();
-  else if(tab==='prospects')loadProspects();
+  else if(tab==='pipeline')loadPipeline();
   else if(tab==='traffic')loadTraffic();
   else if(tab==='add')renderAdd();
 }
-function loadAll(){loadFeed();loadQueue();loadProspects();loadTraffic();}
 
-// ══════════════════════════════════
+function loadAll(){loadFeed();loadQueue();loadPipeline();loadTraffic();}
+
+// ══════════════════════════
 // TEMPLATES
-// ══════════════════════════════════
-const TEMPLATES={
-  'Connection Request':[
-    {label:'IFA — Market challenge',text:`Your post about [THEIR TOPIC] resonated — I've been building a research tool that addresses exactly this advisory challenge. Regime-aware briefings in practitioner language, session-isolated. Happy to share if you're curious.`},
-    {label:'RIA — Governance framing',text:`Saw your post on [THEIR TOPIC]. Building a governed intelligence system for SEBI-registered advisors — uncertainty disclosure, analytical provenance, session isolation. The governance layer may be relevant to what you're thinking about.`},
-    {label:'Wealth Manager — Cross-asset',text:`Your note on [THEIR TOPIC] caught my attention. Building a cross-asset regime tool for advisory professionals — equity-debt-gold posture in governed briefings, practitioner language. Worth a look if you're curious.`},
-  ],
-  'First DM':[
-    {label:'Standard first DM',text:`Thanks for connecting. I've been researching how regime-aware intelligence can support advisory conversations — the daily challenge of knowing where the market is and being able to say it in your client's language.\n\nBuilt a research tool at advisiq.in that generates governed briefings for different advisory contexts — IFA, wealth manager, institutional desk. Session-isolated, no client data stored.\n\nHappy to show you what it produces for your typical client type — 12 minutes, live brief, no agenda beyond getting practitioner feedback on whether it's actually useful.`},
-  ],
-  'Day 7 Follow-Up':[
-    {label:'Soft follow-up',text:`Following up briefly — if you'd like to see what a regime brief looks like for your typical client type, just reply with a rough equity/debt/gold split and I'll generate one and send it across. No call needed.`},
-  ],
-  'Day 14 Final':[
-    {label:'Final message',text:`Last note — I'm running a small practitioner feedback group for this tool, 20-odd advisors who use it regularly and share observations. If you'd like to be included, just say so. Otherwise advisiq.in is openly accessible whenever you're curious.`},
-  ],
-  'Demo Scheduling':[
-    {label:'Offer two times',text:`Happy to walk through it. I can do [DAY X] at [TIME] or [DAY Y] at [TIME] — whichever works. 12–15 minutes, I'll generate a brief live for your client type. No preparation needed.`},
-    {label:'24h reminder',text:`Quick reminder for our call tomorrow at [TIME]. I'll walk through a live brief for your client type. No preparation needed on your side.`},
-  ],
-  'Post-Demo':[
-    {label:'Follow-up + beta invite',text:`Thanks for the time today. Access is live at advisiq.in — try generating a brief for your most common client type and see if it changes how you'd frame a client conversation this week.\n\nI'm running a small founding cohort — advisors who use it regularly and share observations over 60 days, just two structured feedback exchanges. Would you like to be included?`},
-  ],
-  'WhatsApp (warm only)':[
-    {label:'Warm intro',text:`Hi [NAME] — I've been building a market intelligence tool for advisory professionals and wanted to show it to someone whose judgment I respect before pushing it wider. It generates a governed regime brief — IFA, wealth manager, or institutional register. Session-isolated, no client data. Would you be open to a 12-minute look this week?`},
-  ],
-  'Beta Cohort':[
-    {label:'Beta invite',text:`We're running a small founding cohort — 20 advisors who use the tool regularly and share observations over 60 days. Just two structured feedback exchanges over the period. Would you like to be included?`},
-    {label:'Onboarding welcome',text:`Welcome to the founding cohort. Three things for your first session:\n1. Open advisiq.in and read the current regime brief — no input needed\n2. Enter a real allocation for your most common client type and generate a brief\n3. Click 'View analytical provenance' after the brief is generated\n\nThen reply with one sentence: did this change how you'd frame your next client conversation?`},
-  ],
-  'Feedback':[
-    {label:'Week 1',text:`Quick question: Did any brief you generated this week change how you'd approach a client conversation? Yes / No / one sentence is plenty.`},
-    {label:'Week 2',text:`This week: Which audience type did you use most and why?`},
-    {label:'Week 3',text:`This week: Did you share any output with a client, directly or adapted? What was their reaction?`},
-    {label:'Week 4',text:`This week: What's one thing the platform said that you disagreed with or questioned?`},
-    {label:'Nudge — inactive',text:`Hi [NAME] — just checking in, haven't seen you on the platform this week. Any friction I can help with? Happy to generate a brief together over a quick call if easier.`},
-  ],
-  'Dormant Reactivation':[
-    {label:'Organic trigger only',text:`Good to see you active — your note on [THEIR RECENT POST] is well-observed. The intelligence tool I mentioned a while back is live at advisiq.in if you ever want to see what it produces for your client type.`},
-  ],
-  'LinkedIn Post':[
-    {label:'Market event',text:`This morning's [MARKET EVENT] produced an interesting regime signal. Generated a brief at advisiq.in — current read: [REGIME] with [CONVICTION] conviction. Advisory posture for a moderate-risk IFA client: [ONE LINE].\n\nThe platform disclosed [UNCERTAINTY NOTE IF ANY] — the correct response when signals conflict.\n\nadvisiq.in — session-isolated, no client data stored.`},
-  ],
+// ══════════════════════════
+const T={
+'Connection Request':[
+  {l:'IFA — Market challenge',ph:true,t:`Your post about [THEIR TOPIC] resonated — I've been building a research tool that addresses exactly this advisory challenge. Regime-aware briefings in practitioner language, session-isolated. Happy to share if you're curious.`},
+  {l:'RIA — Governance',ph:true,t:`Saw your post on [THEIR TOPIC]. Building a governed intelligence system for SEBI-registered advisors — uncertainty disclosure, analytical provenance, session isolation. The governance layer may be relevant.`},
+  {l:'Wealth Manager — Cross-asset',ph:true,t:`Your note on [THEIR TOPIC] caught my attention. Building a cross-asset regime tool for advisory professionals — equity-debt-gold posture in governed briefings, practitioner language. Worth a look.`},
+],
+'First DM':[
+  {l:'Standard first DM',t:`Thanks for connecting. I've been researching how regime-aware intelligence can support advisory conversations — the daily challenge of knowing where the market is and being able to say it in your client's language.\n\nBuilt a research tool at advisiq.in that generates governed briefings for different advisory contexts — IFA, wealth manager, institutional desk. Session-isolated, no client data stored.\n\nHappy to show you what it produces for your typical client type — 12 minutes, live brief, no agenda beyond practitioner feedback.`},
+],
+'Day 7 Follow-Up':[
+  {l:'Soft follow-up',t:`Following up briefly — if you'd like to see what a regime brief looks like for your typical client type, just reply with a rough equity/debt/gold split and I'll generate one and send it across. No call needed.`},
+],
+'Day 14 Final':[
+  {l:'Final message',t:`Last note — I'm running a small practitioner feedback group for this tool, 20-odd advisors who use it regularly and share observations. If you'd like to be included, just say so. Otherwise advisiq.in is openly accessible whenever you're curious.`},
+],
+'Demo Scheduling':[
+  {l:'Offer two times',ph:true,t:`Happy to walk through it. I can do [DAY X] at [TIME] or [DAY Y] at [TIME] — whichever works. 12–15 minutes, I'll generate a brief live for your client type. No preparation needed.`},
+  {l:'24h reminder',ph:true,t:`Quick reminder for our call tomorrow at [TIME]. I'll walk through a live brief for your client type. No preparation needed on your side.`},
+],
+'Post-Demo':[
+  {l:'Follow-up + beta invite',t:`Thanks for the time today. Access is live at advisiq.in — try generating a brief for your most common client type and see if it changes how you'd frame a client conversation this week.\n\nI'm running a small founding cohort — advisors who use it regularly and share observations over 60 days, just two structured feedback exchanges. Would you like to be included?`},
+],
+'WhatsApp (warm only)':[
+  {l:'Warm intro',ph:true,t:`Hi [NAME] — I've been building a market intelligence tool for advisory professionals and wanted to show it to someone whose judgment I respect before pushing it wider. It generates a governed regime brief — IFA, wealth manager, or institutional register. Session-isolated, no client data. Would you be open to a 12-minute look this week?`},
+],
+'Beta Cohort':[
+  {l:'Beta invite',t:`We're running a small founding cohort — 20 advisors who use the tool regularly and share observations over 60 days. Just two structured feedback exchanges. Would you like to be included?`},
+  {l:'Onboarding welcome',t:`Welcome to the founding cohort. Three things for your first session:\n1. Open advisiq.in — read the current regime brief, no input needed\n2. Enter a real allocation for your most common client type, generate a brief\n3. Click 'View analytical provenance' after generation\n\nThen reply: did this change how you'd frame your next client conversation?`},
+],
+'Feedback':[
+  {l:'Week 1',t:`Quick question: Did any brief you generated this week change how you'd approach a client conversation? Yes / No / one sentence is plenty.`},
+  {l:'Week 2',t:`This week: Which audience type did you use most and why?`},
+  {l:'Week 3',t:`This week: Did you share any output with a client, directly or adapted? What was their reaction?`},
+  {l:'Week 4',t:`This week: What's one thing the platform said that you disagreed with or questioned?`},
+  {l:'Nudge — inactive',ph:true,t:`Hi [NAME] — just checking in, haven't seen you on the platform this week. Any friction I can help with?`},
+],
+'Dormant Reactivation':[
+  {l:'Organic trigger only',ph:true,t:`Good to see you active — your note on [THEIR RECENT POST] is well-observed. The intelligence tool I mentioned a while back is live at advisiq.in if you ever want to see what it produces for your client type.`},
+],
+'LinkedIn Post':[
+  {l:'Market event',ph:true,t:`This morning's [MARKET EVENT] produced an interesting regime signal. Generated a brief at advisiq.in — current read: [REGIME] with [CONVICTION] conviction. Advisory posture for a moderate-risk IFA client: [ONE LINE].\n\nThe platform disclosed [UNCERTAINTY NOTE] — the correct response when signals conflict.\n\nadvisiq.in — session-isolated, no client data stored.`},
+],
 };
 
-function renderTemplates(){
-  const el=document.getElementById('pane-templates');
-  let html='<div class="sh">Message Templates <span class="sc">'+Object.keys(TEMPLATES).length+' groups</span></div>';
-  for(const[group,tpls]of Object.entries(TEMPLATES)){
-    html+=`<div class="tpl-group"><div class="tpl-group-head"><div class="tpl-group-title">${group}</div><div class="tpl-group-count">${tpls.length}</div></div>`;
-    tpls.forEach(t=>{
-      const preview=t.text.replace(/\n/g,' ').slice(0,90)+'...';
-      const hasVars=/\[[A-Z_ ]+\]/.test(t.text);
-      html+=`<div class="tpl-item">
+function getMsgForStatus(s){
+  const m={SOURCED:T['Connection Request'][0].t,CONNECTION_SENT:T['Connection Request'][0].t,ACCEPTED:T['First DM'][0].t,MSG1_SENT:T['Day 7 Follow-Up'][0].t,MSG2_SENT:T['Day 14 Final'][0].t,DEMO_REQUESTED:T['Demo Scheduling'][0].t,DEMO_SCHEDULED:T['Demo Scheduling'][1].t,DEMO_DONE:T['Post-Demo'][0].t,BETA_INVITED:T['Beta Cohort'][1].t};
+  return m[s]||T['First DM'][0].t;
+}
+function hasPH(t){return /\[[A-Z][A-Z _]+\]/.test(t);}
+function nextSt(s){const m={SOURCED:'CONNECTION_SENT',CONNECTION_SENT:'ACCEPTED',ACCEPTED:'MSG1_SENT',MSG1_SENT:'MSG2_SENT',MSG2_SENT:'MSG3_SENT',MSG3_SENT:'INTERESTED',DEMO_REQUESTED:'DEMO_SET',DEMO_SCHEDULED:'DEMO_DONE',DEMO_DONE:'BETA_INVITED'};return m[s]||null;}
+function nextLbl(s){const m={SOURCED:'Sent ✓',CONNECTION_SENT:'Accepted ✓',ACCEPTED:'DM Sent ✓',MSG1_SENT:'Followed Up ✓',MSG2_SENT:'Final Sent ✓',MSG3_SENT:'Demo Set ✓',DEMO_REQUESTED:'Demo Set ✓',DEMO_SCHEDULED:'Demo Done ✓',DEMO_DONE:'Beta Invited ✓'};return m[s]||'Advance →';}
+function stageCls(s){const m={SOURCED:'cs-src',CONNECTION_SENT:'cs-sent',ACCEPTED:'cs-sent',MSG1_SENT:'cs-sent',MSG2_SENT:'cs-sent',MSG3_SENT:'cs-sent',DEMO_REQUESTED:'cs-demo',DEMO_SCHEDULED:'cs-demo',DEMO_DONE:'cs-demo',BETA_INVITED:'cs-beta',CLOSED:'cs-done'};return m[s]||'cs-src';}
+function initials(name){return(name||'?').split(' ').map(n=>n[0]||'').join('').toUpperCase().slice(0,2);}
+
+// ── MSGS TAB ──
+function renderMsgs(){
+  const el=document.getElementById('pane-msgs');
+  let html='<div class="sec">Messages <span class="sec-ct">'+Object.keys(T).length+' groups</span></div>';
+  for(const[grp,tpls]of Object.entries(T)){
+    const id='tg-'+grp.replace(/\W/g,'');
+    html+=`<div class="tpl-grp">
+      <div class="tpl-grp-h" onclick="toggleTplGrp('${id}')">
+        <div class="tpl-grp-title">${grp}</div>
+        <div class="tpl-grp-meta"><span>${tpls.length}</span><span class="tpl-grp-arrow" id="${id}-arr">▼</span></div>
+      </div>
+      <div class="tpl-items" id="${id}">`;
+    tpls.forEach((t,i)=>{
+      const preview=t.t.replace(/\n/g,' ').slice(0,100)+'...';
+      html+=`<div class="tpl-row">
         <div class="tpl-info">
-          <div class="tpl-label">${t.label}${hasVars?'<span style="color:var(--am);margin-left:6px">✎</span>':''}</div>
+          <div class="tpl-label">${t.l}${t.ph?'<span class="tpl-tag">✎ edit</span>':''}</div>
           <div class="tpl-preview">${preview}</div>
         </div>
-        <div class="tpl-copy-btn" onclick='cp(${JSON.stringify(t.text)},"${t.label}")'>Copy</div>
+        <button class="btn btn-copy" data-tkey="${grp}|||${i}" style="min-width:60px">Copy</button>
       </div>`;
     });
-    html+='</div>';
+    html+='</div></div>';
   }
   el.innerHTML=html;
 }
+function toggleTplGrp(id){
+  const el=document.getElementById(id);const arr=document.getElementById(id+'-arr');
+  if(el){el.classList.toggle('open');if(arr)arr.classList.toggle('open');}
+}
 
-// ══════════════════════════════════
-// SOURCE GUIDE
-// ══════════════════════════════════
+// ── SOURCE TAB ──
 const SEARCHES=[
-  {label:'S1 — IFA',query:'"Independent Financial Advisor" India',note:'Filter: People · India · 2nd connections · Sort relevance. Add "AUM" for higher signal.'},
-  {label:'S2 — RIA',query:'"Registered Investment Advisor" India',note:'Also try "SEBI RIA". These professionals often have RIA directly in their title.'},
-  {label:'S3 — Wealth Manager',query:'"Wealth Manager" India "HNI" OR "family office"',note:'HNI/family office qualifier filters out retail banking RMs.'},
-  {label:'S4 — PMS',query:'"Portfolio Manager" India "PMS" OR "advisory"',note:'Also: "Investment Counselor" or "Head of Advisory" for boutique firm leadership.'},
+  {l:'S1 — IFA',q:'"Independent Financial Advisor" India',n:'People · India · 2nd connections. Add "AUM" for higher signal.'},
+  {l:'S2 — RIA',q:'"Registered Investment Advisor" India',n:'Also try "SEBI RIA". RIA often appears directly in title or bio.'},
+  {l:'S3 — Wealth Manager',q:'"Wealth Manager" India "HNI" OR "family office"',n:'HNI/family office qualifier filters retail banking RMs.'},
+  {l:'S4 — PMS',q:'"Portfolio Manager" India "PMS" OR "advisory"',n:'Also: "Investment Counselor" or "Head of Advisory".'},
 ];
 function renderSource(){
   const el=document.getElementById('pane-source');
-  let html='<div class="sh">Prospect Sourcing</div>';
-  html+='<div class="sguide"><div class="sguide-h"><span style="font-size:16px">🔍</span><span class="sguide-title">Search Strings</span></div>';
+  let html='<div class="sec">Prospect Sourcing</div>';
+  html+='<div class="src-card"><div class="src-head"><span style="font-size:16px">🔍</span><div class="src-head-title">LinkedIn Search Strings</div></div>';
   SEARCHES.forEach(s=>{
-    html+=`<div class="sguide-item">
-      <div class="sguide-label">${s.label}</div>
-      <div class="sguide-query">${s.query}</div>
-      <div class="sguide-note">${s.note}</div>
-      <div style="margin-top:8px;display:flex;gap:6px">
-        <div class="tpl-copy-btn" onclick='cp("${s.query}","${s.label}")'>Copy Query</div>
-        <div class="tpl-copy-btn" style="background:rgba(245,158,11,.1);color:var(--am);border-color:#92400e" onclick="openLI('https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent('${s.query}')+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH')">Open LinkedIn ↗</div>
+    const liUrl='https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(s.q)+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH';
+    html+=`<div class="src-item">
+      <div class="src-label">${s.l}</div>
+      <div class="src-query">${s.q}</div>
+      <div class="src-note">${s.n}</div>
+      <div class="src-btns">
+        <button class="btn btn-copy" data-skey="${SEARCHES.indexOf(s)}|||copy">Copy Query</button>
+        <button class="btn btn-open" data-skey="${SEARCHES.indexOf(s)}|||open">Open LinkedIn ↗</button>
       </div>
     </div>`;
   });
   html+='</div>';
-  html+=`<div class="sh" style="margin-top:8px">Scoring</div>
-  <div class="sguide">
-    <div class="sguide-h"><span style="font-size:16px">◎</span><span class="sguide-title">Score Prospects</span></div>
-    <div class="sguide-item"><div class="sguide-label">Score 3 — Add immediately</div><div class="sguide-note">Posted about market/clients this week · active · bio mentions AUM. Outreach priority.</div></div>
-    <div class="sguide-item"><div class="sguide-label">Score 2 — Add to queue</div><div class="sguide-note">Correct title, financial professional, less active or less specific.</div></div>
-    <div class="sguide-item"><div class="sguide-label">Score 1 — Skip</div><div class="sguide-note">Title matches but no posting activity or inactive profile. Do not add.</div></div>
+  html+=`<div class="src-card" style="margin-top:8px">
+    <div class="src-head"><span style="font-size:16px">◎</span><div class="src-head-title">Scoring Rules</div></div>
+    <div class="src-item"><div class="src-label">Score 3 — Add immediately</div><div class="src-note">Posted about market/clients in last 2 weeks · active poster · bio mentions AUM → outreach first batch.</div></div>
+    <div class="src-item"><div class="src-label">Score 2 — Add to queue</div><div class="src-note">Correct title, financial professional, less active or less specific.</div></div>
+    <div class="src-item"><div class="src-label">Score 1 — Skip</div><div class="src-note">Title matches but no posting activity or inactive. Do not add.</div></div>
   </div>
-  <div class="sh" style="margin-top:8px">Comment-First (Optional)</div>
-  <div class="sguide">
-    <div class="sguide-h"><span style="font-size:16px">💬</span><span class="sguide-title">Optional Warm-Up</span></div>
-    <div class="sguide-item"><div class="sguide-note">For Score 3 targets: optionally react to or briefly comment on their latest post before connecting. Even a like is enough. Improves acceptance rate. Not required — proceed directly to connection request if time is short.</div></div>
+  <div class="src-card" style="margin-top:8px">
+    <div class="src-head"><span style="font-size:16px">💬</span><div class="src-head-title">Comment-First (Optional)</div></div>
+    <div class="src-item"><div class="src-note">For Score 3 targets: optionally react or leave a brief comment on their latest post before connecting. Even a like is enough. Improves acceptance rate. Not required — proceed directly if time is short.</div></div>
   </div>`;
   el.innerHTML=html;
 }
 
-// ══════════════════════════════════
-// OUTREACH QUEUE
-// ══════════════════════════════════
-function loadQueue(){
-  Promise.all([fx('/api/v1/ops/prospects/queue'),fx('/api/v1/ops/feed')]).then(([pq,feed])=>{
-    renderQueue(pq,feed);
-    const ct=(pq.data&&pq.data.count)||0;
-    const b=document.getElementById('b-queue');b.textContent=ct;b.classList.toggle('on',ct>0);
-  }).catch(()=>{
-    document.getElementById('pane-queue').innerHTML='<div class="empty"><div class="empty-ico">→</div><div class="empty-title">Queue empty</div><div class="empty-sub">Add prospects via the + tab</div></div>';
-  });
-}
-
-function renderQueue(pq,feed){
-  const el=document.getElementById('pane-queue');
-  const queue=(pq.data&&pq.data.queue)||[];
-  const overdue=(feed&&feed.data&&feed.data.overdue)||[];
-  if(queue.length===0&&overdue.length===0){el.innerHTML='<div class="empty"><div class="empty-ico">→</div><div class="empty-title">Queue empty</div><div class="empty-sub">Add prospects using the + tab<br>Return here to execute outreach</div></div>';return;}
-  let html='';
-  if(overdue.length>0){
-    html+=`<div class="sh">⚡ Overdue <span class="sc">${overdue.length}</span></div>`;
-    html+='<div class="swipe-hint"><span>← snooze</span><span>done →</span></div>';
-    overdue.forEach(item=>{const hrs=Math.floor((item.overdueMs||0)/3600000);html+=qCard({id:item.id,name:item.prospect||item.type,sub:item.type,urgency:'urgent',liUrl:null,msg:null,status:null,note:null,overdueHrs:hrs});});
-  }
-  const stages={SOURCED:'Ready to Connect',CONNECTION_SENT:'Awaiting Acceptance',ACCEPTED:'Send First DM',MSG1_SENT:'Day 7 Follow-Up',MSG2_SENT:'Day 14 Final',DEMO_REQUESTED:'Schedule Demo',DEMO_SCHEDULED:'Demo Upcoming',DEMO_DONE:'Post-Demo Follow-Up',BETA_INVITED:'Onboard to Cohort'};
-  const grouped={};
-  queue.forEach(p=>{const g=stages[p.status]||p.status;if(!grouped[g])grouped[g]=[];grouped[g].push(p);});
-  for(const[stage,prospects]of Object.entries(grouped)){
-    html+=`<div class="sh">${stage} <span class="sc">${prospects.length}</span></div>`;
-    prospects.forEach(p=>{
-      const msg=getMsgForStatus(p.status);
-      html+=qCard({id:p.id,name:p.name,sub:(p.role||'Professional')+' · Score '+(p.score||2),urgency:'today',liUrl:p.linkedin_url||null,msg,status:p.status,note:p.personalisationNote});
-    });
-  }
-  el.innerHTML=html;
-  attachSwipe('.qcard');
-}
-
-function qCard({id,name,sub,urgency,liUrl,msg,status,note,overdueHrs}){
-  const cls={urgent:'uc-urgent',today:'uc-today',cohort:'uc-cohort'}[urgency]||'uc-passive';
-  const initials=name?name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2):'?';
-  let chips='';
-  if(msg){
-    const hasVars=/\[[A-Z_ ]+\]/.test(msg);
-    // Combined copy+open is the primary action
-    if(liUrl){
-      chips+=`<div class="qchip qc-both" onclick='cp(${JSON.stringify(msg)},"${name}","${liUrl}")'>📋 Copy + Open ↗</div>`;
-      chips+=`<div class="qchip qc-open" onclick="openLI('${liUrl}')">Open ↗</div>`;
-    }else{
-      chips+=`<div class="qchip qc-copy" onclick='cp(${JSON.stringify(msg)},"${name}")'>📋 Copy Msg</div>`;
-    }
-    if(hasVars)chips+=`<div style="width:100%;font-family:var(--mono);font-size:10px;color:var(--am);padding:2px 0">⚠ Edit [BRACKETS] before sending</div>`;
-  }else if(liUrl){
-    chips+=`<div class="qchip qc-open" onclick="openLI('${liUrl}')">Open LinkedIn ↗</div>`;
-  }
-  if(status){
-    const nx=nextStatus(status);
-    const lbl=nextLabel(status);
-    if(nx)chips+=`<div class="qchip qc-sent" onclick="advP(${id},'${nx}')">${lbl}</div>`;
-    if(status==='DEMO_DONE')chips+=`<div class="qchip" style="background:var(--pb);color:var(--pu);border-color:#6b21a8;font-family:var(--mono);font-size:10px;padding:5px 11px;border-radius:5px;cursor:pointer" onclick="openNotes(${id})">📝 Note</div>`;
-  }else if(overdueHrs!==undefined){
-    chips+=`<div class="qchip qc-sent" onclick="doneAct(${id})">✓ Done</div>`;
-    chips+=`<div class="qchip qc-snooze" onclick="snoozeAct(${id})">+24h</div>`;
-  }
-  chips+=`<div class="qchip qc-close" onclick="closeP(${id})">Close</div>`;
-  return `<div class="qcard ${cls}" id="qc-${id}" data-id="${id}">
-    <div class="qcard-body">
-      <div class="qcard-ico ico-action" style="background:var(--ab);font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ac)">${initials}</div>
-      <div class="qcard-info">
-        <div class="qcard-title">${name}${overdueHrs!==undefined?' — '+overdueHrs+'h overdue':''}</div>
-        <div class="qcard-sub">${sub}</div>
-      </div>
-    </div>
-    ${note?`<div class="qcard-note">${note}</div>`:''}
-    <div class="qcard-chips">${chips}</div>
-  </div>`;
-}
-
-function getMsgForStatus(status){
-  const map={SOURCED:TEMPLATES['Connection Request'][0].text,CONNECTION_SENT:TEMPLATES['Connection Request'][0].text,ACCEPTED:TEMPLATES['First DM'][0].text,MSG1_SENT:TEMPLATES['Day 7 Follow-Up'][0].text,MSG2_SENT:TEMPLATES['Day 14 Final'][0].text,DEMO_REQUESTED:TEMPLATES['Demo Scheduling'][0].text,DEMO_SCHEDULED:TEMPLATES['Demo Scheduling'][1].text,DEMO_DONE:TEMPLATES['Post-Demo'][0].text,BETA_INVITED:TEMPLATES['Beta Cohort'][1].text};
-  return map[status]||TEMPLATES['First DM'][0].text;
-}
-function nextStatus(s){const m={SOURCED:'CONNECTION_SENT',CONNECTION_SENT:'ACCEPTED',ACCEPTED:'MSG1_SENT',MSG1_SENT:'MSG2_SENT',MSG2_SENT:'MSG3_SENT',MSG3_SENT:'INTERESTED',DEMO_REQUESTED:'DEMO_SET',DEMO_SCHEDULED:'DEMO_DONE',DEMO_DONE:'BETA_INVITED'};return m[s]||null;}
-function nextLabel(s){const m={SOURCED:'Sent ✓',CONNECTION_SENT:'Accepted ✓',ACCEPTED:'DM Sent ✓',MSG1_SENT:'Followed Up ✓',MSG2_SENT:'Final Sent ✓',MSG3_SENT:'Demo Set ✓',DEMO_REQUESTED:'Demo Set ✓',DEMO_SCHEDULED:'Demo Done ✓',DEMO_DONE:'Beta Invited ✓'};return m[s]||'Advance →';}
-function advP(id,action){fx('/api/v1/ops/prospects/'+id+'/action',{method:'POST',body:JSON.stringify({action})}).then(d=>{if(d.status==='OK'){toast('→ '+action.replace(/_/g,' '));loadQueue();loadProspects();}else toast('Error: '+d.error);});}
-function closeP(id){if(!confirm('Close this prospect?'))return;fx('/api/v1/ops/prospects/'+id+'/action',{method:'POST',body:JSON.stringify({action:'CLOSED'})}).then(()=>{toast('Closed');loadQueue();loadProspects();});}
-
-// ── NOTES MODAL ──
-function openNotes(id){noteProspectId=id;document.getElementById('notes-in').value='';document.getElementById('notes-modal').classList.add('on');}
-function closeNotes(){document.getElementById('notes-modal').classList.remove('on');noteProspectId=null;}
-function saveNotes(){
-  const note=document.getElementById('notes-in').value.trim();if(!note)return closeNotes();
-  const label='Demo note — '+noteProspectId;
-  afterCopy('[NOTE SAVED] '+note,label);
-  toast('📝 Note saved to recent copies');
-  closeNotes();
-}
-
-// ══════════════════════════════════
-// DAILY EXECUTION MODE
-// ══════════════════════════════════
-function startDaily(lowEnergy){
-  dailyLow=!!lowEnergy;
-  document.getElementById('daily-mode').classList.add('on');
-  document.getElementById('dm-body').innerHTML='<div class="loading"><span class="spin"></span>Loading queue...</div>';
-  Promise.all([fx('/api/v1/ops/prospects/queue'),fx('/api/v1/ops/feed')]).then(([pq,feed])=>{
-    const overdue=(feed.data&&feed.data.overdue)||[];
-    const queue=(pq.data&&pq.data.queue)||[];
-    // Build ordered item list
-    dailyItems=[];
-    // Always: overdue first
-    overdue.forEach(o=>dailyItems.push({type:'feed',id:o.id,name:o.prospect||o.type,sub:o.type,msg:null,liUrl:null,status:null,overdue:true}));
-    const targetCount=dailyLow?2:5;
-    let added=0;
-    queue.forEach(p=>{
-      if(added>=targetCount)return;
-      dailyItems.push({type:'prospect',id:p.id,name:p.name,sub:(p.role||'')+' · '+((p.status||'').replace(/_/g,' ')),msg:getMsgForStatus(p.status),liUrl:p.linkedin_url||null,status:p.status,note:p.personalisationNote,overdue:false});
-      added++;
-    });
-    dailyIdx=0;
-    renderDailyItem();
-  });
-}
-function exitDaily(){document.getElementById('daily-mode').classList.remove('on');}
-function renderDailyItem(){
-  const el=document.getElementById('dm-body');
-  if(dailyIdx>=dailyItems.length){
-    el.innerHTML=`<div class="dm-done"><div class="dm-done-ico">${dailyLow?'⚡':'✓'}</div><div class="dm-done-title">${dailyLow?'Minimum cadence complete':'Daily session complete'}</div><div class="dm-done-sub">All ${dailyItems.length} action${dailyItems.length!==1?'s':''} processed.<br>Return tomorrow.</div></div>`;
-    document.getElementById('dm-prog').style.width='100%';
-    return;
-  }
-  const item=dailyItems[dailyIdx];
-  const pct=Math.round(dailyIdx/Math.max(dailyItems.length,1)*100);
-  document.getElementById('dm-prog').style.width=pct+'%';
-  const hasVars=item.msg&&/\[[A-Z_ ]+\]/.test(item.msg);
-  el.innerHTML=`
-    ${dailyIdx===0&&!dailyLow?`<div class="dm-low" onclick="exitDaily();startDaily(true)">⚡ Low energy? Switch to minimum cadence (2 actions)</div>`:''}
-    <div class="dm-label">Action ${dailyIdx+1} of ${dailyItems.length}</div>
-    <div class="dm-count">${item.overdue?'⚡ Overdue':item.status?item.status.replace(/_/g,' '):'Outreach'}</div>
-    <div class="dm-card">
-      <div class="dm-card-head">
-        <div class="dm-name">${item.name}</div>
-        <div class="dm-meta">${item.sub}</div>
-      </div>
-      ${item.note?`<div class="dm-note">${item.note}</div>`:''}
-      <div class="dm-actions">
-        ${hasVars?`<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;padding:7px 10px;font-family:var(--mono);font-size:10px;color:var(--am);margin-bottom:4px">⚠ Edit [BRACKETS] before sending</div>`:''}
-        ${item.msg?`<button class="dm-copy" onclick="cp(${JSON.stringify(item.msg)},'${item.name}')">📋 Copy Message</button>`:''}
-        ${item.liUrl?`<button class="dm-open" onclick="openLI('${item.liUrl}')">Open LinkedIn Profile ↗</button>`:''}
-        ${item.msg&&item.liUrl?`<button class="dm-copy" style="background:var(--ab);border:1px solid var(--ad)" onclick="cp(${JSON.stringify(item.msg)},'${item.name}','${item.liUrl}')">📋 Copy + Open ↗</button>`:''}
-        <div class="dm-row">
-          <button class="dm-sent" onclick="dmAdvance()">${item.overdue?'✓ Done':nextLabel(item.status)||'Sent ✓'}</button>
-          <button class="dm-skip" onclick="dmSkip()">Skip</button>
-        </div>
-      </div>
-    </div>`;
-}
-function dmAdvance(){
-  const item=dailyItems[dailyIdx];
-  if(item.type==='feed'){doneAct(item.id);}
-  else if(item.status){const nx=nextStatus(item.status);if(nx)advP(item.id,nx);}
-  dailyIdx++;renderDailyItem();
-}
-function dmSkip(){dailyIdx++;renderDailyItem();}
-
-// ══════════════════════════════════
-// FEED TAB
-// ══════════════════════════════════
+// ── FEED TAB ──
 function loadFeed(){
   Promise.all([fx('/api/v1/ops/brief'),fx('/api/v1/ops/feed')]).then(([brief,feed])=>{
     renderFeed(brief,feed);
     const oc=(feed.data&&feed.data.counts&&feed.data.counts.overdue)||0;
-    const b=document.getElementById('b-feed');b.textContent=oc;b.classList.toggle('on',oc>0);
+    setBadge('b-feed',oc);
     updateSticky(feed);
-  }).catch(e=>{document.getElementById('pane-feed').innerHTML='<div class="empty"><div class="empty-ico">⚠</div><div class="empty-title">Load failed</div><div class="empty-sub">'+e.message+'</div></div>';});
+  }).catch(e=>{document.getElementById('pane-feed').innerHTML=`<div class="empty"><div class="empty-ico">⚠</div><div class="empty-h">Load failed</div><div class="empty-s">${e.message}</div></div>`;});
 }
 function renderFeed(brief,feed){
   const el=document.getElementById('pane-feed');
-  let html='';
-  const d=brief.data||{};const oc=d.overdueCount||0,pe=d.pendingEvents||0,yv=d.yesterdayUniqueCount||0;
+  const d=brief.data||{};
+  const oc=d.overdueCount||0,pe=d.pendingEvents||0,yv=d.yesterdayUniqueCount||0;
   const now=new Date();
-  html+=`<div class="brief">
-    <div class="brief-date">${now.toLocaleDateString('en-IN',{weekday:'long'})} · ${now.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} · Operational Brief</div>
-    <div class="brief-stats">
-      <div class="bst"><div class="bst-v ${oc>0?'rd':'gn'}">${oc}</div><div class="bst-l">Overdue</div></div>
-      <div class="bst"><div class="bst-v ${pe>0?'am':''}">${pe}</div><div class="bst-l">Events</div></div>
-      <div class="bst"><div class="bst-v ${yv>0?'gn':''}">${yv}</div><div class="bst-l">Visitors</div></div>
+  let html=`<div class="brief">
+    <div class="brief-day">${now.toLocaleDateString('en-IN',{weekday:'long'})} · ${now.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} · Operational Brief</div>
+    <div class="brief-grid">
+      <div class="bstat"><div class="bstat-n ${oc>0?'red':'grn'}">${oc}</div><div class="bstat-l">Overdue</div></div>
+      <div class="bstat"><div class="bstat-n ${pe>0?'amb':''}">${pe}</div><div class="bstat-l">Events</div></div>
+      <div class="bstat"><div class="bstat-n ${yv>0?'grn':''}">${yv}</div><div class="bstat-l">Visitors</div></div>
     </div>
-    <div class="brief-lines">${(d.lines||[]).map(l=>`<div class="brief-line">${l}</div>`).join('')}</div>
+    <div class="brief-lines">${(d.lines||[]).map(l=>`<div class="brief-line">· ${l}</div>`).join('')}</div>
   </div>`;
-  const fd=feed.data||{};const overdue=fd.overdue||[],today=fd.today||[],events=fd.events||[];
-  if(overdue.length>0){
-    html+=`<div class="sh">⚡ Overdue <span class="sc">${overdue.length}</span></div>`;
+  const fd=feed.data||{};const ov=fd.overdue||[],td=fd.today||[],ev=fd.events||[];
+  if(ov.length>0){
+    html+=`<div class="sec">⚡ Overdue <span class="sec-ct">${ov.length}</span></div>`;
     html+='<div class="swipe-hint"><span>← snooze</span><span>done →</span></div>';
-    overdue.forEach(item=>{const hrs=Math.floor((item.overdueMs||0)/3600000);html+=`<div class="qcard uc-urgent" id="fi-${item.id}" data-id="${item.id}"><div class="qcard-body"><div class="qcard-ico ico-urgent">⚡</div><div class="qcard-info"><div class="qcard-title">${item.prospect||item.type} — ${hrs}h overdue</div><div class="qcard-sub">${item.type}</div></div></div><div class="qcard-chips"><div class="qchip qc-sent" onclick="doneAct(${item.id})">✓ Done</div><div class="qchip qc-snooze" onclick="snoozeAct(${item.id})">+24h</div><div class="qchip qc-close" onclick="dismissAct(${item.id})">Dismiss</div></div></div>`;});
+    ov.forEach(item=>{const hrs=Math.floor((item.overdueMs||0)/3600000);
+      html+=feedCard(item.id,item.prospect||item.type,item.type+' · '+hrs+'h overdue','urgent','⚡',true);
+    });
   }
-  if(today.length>0){
-    html+=`<div class="sh">Today <span class="sc">${today.length}</span></div>`;
-    today.forEach(item=>{html+=`<div class="qcard uc-today" id="fi-${item.id}" data-id="${item.id}"><div class="qcard-body"><div class="qcard-ico ico-action">${actIcon(item.type)}</div><div class="qcard-info"><div class="qcard-title">${item.prospect||item.type}</div><div class="qcard-sub">${item.type}</div></div></div><div class="qcard-chips"><div class="qchip qc-sent" onclick="doneAct(${item.id})">✓ Done</div><div class="qchip qc-snooze" onclick="snoozeAct(${item.id})">+24h</div><div class="qchip qc-close" onclick="dismissAct(${item.id})">Dismiss</div></div></div>`;});
+  if(td.length>0){
+    html+=`<div class="sec">Today <span class="sec-ct">${td.length}</span></div>`;
+    td.forEach(item=>{html+=feedCard(item.id,item.prospect||item.type,item.type,'','→',true);});
   }
-  if(events.length>0){
-    html+=`<div class="sh">Events <span class="sc">${events.length}</span></div>`;
-    events.forEach(ev=>{html+=`<div class="qcard uc-cohort"><div class="qcard-body"><div class="qcard-ico ico-cohort">🔔</div><div class="qcard-info"><div class="qcard-title">${ev.title}</div><div class="qcard-sub">${ev.body}</div></div></div></div>`;});
+  if(ev.length>0){
+    html+=`<div class="sec">Events <span class="sec-ct">${ev.length}</span></div>`;
+    ev.forEach(e=>{html+=feedCard(e.id,e.title,e.body,'cohort','🔔',false);});
   }
-  if(overdue.length===0&&today.length===0&&events.length===0){html+=`<div class="empty"><div class="empty-ico">✓</div><div class="empty-title">All clear</div><div class="empty-sub">Nothing pending.<br>Tap ▶ Daily to run your outreach batch.</div></div>`;}
-  el.innerHTML=html;attachSwipe('#pane-feed .qcard');
+  if(!ov.length&&!td.length&&!ev.length){
+    html+=`<div class="empty"><div class="empty-ico">✓</div><div class="empty-h">All clear</div><div class="empty-s">No pending actions.<br>Tap ▶ Daily to run outreach.</div><div class="empty-action" onclick="startDaily(false)">▶ Start Daily Session</div></div>`;
+  }
+  el.innerHTML=html;
+  attachSwipe('#pane-feed .card[data-id]');
 }
-function actIcon(t){const m={CONNECTION_READY:'→',CONNECTION_SENT:'→',ACCEPTED_CHECK:'◎',MSG1_SEND:'✉',MSG2_FOLLOW:'↩',MSG3_FINAL:'◈',DEMO_SCHEDULE:'📅',BETA_EVALUATE:'⭐'};return m[t]||'→';}
-function doneAct(id){const el=document.getElementById('fi-'+id)||document.getElementById('qc-'+id);if(el){el.classList.add('sw-r');setTimeout(()=>el.remove(),220);}fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(loadFeed,400);});}
-function snoozeAct(id){const el=document.getElementById('fi-'+id)||document.getElementById('qc-'+id);if(el){el.classList.add('sw-l');setTimeout(()=>el.remove(),220);}fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'SNOOZE_24H'})}).then(()=>toast('Snoozed 24h'));}
-function dismissAct(id){const el=document.getElementById('fi-'+id)||document.getElementById('qc-'+id);if(el){el.classList.add('sw-l');setTimeout(()=>el.remove(),220);}fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'DISMISS'})}).then(()=>toast('Dismissed'));}
-function attachSwipe(sel){
-  document.querySelectorAll(sel||'.qcard[data-id]').forEach(el=>{
-    let sx=0,sy=0,dx=0;
-    el.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;},{passive:true});
-    el.addEventListener('touchmove',e=>{dx=e.touches[0].clientX-sx;const dy=Math.abs(e.touches[0].clientY-sy);if(Math.abs(dx)>dy&&Math.abs(dx)>10){el.style.transform=`translateX(${dx}px)`;el.style.opacity=1-Math.abs(dx)/200;}},{passive:true});
-    el.addEventListener('touchend',()=>{const id=parseInt(el.dataset.id);if(dx>80)doneAct(id);else if(dx<-80)snoozeAct(id);else{el.style.transform='';el.style.opacity='';}});
-  });
-}
-function updateSticky(feed){
-  const fd=feed.data||{};const ov=fd.overdue||[];const td=fd.today||[];
-  const st=document.getElementById('sticky');if(CUR!=='feed'){st.classList.remove('on');return;}
-  if(ov.length>0){document.getElementById('sticky-txt').textContent='⚡ '+(ov[0].prospect||ov[0].type)+' overdue';document.getElementById('sticky-cta').onclick=()=>doneAct(ov[0].id);st.classList.add('on');}
-  else if(td.length>0){document.getElementById('sticky-txt').textContent='→ Next: '+(td[0].prospect||td[0].type);document.getElementById('sticky-cta').onclick=()=>doneAct(td[0].id);st.classList.add('on');}
-  else st.classList.remove('on');
+function feedCard(id,name,sub,cls,ico,showAct){
+  const cv=cls?`card ${cls}`:'card';
+  let btns='';
+  if(showAct)btns=`<button class="btn btn-done btn-full" onclick="doneAct(${id})">✓ Done</button><button class="btn btn-snooze" onclick="snoozeAct(${id})">+24h</button><button class="btn btn-close" onclick="dismissAct(${id})">Dismiss</button>`;
+  return `<div class="${cv} swipeable" id="fi-${id}" data-id="${id}">
+    <div class="card-top"><div class="card-ico card-ic-${cls||'action'}">${ico}</div><div class="card-info"><div class="card-name">${name}</div><div class="card-sub">${sub||''}</div></div></div>
+    ${btns?`<div class="actions">${btns}</div>`:''}
+  </div>`;
 }
 
-// ══════════════════════════════════
-// PROSPECTS (PIPELINE)
-// ══════════════════════════════════
-function loadProspects(){
-  fx('/api/v1/ops/prospects/queue').then(data=>{
-    renderProspects(data);
-    const ct=(data.data&&data.data.count)||0;
-    const b=document.getElementById('b-prospects');b.textContent=ct;b.classList.toggle('on',ct>0);
-  }).catch(()=>{document.getElementById('pane-prospects').innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-title">No prospects yet</div><div class="empty-sub">Add via + tab</div></div>';});
+// ── QUEUE TAB ──
+function loadQueue(){
+  Promise.all([fx('/api/v1/ops/prospects/queue'),fx('/api/v1/ops/feed')]).then(([pq,feed])=>{
+    renderQueue(pq,feed);
+    const ct=(pq.data&&pq.data.count)||0;setBadge('b-queue',ct);
+  }).catch(()=>{
+    document.getElementById('pane-queue').innerHTML=`<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Add prospects via the + tab<br>They appear here ready to execute.</div><div class="empty-action" onclick="go('add')">+ Add First Prospect</div></div>`;
+  });
 }
-function renderProspects(data){
-  const el=document.getElementById('pane-prospects');
-  const queue=(data.data&&data.data.queue)||[];
-  if(queue.length===0){el.innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-title">Pipeline empty</div><div class="empty-sub">Add first prospect via the + tab</div></div>';return;}
-  let html=`<div class="sh">Pipeline <span class="sc">${queue.length}</span></div>`;
-  queue.forEach(p=>{
-    const initials=p.name.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2);
+function renderQueue(pq,feed){
+  const el=document.getElementById('pane-queue');
+  const queue=(pq.data&&pq.data.queue)||[];
+  const ov=(feed&&feed.data&&feed.data.overdue)||[];
+  if(!queue.length&&!ov.length){el.innerHTML=`<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Source prospects, then add via + tab.<br>The queue sequences everything automatically.</div><div class="empty-action" onclick="go('source')">🔍 Go to Source</div></div>`;return;}
+  let html='';
+  if(ov.length){
+    html+=`<div class="sec">⚡ Overdue <span class="sec-ct">${ov.length}</span></div>`;
+    html+='<div class="swipe-hint"><span>← snooze</span><span>done →</span></div>';
+    ov.forEach(o=>{const hrs=Math.floor((o.overdueMs||0)/3600000);html+=prospectCard({id:o.id,name:o.prospect||o.type,sub:o.type,stage:'OVERDUE',liUrl:null,msg:null,note:null,isOverdue:true,overdueHrs:hrs});});
+  }
+  const stages={SOURCED:'Ready to Connect',CONNECTION_SENT:'Awaiting Acceptance',ACCEPTED:'Send First DM',MSG1_SENT:'Day 7 Follow-Up',MSG2_SENT:'Day 14 Final',DEMO_REQUESTED:'Schedule Demo',DEMO_SCHEDULED:'Demo Upcoming',DEMO_DONE:'Post-Demo Follow-Up',BETA_INVITED:'Onboard to Cohort'};
+  const grouped={};
+  queue.forEach(p=>{const g=stages[p.status]||p.status;if(!grouped[g])grouped[g]=[];grouped[g].push(p);});
+  for(const[stage,ps]of Object.entries(grouped)){
+    html+=`<div class="sec">${stage} <span class="sec-ct">${ps.length}</span></div>`;
+    ps.forEach(p=>{html+=prospectCard({id:p.id,name:p.name,sub:(p.role||'Professional')+' · Score '+(p.score||2),stage:p.status,liUrl:p.linkedin_url,msg:getMsgForStatus(p.status),note:p.personalisationNote,isOverdue:false});});
+  }
+  el.innerHTML=html;
+  attachSwipe('#pane-queue .card[data-id]');
+}
+function prospectCard({id,name,sub,stage,liUrl,msg,note,isOverdue,overdueHrs}){
+  const init=initials(name);
+  const msgPH=msg&&hasPH(msg);
+  let chips='';
+  if(msg&&liUrl){
+    // Primary: combined copy+open
+    const escapedMsg=JSON.stringify(msg);const escapedName=JSON.stringify(name);const escapedUrl=JSON.stringify(liUrl);
+    chips+=`<button class="btn btn-both btn-full" onclick="cp(${escapedMsg},${escapedName},${escapedUrl})">📋 Copy + Open ↗</button>`;
+    chips+=`<button class="btn btn-open" onclick="openOnly(${escapedUrl})">Open ↗</button>`;
+  }else if(msg){
+    const escapedMsg=JSON.stringify(msg);const escapedName=JSON.stringify(name);
+    chips+=`<button class="btn btn-copy" onclick="cpOnly(${escapedMsg},${escapedName})">📋 Copy Msg</button>`;
+  }else if(liUrl){
+    const escapedUrl=JSON.stringify(liUrl);
+    chips+=`<button class="btn btn-open" onclick="openOnly(${escapedUrl})">Open LinkedIn ↗</button>`;
+  }
+  if(msgPH)chips+=`<div style="width:100%;font-family:var(--mono);font-size:10px;color:var(--am);padding:2px 0">⚠ Edit [BRACKETS] before sending</div>`;
+  if(isOverdue){
+    chips+=`<button class="btn btn-done btn-full" onclick="doneAct(${id})">✓ Done</button>`;
+    chips+=`<button class="btn btn-snooze" onclick="snoozeAct(${id})">+24h</button>`;
+  }else if(stage){
+    const nx=nextSt(stage);
+    if(nx){const lbl=nextLbl(stage);chips+=`<button class="btn btn-adv" onclick="advP(${id},${JSON.stringify(nx)})">${lbl}</button>`;}
+    if(stage==='DEMO_DONE')chips+=`<button class="btn btn-note" onclick="openNotes(${id})">📝 Note</button>`;
+  }
+  chips+=`<button class="btn btn-close" onclick="closeP(${id})">Close</button>`;
+  return `<div class="card swipeable" id="qc-${id}" data-id="${id}">
+    <div class="card-top">
+      <div class="card-av">${init}</div>
+      <div class="card-info"><div class="card-name">${name}</div><div class="card-sub">${sub}</div></div>
+      <div class="card-stage ${stageCls(stage)}">${(stage||'SOURCED').replace(/_/g,' ')}</div>
+    </div>
+    ${note?`<div class="card-note">${note}</div>`:''}
+    ${msgPH?`<div class="card-warn">⚠ Edit [BRACKETS] before sending</div>`:''}
+    <div class="actions">${chips}</div>
+  </div>`;
+}
+
+// ── PIPELINE TAB ──
+function loadPipeline(){
+  fx('/api/v1/ops/prospects/queue').then(data=>{
+    renderPipeline(data);
+    const ct=(data.data&&data.data.count)||0;setBadge('b-pipeline',ct);
+  }).catch(()=>{document.getElementById('pane-pipeline').innerHTML=`<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add first prospect via the + tab.</div><div class="empty-action" onclick="go('add')">+ Add Prospect</div></div>`;});
+}
+function renderPipeline(data){
+  const el=document.getElementById('pane-pipeline');
+  const q=(data.data&&data.data.queue)||[];
+  if(!q.length){el.innerHTML=`<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.<br>All status tracking is automatic.</div><div class="empty-action" onclick="go('add')">+ Add Prospect</div></div>`;return;}
+  let html=`<div class="sec">Pipeline <span class="sec-ct">${q.length}</span></div>`;
+  q.forEach(p=>{
     const msg=getMsgForStatus(p.status);
-    const hasVars=msg&&/\[[A-Z_ ]+\]/.test(msg);
-    html+=`<div class="qcard uc-today">
-      <div class="qcard-body">
-        <div class="qcard-ico ico-action" style="background:var(--ab);font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ac)">${initials}</div>
-        <div class="qcard-info">
-          <div class="qcard-title">${p.name}</div>
-          <div class="qcard-sub">${p.role||'Professional'} · Score ${p.score||2} · ${(p.status||'SOURCED').replace(/_/g,' ')}</div>
-        </div>
+    const msgPH=hasPH(msg);
+    let chips='';
+    if(p.linkedin_url){
+      chips+=`<button class="btn btn-both" onclick="cp(${JSON.stringify(msg)},${JSON.stringify(p.name)},${JSON.stringify(p.linkedin_url)})">📋 Copy + Open ↗</button>`;
+      chips+=`<button class="btn btn-open" onclick="openOnly(${JSON.stringify(p.linkedin_url)})">Open ↗</button>`;
+    }else{chips+=`<button class="btn btn-copy" onclick="cpOnly(${JSON.stringify(msg)},${JSON.stringify(p.name)})">📋 Copy</button>`;}
+    const nx=nextSt(p.status);
+    if(nx)chips+=`<button class="btn btn-adv" onclick="advP(${p.id},${JSON.stringify(nx)})">${nextLbl(p.status)}</button>`;
+    if(p.status==='DEMO_DONE')chips+=`<button class="btn btn-note" onclick="openNotes(${p.id})">📝 Note</button>`;
+    chips+=`<button class="btn btn-close" onclick="closeP(${p.id})">Close</button>`;
+    html+=`<div class="card">
+      <div class="card-top">
+        <div class="card-av">${initials(p.name)}</div>
+        <div class="card-info"><div class="card-name">${p.name}</div><div class="card-sub">${p.role||'Professional'} · Score ${p.score||2}</div></div>
+        <div class="card-stage ${stageCls(p.status)}">${(p.status||'SOURCED').replace(/_/g,' ')}</div>
       </div>
-      ${p.personalisationNote?`<div class="qcard-note">${p.personalisationNote}</div>`:''}
-      <div class="qcard-chips">
-        ${p.linkedin_url?`<div class="qchip qc-both" onclick='cp(${JSON.stringify(msg)},"${p.name}","${p.linkedin_url}")'>📋 Copy + Open ↗</div>`:`<div class="qchip qc-copy" onclick='cp(${JSON.stringify(msg)},"${p.name}")'>📋 Copy Msg</div>`}
-        ${p.linkedin_url?`<div class="qchip qc-open" onclick="openLI('${p.linkedin_url}')">Open ↗</div>`:''}
-        ${hasVars?`<div style="width:100%;font-family:var(--mono);font-size:10px;color:var(--am);padding:2px 0">⚠ Edit [BRACKETS] before sending</div>`:''}
-        <div class="qchip qc-sent" onclick="advP(${p.id},'${nextStatus(p.status)||'INTERESTED'}')">${nextLabel(p.status)||'Advance →'}</div>
-        ${p.status==='DEMO_DONE'?`<div class="qchip" style="background:var(--pb);color:var(--pu);border-color:#6b21a8;font-family:var(--mono);font-size:10px;padding:5px 11px;border-radius:5px;cursor:pointer" onclick="openNotes(${p.id})">📝 Note</div>`:''}
-        <div class="qchip qc-close" onclick="closeP(${p.id})">Close</div>
-      </div>
+      ${p.personalisationNote?`<div class="card-note">${p.personalisationNote}</div>`:''}
+      ${msgPH?`<div class="card-warn">⚠ Edit [BRACKETS] before sending</div>`:''}
+      <div class="actions">${chips}</div>
     </div>`;
   });
   el.innerHTML=html;
 }
 
-// ══════════════════════════════════
-// TRAFFIC
-// ══════════════════════════════════
+// ── TRAFFIC TAB ──
 function loadTraffic(){
-  fx('/api/v1/ops/traffic').then(data=>{renderTraffic(data);}).catch(()=>{document.getElementById('pane-traffic').innerHTML='<div class="empty"><div class="empty-ico">↗</div><div class="empty-title">Load failed</div></div>';});
+  fx('/api/v1/ops/traffic').then(data=>{renderTraffic(data);}).catch(()=>{document.getElementById('pane-traffic').innerHTML=`<div class="empty"><div class="empty-ico">↗</div><div class="empty-h">Load failed</div></div>`;});
 }
 function renderTraffic(data){
   const el=document.getElementById('pane-traffic');
-  const d=data.data||{};const tu=d.totalUnique||0,tr=d.totalRevisits||0,rr=d.revisitRate||0,sm=d.sources||{};const tot=Math.max(tu,1);
-  let html=`<div class="sh">Traffic Intelligence <span class="sc">7d</span></div>
-  <div class="tcard">
-    <div class="tcard-title">Last 7 Days</div>
-    <div class="tgrid">
-      <div class="tst"><div class="tst-v">${tu}</div><div class="tst-l">Unique</div></div>
-      <div class="tst"><div class="tst-v">${tr}</div><div class="tst-l">Revisits</div></div>
-      <div class="tst"><div class="tst-v">${rr}×</div><div class="tst-l">Rate</div></div>
-      <div class="tst"><div class="tst-v">${tu>0?Math.round(tr/tu*100):0}%</div><div class="tst-l">Return</div></div>
+  const d=data.data||{};const tu=d.totalUnique||0,tr=d.totalRevisits||0,sm=d.sources||{};const tot=Math.max(tu,1);
+  let html=`<div class="sec">Traffic Intelligence <span class="sec-ct">7d</span></div>
+  <div class="t-card">
+    <div class="t-grid">
+      <div class="t-stat"><div class="t-stat-n">${tu}</div><div class="t-stat-l">Unique</div></div>
+      <div class="t-stat"><div class="t-stat-n">${tr}</div><div class="t-stat-l">Revisits</div></div>
+      <div class="t-stat"><div class="t-stat-n">${tu>0?Math.round(tr/tu*100):0}%</div><div class="t-stat-l">Return</div></div>
+      <div class="t-stat"><div class="t-stat-n">${d.revisitRate||0}×</div><div class="t-stat-l">Rate</div></div>
     </div>
-    <div class="sbars">
-      ${sbar('LinkedIn',sm.LINKEDIN||0,tot,'fl')}${sbar('WhatsApp',sm.WHATSAPP||0,tot,'fw')}${sbar('Direct',sm.DIRECT||0,tot,'fd')}${sbar('Other',sm.OTHER||0,tot,'fo')}
+    <div class="t-bars">
+      ${tbar('LinkedIn',sm.LINKEDIN||0,tot,'tf-li')}${tbar('WhatsApp',sm.WHATSAPP||0,tot,'tf-wa')}${tbar('Direct',sm.DIRECT||0,tot,'tf-di')}${tbar('Other',sm.OTHER||0,tot,'tf-ot')}
     </div>
   </div>`;
-  if(tu===0)html+=`<div class="empty"><div class="empty-ico">↗</div><div class="empty-title">No visits yet</div><div class="empty-sub">Traffic appears once outreach<br>drives visitors to advisiq.in</div></div>`;
+  if(!tu)html+=`<div class="empty"><div class="empty-ico">↗</div><div class="empty-h">No visits yet</div><div class="empty-s">Traffic appears once outreach<br>drives visitors to advisiq.in</div></div>`;
   el.innerHTML=html;
-  setTimeout(()=>{el.querySelectorAll('.sbar-f').forEach(b=>{if(b.dataset.w)b.style.width=b.dataset.w+'%';});},50);
+  setTimeout(()=>{el.querySelectorAll('.t-bar-fill').forEach(b=>{if(b.dataset.w)b.style.width=b.dataset.w+'%';});},60);
 }
-function sbar(l,v,t,c){const p=t>0?Math.min(100,Math.round(v/t*100)):0;return `<div class="sbar"><div class="sbar-l">${l}</div><div class="sbar-t"><div class="sbar-f ${c}" style="width:0%" data-w="${p}"></div></div><div class="sbar-v">${v}</div></div>`;}
+function tbar(l,v,tot,c){const p=Math.min(100,Math.round(v/tot*100));return `<div class="t-bar"><div class="t-bar-l">${l}</div><div class="t-bar-track"><div class="t-bar-fill ${c}" style="width:0%" data-w="${p}"></div></div><div class="t-bar-n">${v}</div></div>`;}
 
-// ══════════════════════════════════
-// ADD PROSPECT
-// ══════════════════════════════════
+// ── ADD TAB ──
 function renderAdd(){
-  const el=document.getElementById('pane-add');
-  el.innerHTML=`<div class="sh">Add Prospect</div>
-  <div class="aform">
-    <div class="aform-title">New Prospect</div>
-    <div class="ff"><label class="fl-label">Full Name *</label><input class="fi" id="fn" type="text" placeholder="Rajesh Kumar" autocomplete="off"></div>
-    <div class="ff"><label class="fl-label">Role</label><div class="fsel-wrap"><select class="fsel" id="fr"><option>IFA</option><option>RIA</option><option>Wealth Manager</option><option>PMS</option><option>Family Office</option><option>Other</option></select></div></div>
-    <div class="ff"><label class="fl-label">Organisation</label><input class="fi" id="fo2" type="text" placeholder="Optional" autocomplete="off"></div>
-    <div class="ff"><label class="fl-label">LinkedIn URL *</label><input class="fi" id="fu" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off"></div>
-    <div class="ff"><label class="fl-label">Priority Score</label><div class="fsel-wrap"><select class="fsel" id="fs"><option value="3">3 — Priority (posts about market, active)</option><option value="2" selected>2 — Standard</option><option value="1">1 — Low</option></select></div></div>
-    <div class="ff"><label class="fl-label">What did they post about?</label><input class="fi" id="fp" type="text" placeholder="Personalisation note" autocomplete="off"></div>
-    <button class="fbtn" onclick="addP()">Add to Pipeline → Queue</button>
+  document.getElementById('pane-add').innerHTML=`
+  <div class="sec">Add Prospect</div>
+  <div class="form">
+    <div class="form-title">New Prospect</div>
+    <div class="ff"><label class="ff-label">Full Name *</label><input class="ff-in" id="fn" type="text" placeholder="Rajesh Kumar" autocomplete="off"></div>
+    <div class="ff"><label class="ff-label">Role</label><div class="ff-wrap"><select class="ff-sel" id="fr"><option>IFA</option><option>RIA</option><option>Wealth Manager</option><option>PMS</option><option>Family Office</option><option>Other</option></select></div></div>
+    <div class="ff"><label class="ff-label">Organisation</label><input class="ff-in" id="fo" type="text" placeholder="Optional" autocomplete="off"></div>
+    <div class="ff"><label class="ff-label">LinkedIn URL *</label><input class="ff-in" id="fu" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off"></div>
+    <div class="ff"><label class="ff-label">Priority Score</label><div class="ff-wrap"><select class="ff-sel" id="fs"><option value="3">3 — Priority (posts about market)</option><option value="2" selected>2 — Standard</option><option value="1">1 — Low</option></select></div></div>
+    <div class="ff"><label class="ff-label">What did they post about?</label><input class="ff-in" id="fp" type="text" placeholder="Personalisation note" autocomplete="off"></div>
+    <button class="form-btn" onclick="addP()">Add to Pipeline → Queue</button>
   </div>`;
 }
 function addP(){
   const name=document.getElementById('fn').value.trim();const url=document.getElementById('fu').value.trim();
   if(!name||!url){toast('Name and LinkedIn URL required');return;}
-  const body={name,linkedin_url:url,role:document.getElementById('fr').value,organisation:document.getElementById('fo2').value.trim()||null,score:parseInt(document.getElementById('fs').value),personalisation_note:document.getElementById('fp').value.trim()||null,source_string:'S1'};
+  const body={name,linkedin_url:url,role:document.getElementById('fr').value,organisation:document.getElementById('fo').value.trim()||null,score:parseInt(document.getElementById('fs').value),personalisation_note:document.getElementById('fp').value.trim()||null,source_string:'S1'};
   fx('/api/v1/ops/prospects',{method:'POST',body:JSON.stringify(body)}).then(d=>{
-    if(d.status==='OK'){toast('Added: '+name+' → Queue');document.getElementById('fn').value='';document.getElementById('fu').value='';document.getElementById('fo2').value='';document.getElementById('fp').value='';go('queue');}
+    if(d.status==='OK'){toast('Added: '+name);['fn','fu','fo','fp'].forEach(id=>document.getElementById(id).value='');go('queue');}
     else if(d.status==='DUPLICATE')toast('Already in pipeline');
     else toast('Error: '+(d.error||'unknown'));
   }).catch(()=>toast('Network error'));
 }
 
-// Init
+// ── ACTION HANDLERS ──
+function doneAct(id){swipeOut(id,'r');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(()=>{loadFeed();loadQueue();},400);});}
+function snoozeAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'SNOOZE_24H'})}).then(()=>toast('Snoozed 24h'));}
+function dismissAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'DISMISS'})}).then(()=>toast('Dismissed'));}
+function swipeOut(id,dir){
+  const el=document.getElementById('fi-'+id)||document.getElementById('qc-'+id);
+  if(el){el.classList.add(dir==='r'?'sw-out-r':'sw-out-l');setTimeout(()=>el.remove(),200);}
+}
+function advP(id,action){
+  fx('/api/v1/ops/prospects/'+id+'/action',{method:'POST',body:JSON.stringify({action})}).then(d=>{
+    if(d.status==='OK'){toast('→ '+action.replace(/_/g,' '));loadQueue();loadPipeline();}
+    else toast('Error: '+(d.error||'unknown'));
+  });
+}
+function closeP(id){
+  if(!window.confirm('Close this prospect?'))return;
+  fx('/api/v1/ops/prospects/'+id+'/action',{method:'POST',body:JSON.stringify({action:'CLOSED'})}).then(()=>{toast('Closed');loadQueue();loadPipeline();});
+}
+
+// ── SWIPE GESTURES ──
+function attachSwipe(sel){
+  document.querySelectorAll(sel||'.card[data-id]').forEach(el=>{
+    let sx=0,sy=0,dx=0,moved=false;
+    el.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;moved=false;},{passive:true});
+    el.addEventListener('touchmove',e=>{
+      const cx=e.touches[0].clientX,cy=e.touches[0].clientY;
+      dx=cx-sx;const dy=Math.abs(cy-sy);
+      if(Math.abs(dx)>dy&&Math.abs(dx)>12){moved=true;el.style.transform=`translateX(${dx}px)`;el.style.opacity=String(1-Math.abs(dx)/220);}
+    },{passive:true});
+    el.addEventListener('touchend',()=>{
+      if(!moved){el.style.transform='';el.style.opacity='';return;}
+      const id=parseInt(el.dataset.id);
+      if(dx>80)doneAct(id);
+      else if(dx<-80)snoozeAct(id);
+      else{el.style.transform='';el.style.opacity='';}
+    });
+  });
+}
+
+// ── STICKY ──
+function updateSticky(feed){
+  const fd=feed.data||{};const ov=fd.overdue||[];const td=fd.today||[];
+  const st=document.getElementById('sticky');
+  if(CUR!=='feed'){st.classList.remove('on');return;}
+  if(ov.length){document.getElementById('sticky-txt').textContent='⚡ '+(ov[0].prospect||ov[0].type)+' overdue';document.getElementById('sticky-act').onclick=()=>doneAct(ov[0].id);st.classList.add('on');}
+  else if(td.length){document.getElementById('sticky-txt').textContent='→ Next: '+(td[0].prospect||td[0].type);document.getElementById('sticky-act').onclick=()=>doneAct(td[0].id);st.classList.add('on');}
+  else st.classList.remove('on');
+}
+
+// ── BADGES ──
+function setBadge(id,n){const el=document.getElementById(id);if(!el)return;el.textContent=n;el.classList.toggle('on',n>0);}
+
+// ── NOTES ──
+function openNotes(id){notesPid=id;document.getElementById('notes-ta').value='';document.getElementById('notes-overlay').classList.add('on');}
+function closeNotes(){document.getElementById('notes-overlay').classList.remove('on');notesPid=null;}
+function saveNotes(){
+  const note=document.getElementById('notes-ta').value.trim();if(!note)return closeNotes();
+  pushTray('[NOTE] '+note,'Demo note');toast('📝 Note saved');closeNotes();
+}
+
+// ══════════════════════════
+// DAILY EXECUTION MODE
+// ══════════════════════════
+function startDaily(lowEnergy){
+  document.getElementById('daily').classList.add('on');
+  document.getElementById('dm-body').innerHTML='<div class="loading"><span class="spin"></span>Loading queue...</div>';
+  Promise.all([fx('/api/v1/ops/prospects/queue'),fx('/api/v1/ops/feed')]).then(([pq,feed])=>{
+    const ov=(feed.data&&feed.data.overdue)||[];
+    const q=(pq.data&&pq.data.queue)||[];
+    dailyItems=[];
+    ov.forEach(o=>dailyItems.push({type:'feed',id:o.id,name:o.prospect||o.type,sub:o.type,msg:null,liUrl:null,status:null,note:null,isOverdue:true}));
+    const limit=lowEnergy?2:5;let added=0;
+    q.forEach(p=>{if(added>=limit)return;dailyItems.push({type:'prospect',id:p.id,name:p.name,sub:(p.role||'')+' · '+(p.status||'').replace(/_/g,' '),msg:getMsgForStatus(p.status),liUrl:p.linkedin_url||null,status:p.status,note:p.personalisationNote,isOverdue:false});added++;});
+    dailyIdx=0;renderDailyStep();
+  });
+}
+function exitDaily(){document.getElementById('daily').classList.remove('on');}
+function renderDailyStep(){
+  const el=document.getElementById('dm-body');
+  const pct=dailyItems.length?Math.round(dailyIdx/dailyItems.length*100):100;
+  document.getElementById('dm-prog').style.width=pct+'%';
+  if(dailyIdx>=dailyItems.length){
+    el.innerHTML=`<div class="dm-done"><div class="dm-done-ico">✓</div><div class="dm-done-h">Session complete</div><div class="dm-done-s">${dailyItems.length} action${dailyItems.length!==1?'s':''} processed.<br>Return tomorrow.</div></div>`;
+    return;
+  }
+  const item=dailyItems[dailyIdx];
+  const msgPH=item.msg&&hasPH(item.msg);
+  const showLow=dailyIdx===0;
+  const escapedMsg=item.msg?JSON.stringify(item.msg):'""';
+  const escapedName=JSON.stringify(item.name);
+  const escapedUrl=item.liUrl?JSON.stringify(item.liUrl):'""';
+  const nx=item.status?nextSt(item.status):null;
+  const lbl=item.status?nextLbl(item.status):'✓ Done';
+
+  let html=`${showLow?`<button class="dm-low-btn" onclick="exitDaily();startDaily(true)">⚡ Low energy? Minimum cadence (2 actions)</button>`:''}
+  <div class="dm-meta">Action ${dailyIdx+1} of ${dailyItems.length}</div>
+  <div class="dm-step">${item.isOverdue?'⚡ OVERDUE':(item.status||'Outreach').replace(/_/g,' ')}</div>
+  <div class="dm-card">
+    <div class="dm-card-top">
+      <div class="dm-card-name">${item.name}</div>
+      <div class="dm-card-meta">${item.sub}</div>
+    </div>
+    ${item.note?`<div class="dm-card-note">${item.note}</div>`:''}
+    ${msgPH?`<div class="dm-card-warn">⚠ Edit [BRACKETS] before sending</div>`:''}
+    <div class="dm-actions">`;
+
+  if(item.msg&&item.liUrl){
+    html+=`<button class="dm-btn dm-btn-both" onclick="cp(${escapedMsg},${escapedName},${escapedUrl})">📋 Copy + Open LinkedIn ↗</button>`;
+    html+=`<button class="dm-btn dm-btn-open" onclick="cpOnly(${escapedMsg},${escapedName})">📋 Copy only</button>`;
+    html+=`<button class="dm-btn dm-btn-open" onclick="openOnly(${escapedUrl})">Open LinkedIn only ↗</button>`;
+  }else if(item.msg){
+    html+=`<button class="dm-btn dm-btn-copy" onclick="cpOnly(${escapedMsg},${escapedName})">📋 Copy Message</button>`;
+  }else if(item.liUrl){
+    html+=`<button class="dm-btn dm-btn-open" onclick="openOnly(${escapedUrl})">Open LinkedIn ↗</button>`;
+  }
+
+  html+=`<div class="dm-row">
+    <button class="dm-btn dm-btn-adv" onclick="dmAdv()">${item.isOverdue?'✓ Done':lbl}</button>
+    <button class="dm-btn dm-btn-skip" onclick="dmSkip()">Skip</button>
+  </div>
+  ${item.status==='DEMO_DONE'?`<button class="dm-btn dm-btn-open" onclick="openNotes(${item.id})">📝 Add demo note</button>`:''}
+    </div>
+  </div>`;
+  el.innerHTML=html;
+}
+function dmAdv(){
+  const item=dailyItems[dailyIdx];
+  if(item.type==='feed')doneAct(item.id);
+  else if(item.status){const nx=nextSt(item.status);if(nx)advP(item.id,nx);}
+  dailyIdx++;renderDailyStep();
+}
+function dmSkip(){dailyIdx++;renderDailyStep();}
+
+
+// ── DELEGATED CLICK HANDLER ──
+document.addEventListener('click', function(e){
+  var el = e.target.closest('[data-tkey]');
+  if(el){
+    var parts = el.dataset.tkey.split('|||');
+    var grp=parts[0], idx=parseInt(parts[1]);
+    if(T[grp] && T[grp][idx]){ cpOnly(T[grp][idx].t, T[grp][idx].l); }
+    return;
+  }
+  var sl = e.target.closest('[data-skey]');
+  if(sl){
+    var parts = sl.dataset.skey.split('|||');
+    var sidx=parseInt(parts[0]), sact=parts[1];
+    var s=SEARCHES[sidx];
+    if(!s)return;
+    if(sact==='copy'){ cpOnly(s.q, s.l); }
+    else if(sact==='open'){
+      var liUrl='https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(s.q)+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH';
+      openOnly(liUrl);
+    }
+    return;
+  }
+}, true);
+
+// ── INIT ──
 document.getElementById('auth-pw').focus();
 </script>
 </body>
