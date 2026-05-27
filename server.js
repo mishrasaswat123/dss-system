@@ -1424,6 +1424,7 @@ const ERROR_ENUM = Object.freeze({
 
 		const express = require("express");
 		const sqlite3 = require("sqlite3").verbose();
+		const crypto = require("crypto"); // PHASE-A
 		const { AbortController } = require("node-abort-controller");
 ////////////////////////////////////////////////////////
 // SECTION-07 : LOGGING (pino structured logger)
@@ -1497,6 +1498,16 @@ const ERROR_ENUM = Object.freeze({
                 db.run('INSERT OR IGNORE INTO circuit_breaker_state (id,failures,last_failure,is_open,updated_at) VALUES (1,0,NULL,0,NULL)');
 
 		db.run('CREATE INDEX IF NOT EXISTS idx_decisions_time ON decisions(timestamp)');
+                db.run(`CREATE TABLE IF NOT EXISTS comm_visits (id INTEGER PRIMARY KEY AUTOINCREMENT, ip_hash TEXT NOT NULL, visit_date TEXT NOT NULL, visit_hour INTEGER NOT NULL, is_revisit INTEGER DEFAULT 0, source TEXT DEFAULT 'DIRECT', page TEXT DEFAULT 'HOME', ua_class TEXT DEFAULT 'UNKNOWN', logged_at INTEGER NOT NULL)`);
+                db.run('CREATE INDEX IF NOT EXISTS idx_visits_date ON comm_visits(visit_date)');
+                db.run('CREATE INDEX IF NOT EXISTS idx_visits_hash ON comm_visits(ip_hash)');
+                db.run(`CREATE TABLE IF NOT EXISTS comm_ops_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, priority TEXT DEFAULT 'MORNING', title TEXT NOT NULL, body TEXT NOT NULL, prospect_ref TEXT, triggered_at INTEGER NOT NULL, delivered INTEGER DEFAULT 0, dismissed INTEGER DEFAULT 0)`);
+                db.run('CREATE INDEX IF NOT EXISTS idx_ops_events_pri ON comm_ops_events(priority, delivered)');
+                db.run(`CREATE TABLE IF NOT EXISTS comm_prospects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT, organisation TEXT, linkedin_url TEXT UNIQUE NOT NULL, score INTEGER DEFAULT 2, source_string TEXT DEFAULT 'S1', last_post_observed TEXT, personalisation_note TEXT, status TEXT DEFAULT 'SOURCED', interaction_count INTEGER DEFAULT 0, last_interaction_at INTEGER, added_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+                db.run('CREATE INDEX IF NOT EXISTS idx_prospects_status ON comm_prospects(status)');
+                db.run(`CREATE TABLE IF NOT EXISTS comm_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, prospect_id INTEGER, action_type TEXT NOT NULL, status TEXT DEFAULT 'PENDING', due_at INTEGER, completed_at INTEGER, note TEXT, outcome TEXT, objection TEXT, logged_at INTEGER NOT NULL)`);
+                db.run('CREATE INDEX IF NOT EXISTS idx_actions_due ON comm_actions(due_at, status)');
+                db.run('CREATE INDEX IF NOT EXISTS idx_actions_prospect ON comm_actions(prospect_id)');
 		});
 		const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 		// ===============================
@@ -1636,6 +1647,36 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 
 		app.use(express.json());
 		app.use("/api/technical", technicalRoutes);
+
+// PHASE-A: TRAFFIC TELEMETRY MIDDLEWARE
+// Privacy-safe. Fire-and-forget. Raw IP never stored.
+(function installTrafficMiddleware(){
+  let _sd='',_sv='';
+  function salt(){const t=new Date().toISOString().slice(0,10);if(_sd!==t){_sd=t;_sv=crypto.randomBytes(16).toString('hex');}return _sv;}
+  function inferPage(u){if(!u||u==='/') return 'HOME';if(u.startsWith('/ops'))return 'OPS';if(u.includes('brief'))return 'BRIEF';return 'HOME';}
+  app.use((req,res,next)=>{
+    if(req.method!=='GET')return next();
+    if(req.path.startsWith('/api/'))return next();
+    if(req.path.includes('.'))return next();
+    next();
+    setImmediate(()=>{
+      try{
+        const ip=(req.headers['x-forwarded-for']||'').split(',')[0].trim()||req.socket.remoteAddress||'unknown';
+        const h=crypto.createHash('sha256').update(ip+salt()).digest('hex').slice(0,32);
+        const now=Date.now();
+        const vd=new Date(now).toISOString().slice(0,10);
+        const vh=new Date(now).getUTCHours();
+        const s=inferSrc(req.headers['referer']||req.headers['referrer'],req.headers['user-agent']);
+        const u=inferUA(req.headers['user-agent']);
+        const p=inferPage(req.path);
+        db.get('SELECT 1 FROM comm_visits WHERE ip_hash=? AND visit_date<? LIMIT 1',[h,vd],(err,row)=>{
+          if(err)return;
+          db.run('INSERT INTO comm_visits (ip_hash,visit_date,visit_hour,is_revisit,source,page,ua_class,logged_at) VALUES (?,?,?,?,?,?,?,?)',[h,vd,vh,row?1:0,s,p,u,now],()=>{});
+        });
+      }catch(e){}
+    });
+  });
+})();
 
 
 		// ===============================
@@ -10567,6 +10608,105 @@ app.post("/api/v1/admin/narrative/simulate-degradation", (req, res) =>
 );
 
 
+app.get("/founder-ops",(req,res)=>res.sendFile(require("path").join(__dirname,"public","ops.html")));
+// PHASE-A: OPS ROUTES
+const OPS_PWD = process.env.OPS_PASSWORD || "advisiq-ops-2026";
+function opsAuth(req,res,next){
+  const a=req.headers["x-ops-auth"]||req.query["ops_auth"];
+  if(a!==OPS_PWD)return res.status(401).json({status:"UNAUTHORIZED"});
+  return next();
+}
+app.get("/api/v1/ops/brief",opsAuth,(req,res)=>{
+  const now=Date.now();
+  const yd=new Date(now-86400000).toISOString().slice(0,10);
+  db.get("SELECT COUNT(*) as c FROM comm_actions WHERE status=? AND due_at IS NOT NULL AND due_at<?",["PENDING",now],(e1,r1)=>{
+    db.get("SELECT COUNT(*) as c FROM comm_ops_events WHERE delivered=0",[],(e2,r2)=>{
+      db.get("SELECT COUNT(DISTINCT ip_hash) as c FROM comm_visits WHERE visit_date=?",[yd],(e3,r3)=>{
+        const oc=(r1&&r1.c)||0,pe=(r2&&r2.c)||0,yv=(r3&&r3.c)||0;
+        res.json({status:"OK",timestamp:now,data:{overdueCount:oc,pendingEvents:pe,yesterdayUniqueCount:yv,lines:[oc>0?String(oc)+" overdue":"No overdue",String(pe)+" events",yv>0?String(yv)+" visitors":"No visits","ops ready"],generatedAt:now}});
+      });
+    });
+  });
+});
+app.get("/api/v1/ops/feed",opsAuth,(req,res)=>{
+  const now=Date.now(),t0=new Date().setHours(0,0,0,0),t1=t0+86400000;
+  db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at IS NOT NULL AND a.due_at<? ORDER BY a.due_at ASC LIMIT 10",["PENDING",now],(e1,ov)=>{
+    if(e1)ov=[];
+    db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at>=? AND a.due_at<? ORDER BY a.due_at ASC LIMIT 15",["PENDING",t0,t1],(e2,td)=>{
+      if(e2)td=[];
+      db.all("SELECT * FROM comm_ops_events WHERE delivered=0 ORDER BY triggered_at DESC LIMIT 5",[],( e3,ev)=>{
+        if(e3)ev=[];
+        var om=(ov||[]).map(function(a){return{id:a.id,type:a.action_type,urgency:"OVERDUE",prospect:a.name||null,dueAt:a.due_at,overdueMs:now-a.due_at};});
+        var tm=(td||[]).map(function(a){return{id:a.id,type:a.action_type,urgency:"TODAY",prospect:a.name||null,dueAt:a.due_at};});
+        var em=(ev||[]).map(function(e){return{id:e.id,type:e.event_type,priority:e.priority,title:e.title,body:e.body};});
+        res.json({status:"OK",timestamp:now,data:{overdue:om,today:tm,events:em,counts:{overdue:om.length,today:tm.length,events:em.length}}});
+      });
+    });
+  });
+});
+app.post("/api/v1/ops/feed/:id/act",opsAuth,(req,res)=>{
+  const id=parseInt(req.params.id),act=(req.body&&req.body.action)||"COMPLETE",now=Date.now();
+  if(["COMPLETE","SNOOZE_24H","DISMISS","SKIP"].indexOf(act)===-1)return res.status(400).json({status:"ERROR",error:"Invalid action"});
+  db.get("SELECT * FROM comm_actions WHERE id=?",[id],(err,a)=>{
+    if(err||!a)return res.status(404).json({status:"NOT_FOUND"});
+    const ns=act==="COMPLETE"?"COMPLETED":act==="DISMISS"?"SKIPPED":"PENDING";
+    const nd=act==="SNOOZE_24H"?now+86400000:null,ca=act==="COMPLETE"?now:null;
+    db.run("UPDATE comm_actions SET status=?,completed_at=?,due_at=COALESCE(?,due_at) WHERE id=?",[ns,ca,nd,id],(e)=>{
+      if(e)return res.status(500).json({status:"ERROR",error:e.message});
+      if(act==="COMPLETE"&&a.prospect_id){var nx={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000}};var n=nx[a.action_type];if(n)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[a.prospect_id,n.t,"PENDING",now+n.d,now],function(){});}
+      res.json({status:"OK",timestamp:now,action:act,itemId:id});
+    });
+  });
+});
+app.get("/api/v1/ops/traffic",opsAuth,(req,res)=>{
+  const ago=new Date(Date.now()-604800000).toISOString().slice(0,10);
+  db.all("SELECT visit_date,source,COUNT(DISTINCT ip_hash) as u,SUM(is_revisit) as rv FROM comm_visits WHERE visit_date>=? GROUP BY visit_date,source ORDER BY visit_date DESC",[ago],(err,rows)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    var tu=0,tr=0,sm={LINKEDIN:0,WHATSAPP:0,DIRECT:0,OTHER:0};
+    (rows||[]).forEach(function(r){tu+=r.u;tr+=r.rv;if(sm[r.source]!==undefined)sm[r.source]+=r.u;else sm.OTHER+=r.u;});
+    res.json({status:"OK",timestamp:Date.now(),data:{period:"7d",totalUnique:tu,totalRevisits:tr,revisitRate:tu>0?Math.round(tr/tu*100)/100:0,sources:sm}});
+  });
+});
+app.post("/api/v1/ops/prospects",opsAuth,(req,res)=>{
+  const b=req.body||{};
+  if(!b.name||!b.linkedin_url)return res.status(400).json({status:"ERROR",error:"name and linkedin_url required"});
+  const now=Date.now();
+  db.run("INSERT OR IGNORE INTO comm_prospects (name,role,organisation,linkedin_url,score,source_string,last_post_observed,personalisation_note,status,added_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",[b.name,b.role||null,b.organisation||null,b.linkedin_url,b.score||2,b.source_string||"S1",b.last_post_observed||null,b.personalisation_note||null,"SOURCED",now,now],function(err){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    if(this.changes===0)return res.json({status:"DUPLICATE"});
+    const lid=this.lastID;
+    db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[lid,"CONNECTION_READY","PENDING",now,now],function(){});
+    res.json({status:"OK",timestamp:now,data:{id:lid,name:b.name}});
+  });
+});
+app.post("/api/v1/ops/prospects/:id/action",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id),tr2=(req.body&&req.body.action)||null,now=Date.now();
+  const VALID=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","INTERESTED","NOT_INTERESTED","DEMO_SET","DEMO_DONE","BETA_INVITED","CLOSED"];
+  if(VALID.indexOf(tr2)===-1)return res.status(400).json({status:"ERROR",error:"Invalid action"});
+  var sm2={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",INTERESTED:"DEMO_REQUESTED",NOT_INTERESTED:"CLOSED",DEMO_SET:"DEMO_SCHEDULED",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
+  db.run("UPDATE comm_prospects SET status=?,updated_at=? WHERE id=?",[sm2[tr2],now,pid],(err)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    var as2={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},ACCEPTED:{t:"MSG1_SEND",d:0},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000},INTERESTED:{t:"DEMO_SCHEDULE",d:0},DEMO_DONE:{t:"BETA_EVALUATE",d:7200000}};
+    var nx=as2[tr2];if(nx)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[pid,nx.t,"PENDING",now+nx.d,now],function(){});
+    res.json({status:"OK",timestamp:now,newStatus:sm2[tr2],nextScheduled:nx?nx.t:null});
+  });
+});
+app.get("/api/v1/ops/events/pending",opsAuth,(req,res)=>{
+  db.all("SELECT * FROM comm_ops_events WHERE delivered=0 ORDER BY triggered_at DESC LIMIT 20",[],( err,rows)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",timestamp:Date.now(),data:{events:rows||[],count:(rows||[]).length}});
+  });
+});
+app.post("/api/v1/ops/events",opsAuth,(req,res)=>{
+  const b=req.body||{};
+  if(!b.event_type||!b.title||!b.body)return res.status(400).json({status:"ERROR",error:"event_type,title,body required"});
+  const now=Date.now();
+  db.run("INSERT INTO comm_ops_events (event_type,priority,title,body,prospect_ref,triggered_at) VALUES (?,?,?,?,?,?)",[b.event_type,b.priority||"MORNING",b.title,b.body,b.prospect_ref||null,now],function(err){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",timestamp:now,data:{id:this.lastID}});
+  });
+});
+(function(){function purge(){db.run("DELETE FROM comm_visits WHERE logged_at<?",[Date.now()-7776000000],function(e){if(!e&&this.changes>0)logger.info({job:"comm-telemetry-purge",deleted:this.changes},"Telemetry purge complete");});}setTimeout(purge,30000);setInterval(purge,86400000);})();
 // R5: Run narrative regression tests on startup
 try {
   const _regResult = runNarrativeRegressionTests();
