@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#080c14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ADVISIQ · OPS</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@400;500;600;700&display=swap');
+
+:root {
+  --bg:       #080c14;
+  --surface:  #0d1220;
+  --surface2: #121829;
+  --border:   #1e2a3a;
+  --border2:  #2a3a50;
+  --text:     #e2e8f0;
+  --text-mid: #94a3b8;
+  --text-dim: #4a5568;
+  --accent:   #3b82f6;
+  --accent-d: #1d4ed8;
+  --accent-bg:#0f1f3d;
+  --green:    #10b981;
+  --green-bg: #062318;
+  --amber:    #f59e0b;
+  --amber-bg: #1f1500;
+  --red:      #ef4444;
+  --red-bg:   #1f0a0a;
+  --purple:   #a855f7;
+  --purple-bg:#1a0f2a;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'Syne', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── AUTH GATE ── */
+#auth-gate {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 32px 24px; z-index: 1000;
+}
+.auth-logo {
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 40px;
+}
+.auth-logo span { color: var(--accent); }
+.auth-title {
+  font-size: 20px; font-weight: 600;
+  color: var(--text); margin-bottom: 8px; text-align: center;
+}
+.auth-sub {
+  font-size: 12px; color: var(--text-dim);
+  margin-bottom: 32px; text-align: center;
+  font-family: var(--mono);
+}
+.auth-input {
+  width: 100%; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 14px 16px;
+  font-family: var(--mono); font-size: 14px;
+  color: var(--text); outline: none;
+  margin-bottom: 12px; letter-spacing: 0.05em;
+}
+.auth-input:focus { border-color: var(--accent); }
+.auth-btn {
+  width: 100%; max-width: 320px;
+  background: var(--accent); border: none;
+  border-radius: 8px; padding: 14px;
+  font-family: var(--sans); font-size: 14px;
+  font-weight: 600; color: white; cursor: pointer;
+}
+.auth-error {
+  color: var(--red); font-family: var(--mono);
+  font-size: 11px; margin-top: 8px; text-align: center;
+}
+
+/* ── MAIN APP ── */
+#app { display: none; height: 100vh; flex-direction: column; overflow: hidden; }
+#app.visible { display: flex; }
+
+/* ── TOP BAR ── */
+.topbar {
+  display: flex; align-items: center;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg); flex-shrink: 0;
+  gap: 10px;
+}
+.topbar-logo {
+  font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.15em; text-transform: uppercase;
+  color: var(--text-dim); flex: 1;
+}
+.topbar-logo span { color: var(--accent); }
+.topbar-time {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-dim);
+}
+.refresh-btn {
+  background: none; border: 1px solid var(--border2);
+  border-radius: 6px; padding: 5px 10px;
+  font-family: var(--mono); font-size: 10px;
+  color: var(--text-dim); cursor: pointer;
+}
+.refresh-btn:active { background: var(--surface); }
+
+/* ── TAB BAR ── */
+.tabbar {
+  display: flex; border-bottom: 1px solid var(--border);
+  background: var(--bg); flex-shrink: 0;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tabbar::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 1; min-width: 64px;
+  padding: 10px 4px 8px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 3px;
+  font-family: var(--mono); font-size: 9px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-dim); cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-icon { font-size: 16px; }
+.tab-badge {
+  background: var(--red); color: white;
+  font-size: 9px; font-weight: 700;
+  border-radius: 8px; padding: 1px 5px;
+  min-width: 16px; text-align: center;
+  display: none;
+}
+.tab-badge.visible { display: inline-block; }
+
+/* ── SCROLL AREA ── */
+.scroll-area {
+  flex: 1; overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 80px;
+}
+
+/* ── SECTION ── */
+.section-head {
+  padding: 16px 16px 8px;
+  font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-dim);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.section-count {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 7px;
+  font-size: 10px; color: var(--text-mid);
+}
+
+/* ── BRIEF CARD ── */
+.brief-card {
+  margin: 12px 12px 0;
+  background: var(--accent-bg); border: 1px solid var(--accent-d);
+  border-radius: 12px; padding: 16px;
+}
+.brief-date {
+  font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 12px;
+}
+.brief-stats {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px; margin-bottom: 12px;
+}
+.bstat {
+  background: rgba(0,0,0,0.3); border-radius: 8px;
+  padding: 10px 8px; text-align: center;
+}
+.bstat-val {
+  font-family: var(--mono); font-size: 22px;
+  font-weight: 700; line-height: 1; color: var(--text);
+}
+.bstat-val.red { color: var(--red); }
+.bstat-val.green { color: var(--green); }
+.bstat-val.amber { color: var(--amber); }
+.bstat-label {
+  font-family: var(--mono); font-size: 9px;
+  color: var(--text-dim); margin-top: 3px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.brief-lines { display: flex; flex-direction: column; gap: 4px; }
+.brief-line {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-mid); padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.brief-line:last-child { border-bottom: none; }
+
+/* ── FEED ITEM ── */
+.feed-item {
+  margin: 8px 12px 0;
+  border-radius: 10px; overflow: hidden;
+  position: relative;
+  transform: translateX(0);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.feed-item.swiped-right { transform: translateX(100%); opacity: 0; }
+.feed-item.swiped-left  { transform: translateX(-100%); opacity: 0; }
+
+.fi-body {
+  padding: 12px 14px;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.fi-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex-shrink: 0; margin-top: 1px;
+}
+.fi-content { flex: 1; min-width: 0; }
+.fi-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  line-height: 1.3; margin-bottom: 2px;
+}
+.fi-sub {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--text-dim); letter-spacing: 0.04em;
+}
+.fi-actions {
+  display: flex; gap: 6px; padding: 0 14px 12px;
+  flex-wrap: wrap;
+}
+.fa {
+  font-family: var(--mono); font-size: 10px;
+  padding: 5px 11px; border-radius: 5px;
+  border: 1px solid; cursor: pointer;
+  white-space: nowrap; letter-spacing: 0.04em;
+}
+.fa:active { opacity: 0.7; }
+.fa-copy   { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-d); }
+.fa-done   { background: var(--green-bg);  color: var(--green);  border-color: #065f46; }
+.fa-later  { background: transparent; color: var(--text-dim); border-color: var(--border); }
+.fa-red    { background: var(--red-bg); color: var(--red); border-color: #7f1d1d; }
+
+/* urgency variants */
+.fi-urgent { background: var(--red-bg); border: 1px solid #7f1d1d; }
+.fi-today  { background: var(--surface); border: 1px solid var(--border2); }
+.fi-cohort { background: var(--green-bg); border: 1px solid #065f46; }
+.fi-intel  { background: var(--purple-bg); border: 1px solid #6b21a8; }
+.fi-passive{ background: var(--surface2); border: 1px solid var(--border); }
+
+/* ── TRAFFIC PANEL ── */
+.traffic-card {
+  margin: 8px 12px 0;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 14px;
+}
+.traffic-title {
+  font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 12px;
+}
+.traffic-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-bottom: 12px;
+}
+.tstat {
+  background: var(--surface2); border-radius: 7px;
+  padding: 10px 12px;
+}
+.tstat-val {
+  font-family: var(--mono); font-size: 20px;
+  font-weight: 700; color: var(--text); line-height: 1;
+}
+.tstat-label {
+  font-family: var(--mono); font-size: 9px;
+  color: var(--text-dim); margin-top: 3px;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.source-bars { display: flex; flex-direction: column; gap: 6px; }
+.sbar-row { display: flex; align-items: center; gap: 8px; }
+.sbar-label {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--text-dim); width: 72px; flex-shrink: 0;
+  letter-spacing: 0.04em;
+}
+.sbar-track {
+  flex: 1; height: 6px; background: var(--border);
+  border-radius: 3px; overflow: hidden;
+}
+.sbar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.fill-li { background: var(--accent); }
+.fill-wa { background: var(--green); }
+.fill-di { background: var(--text-dim); }
+.fill-ot { background: var(--amber); }
+.sbar-val {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--text-mid); width: 20px; text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── PROSPECT CARD ── */
+.prospect-card {
+  margin: 8px 12px 0;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 10px; overflow: hidden;
+}
+.pc-header {
+  padding: 12px 14px 8px;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.pc-avatar {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--surface2); border: 1px solid var(--border2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; color: var(--accent);
+  flex-shrink: 0; font-family: var(--mono);
+}
+.pc-info { flex: 1; min-width: 0; }
+.pc-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.pc-role { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+.pc-stage {
+  font-family: var(--mono); font-size: 9px;
+  padding: 3px 7px; border-radius: 4px; letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.stage-sourced    { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+.stage-sent       { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-d); }
+.stage-accepted   { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-d); }
+.stage-demo       { background: var(--amber-bg); color: var(--amber); border: 1px solid #92400e; }
+.stage-beta       { background: var(--green-bg); color: var(--green); border: 1px solid #065f46; }
+.stage-closed     { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+.pc-next {
+  padding: 0 14px 8px;
+  font-family: var(--mono); font-size: 10px;
+  color: var(--text-mid);
+}
+.pc-next span { color: var(--amber); }
+.pc-actions {
+  display: flex; gap: 6px; padding: 8px 14px 12px;
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+
+/* ── PROSPECT ADD FORM ── */
+.add-form {
+  margin: 8px 12px 0;
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 10px; padding: 14px;
+}
+.add-form-title {
+  font-family: var(--mono); font-size: 10px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 12px;
+}
+.form-field { margin-bottom: 10px; }
+.form-label {
+  font-family: var(--mono); font-size: 9px;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 5px; display: block;
+}
+.form-input, .form-select {
+  width: 100%; background: var(--surface2);
+  border: 1px solid var(--border2); border-radius: 7px;
+  padding: 10px 12px; color: var(--text);
+  font-family: var(--mono); font-size: 12px; outline: none;
+}
+.form-input:focus, .form-select:focus { border-color: var(--accent); }
+.form-select { appearance: none; cursor: pointer; }
+.form-btn {
+  width: 100%; background: var(--accent);
+  border: none; border-radius: 7px; padding: 12px;
+  font-family: var(--sans); font-size: 13px; font-weight: 600;
+  color: white; cursor: pointer; margin-top: 4px;
+}
+.form-btn:active { background: var(--accent-d); }
+
+/* ── EMPTY STATE ── */
+.empty-state {
+  padding: 48px 24px; text-align: center;
+}
+.empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+.empty-title {
+  font-size: 15px; font-weight: 600; color: var(--text-mid);
+  margin-bottom: 6px;
+}
+.empty-sub {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-dim); line-height: 1.6;
+}
+
+/* ── STICKY ACTION BAR ── */
+.sticky-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--surface2); border-top: 1px solid var(--border2);
+  padding: 10px 16px; display: none;
+  align-items: center; gap: 12px; z-index: 50;
+  backdrop-filter: blur(12px);
+}
+.sticky-bar.visible { display: flex; }
+.sticky-text {
+  flex: 1; font-size: 12px; color: var(--text-mid);
+  font-family: var(--mono);
+}
+.sticky-cta {
+  background: var(--accent); border: none;
+  border-radius: 7px; padding: 8px 16px;
+  font-family: var(--sans); font-size: 12px;
+  font-weight: 600; color: white; cursor: pointer;
+  white-space: nowrap;
+}
+
+/* ── TOAST ── */
+#toast {
+  position: fixed; bottom: 70px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 10px 18px;
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text); opacity: 0; pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  white-space: nowrap; z-index: 200;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── LOADING ── */
+.loading {
+  padding: 32px; text-align: center;
+  font-family: var(--mono); font-size: 11px;
+  color: var(--text-dim); letter-spacing: 0.08em;
+}
+.spinner {
+  display: inline-block; width: 16px; height: 16px;
+  border: 2px solid var(--border2); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+  vertical-align: middle; margin-right: 8px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── SWIPE HINT ── */
+.swipe-hint {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 14px;
+  font-family: var(--mono); font-size: 9px;
+  color: var(--text-dim); letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+</style>
+</head>
+<body>
+
+<!-- AUTH GATE -->
+<div id="auth-gate">
+  <div class="auth-logo"><span>ADVISIQ</span> · OPS</div>
+  <div class="auth-title">Commercialization Console</div>
+  <div class="auth-sub">founder access only</div>
+  <input class="auth-input" type="password" id="auth-input" placeholder="ops password" autocomplete="current-password">
+  <button class="auth-btn" onclick="attemptAuth()">Access Console</button>
+  <div class="auth-error" id="auth-error"></div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo"><span>ADVISIQ</span> · OPS</div>
+    <div class="topbar-time" id="topbar-time"></div>
+    <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+  </div>
+
+  <div class="tabbar">
+    <div class="tab active" data-tab="feed" onclick="switchTab('feed')">
+      <span class="tab-icon">📡</span>
+      <span>Feed</span>
+      <span class="tab-badge" id="badge-feed"></span>
+    </div>
+    <div class="tab" data-tab="traffic" onclick="switchTab('traffic')">
+      <span class="tab-icon">↗</span>
+      <span>Traffic</span>
+    </div>
+    <div class="tab" data-tab="prospects" onclick="switchTab('prospects')">
+      <span class="tab-icon">◎</span>
+      <span>Prospects</span>
+      <span class="tab-badge" id="badge-prospects"></span>
+    </div>
+    <div class="tab" data-tab="add" onclick="switchTab('add')">
+      <span class="tab-icon">+</span>
+      <span>Add</span>
+    </div>
+  </div>
+
+  <!-- FEED TAB -->
+  <div class="scroll-area" id="tab-feed">
+    <div class="loading"><span class="spinner"></span>loading brief...</div>
+  </div>
+
+  <!-- TRAFFIC TAB -->
+  <div class="scroll-area" id="tab-traffic" style="display:none">
+    <div class="loading"><span class="spinner"></span>loading traffic...</div>
+  </div>
+
+  <!-- PROSPECTS TAB -->
+  <div class="scroll-area" id="tab-prospects" style="display:none">
+    <div class="loading"><span class="spinner"></span>loading prospects...</div>
+  </div>
+
+  <!-- ADD TAB -->
+  <div class="scroll-area" id="tab-add" style="display:none">
+    <div class="section-head">Add Prospect</div>
+    <div class="add-form">
+      <div class="add-form-title">New Prospect</div>
+      <div class="form-field">
+        <label class="form-label">Full Name *</label>
+        <input class="form-input" id="f-name" type="text" placeholder="Rajesh Kumar">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Role</label>
+        <select class="form-select" id="f-role">
+          <option value="IFA">IFA</option>
+          <option value="RIA">RIA</option>
+          <option value="Wealth Manager">Wealth Manager</option>
+          <option value="PMS">PMS</option>
+          <option value="Family Office">Family Office</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Organisation</label>
+        <input class="form-input" id="f-org" type="text" placeholder="Optional">
+      </div>
+      <div class="form-field">
+        <label class="form-label">LinkedIn URL *</label>
+        <input class="form-input" id="f-url" type="url" placeholder="https://linkedin.com/in/...">
+      </div>
+      <div class="form-field">
+        <label class="form-label">Priority Score</label>
+        <select class="form-select" id="f-score">
+          <option value="3">3 — Priority (posts about market, active)</option>
+          <option value="2" selected>2 — Standard</option>
+          <option value="1">1 — Low</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Personalisation Note</label>
+        <input class="form-input" id="f-note" type="text" placeholder="What did they post about?">
+      </div>
+      <button class="form-btn" onclick="addProspect()">Add to Pipeline</button>
+    </div>
+  </div>
+
+  <!-- STICKY BAR -->
+  <div class="sticky-bar" id="sticky-bar">
+    <div class="sticky-text" id="sticky-text">Next action pending</div>
+    <button class="sticky-cta" id="sticky-cta">Act →</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '';
+let OPS_AUTH = '';
+let feedData = null;
+let trafficData = null;
+let prospectsData = null;
+let activeTab = 'feed';
+let touchStartX = 0, touchStartY = 0;
+
+// ── AUTH ──
+function attemptAuth() {
+  const pw = document.getElementById('auth-input').value;
+  if (!pw) return;
+  OPS_AUTH = pw;
+  fetchJSON('/api/v1/ops/brief').then(data => {
+    if (data.status === 'OK') {
+      document.getElementById('auth-gate').style.display = 'none';
+      document.getElementById('app').classList.add('visible');
+      loadAll();
+      startClock();
+    } else {
+      showAuthError('Invalid password');
+    }
+  }).catch(() => showAuthError('Connection failed'));
+}
+function showAuthError(msg) {
+  document.getElementById('auth-error').textContent = msg;
+  OPS_AUTH = '';
+}
+document.getElementById('auth-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') attemptAuth();
+});
+
+// ── CLOCK ──
+function startClock() {
+  function tick() {
+    const now = new Date();
+    document.getElementById('topbar-time').textContent =
+      now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  }
+  tick(); setInterval(tick, 30000);
+}
+
+// ── FETCH ──
+function fetchJSON(url, opts = {}) {
+  return fetch(API + url, {
+    ...opts,
+    headers: { 'x-ops-auth': OPS_AUTH, 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  }).then(r => r.json());
+}
+
+// ── LOAD ALL ──
+function loadAll() {
+  loadFeed();
+  loadTraffic();
+  loadProspects();
+}
+
+// ── TOAST ──
+function toast(msg, ms = 1800) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// ── COPY ──
+function copyText(text, label) {
+  navigator.clipboard.writeText(text).then(() => {
+    toast('Copied — ' + label);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('Copied — ' + label);
+  });
+}
+
+// ── TAB SWITCH ──
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.scroll-area').forEach(a => a.style.display = 'none');
+  document.getElementById('tab-' + tab).style.display = 'block';
+  document.getElementById('sticky-bar').classList.remove('visible');
+}
+
+// ══════════════════════════════════
+// FEED TAB
+// ══════════════════════════════════
+function loadFeed() {
+  const el = document.getElementById('tab-feed');
+  Promise.all([
+    fetchJSON('/api/v1/ops/brief'),
+    fetchJSON('/api/v1/ops/feed')
+  ]).then(([brief, feed]) => {
+    feedData = { brief, feed };
+    renderFeed(brief, feed);
+    const urgentCount = (feed.data && feed.data.counts) ? feed.data.counts.overdue : 0;
+    const badge = document.getElementById('badge-feed');
+    badge.textContent = urgentCount;
+    badge.classList.toggle('visible', urgentCount > 0);
+    updateStickyBar(feed);
+  }).catch(err => {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-title">Load failed</div><div class="empty-sub">' + err.message + '</div></div>';
+  });
+}
+
+function renderFeed(brief, feed) {
+  const el = document.getElementById('tab-feed');
+  let html = '';
+
+  // Brief card
+  const d = brief.data || {};
+  const oc = d.overdueCount || 0;
+  const pe = d.pendingEvents || 0;
+  const yv = d.yesterdayUniqueCount || 0;
+  const now = new Date();
+  const dayName = now.toLocaleDateString('en-IN', { weekday: 'long' });
+  const dateStr = now.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+  html += `<div class="brief-card">
+    <div class="brief-date">${dayName} · ${dateStr} · Operational Brief</div>
+    <div class="brief-stats">
+      <div class="bstat"><div class="bstat-val ${oc > 0 ? 'red' : 'green'}">${oc}</div><div class="bstat-label">Overdue</div></div>
+      <div class="bstat"><div class="bstat-val ${pe > 0 ? 'amber' : ''}">${pe}</div><div class="bstat-label">Events</div></div>
+      <div class="bstat"><div class="bstat-val ${yv > 0 ? 'green' : ''}">${yv}</div><div class="bstat-label">Visitors</div></div>
+    </div>
+    <div class="brief-lines">
+      ${(d.lines || []).map(l => `<div class="brief-line">${l}</div>`).join('')}
+    </div>
+  </div>`;
+
+  const fd = feed.data || {};
+  const overdue = fd.overdue || [];
+  const today = fd.today || [];
+  const events = fd.events || [];
+
+  // Overdue
+  if (overdue.length > 0) {
+    html += `<div class="section-head">Overdue <span class="section-count">${overdue.length}</span></div>`;
+    html += '<div class="swipe-hint"><span>← snooze</span><span>complete →</span></div>';
+    overdue.forEach(item => {
+      const hrs = Math.floor((item.overdueMs || 0) / 3600000);
+      html += feedItemHTML(item, 'fi-urgent', '⚡', `${item.prospect || item.type} — ${hrs}h overdue`, item.role || item.type);
+    });
+  }
+
+  // Today
+  if (today.length > 0) {
+    html += `<div class="section-head">Today <span class="section-count">${today.length}</span></div>`;
+    today.forEach(item => {
+      const t = item.dueAt ? new Date(item.dueAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
+      html += feedItemHTML(item, 'fi-today', actionIcon(item.type), `${item.prospect || item.type}`, `${item.type} ${t ? '· ' + t : ''}`);
+    });
+  }
+
+  // Events
+  if (events.length > 0) {
+    html += `<div class="section-head">Events <span class="section-count">${events.length}</span></div>`;
+    events.forEach(ev => {
+      html += feedItemHTML({ id: ev.id, type: ev.type }, 'fi-cohort', '🔔', ev.title, ev.body);
+    });
+  }
+
+  if (overdue.length === 0 && today.length === 0 && events.length === 0) {
+    html += `<div class="empty-state">
+      <div class="empty-icon">✓</div>
+      <div class="empty-title">All clear</div>
+      <div class="empty-sub">No pending actions.<br>Add prospects or check traffic.</div>
+    </div>`;
+  }
+
+  el.innerHTML = html;
+  attachSwipeHandlers();
+}
+
+function feedItemHTML(item, cls, icon, title, sub) {
+  return `<div class="feed-item ${cls}" id="fi-${item.id}" data-item-id="${item.id}">
+    <div class="fi-body">
+      <div class="fi-icon">${icon}</div>
+      <div class="fi-content">
+        <div class="fi-title">${title}</div>
+        <div class="fi-sub">${sub || ''}</div>
+      </div>
+    </div>
+    <div class="fi-actions">
+      <div class="fa fa-done" onclick="completeAction(${item.id})">✓ Done</div>
+      <div class="fa fa-later" onclick="snoozeAction(${item.id})">+24h</div>
+      <div class="fa fa-red" onclick="dismissAction(${item.id})">Dismiss</div>
+    </div>
+  </div>`;
+}
+
+function actionIcon(type) {
+  const map = { CONNECTION_READY: '→', CONNECTION_SENT: '→', ACCEPTED_CHECK: '◎', MSG1_SEND: '✉', MSG2_FOLLOW: '↩', MSG3_FINAL: '◈', DEMO_SCHEDULE: '📅', BETA_EVALUATE: '⭐' };
+  return map[type] || '→';
+}
+
+function completeAction(id) {
+  const el = document.getElementById('fi-' + id);
+  if (el) { el.classList.add('swiped-right'); setTimeout(() => { el.remove(); checkEmptyFeed(); }, 220); }
+  fetchJSON('/api/v1/ops/feed/' + id + '/act', { method: 'POST', body: JSON.stringify({ action: 'COMPLETE' }) })
+    .then(() => { toast('✓ Completed'); setTimeout(loadFeed, 500); });
+}
+function snoozeAction(id) {
+  const el = document.getElementById('fi-' + id);
+  if (el) { el.classList.add('swiped-left'); setTimeout(() => { el.remove(); checkEmptyFeed(); }, 220); }
+  fetchJSON('/api/v1/ops/feed/' + id + '/act', { method: 'POST', body: JSON.stringify({ action: 'SNOOZE_24H' }) })
+    .then(() => toast('Snoozed 24h'));
+}
+function dismissAction(id) {
+  const el = document.getElementById('fi-' + id);
+  if (el) { el.classList.add('swiped-left'); setTimeout(() => { el.remove(); checkEmptyFeed(); }, 220); }
+  fetchJSON('/api/v1/ops/feed/' + id + '/act', { method: 'POST', body: JSON.stringify({ action: 'DISMISS' }) })
+    .then(() => toast('Dismissed'));
+}
+
+function checkEmptyFeed() {
+  const items = document.querySelectorAll('.feed-item');
+  if (items.length === 0) loadFeed();
+}
+
+// ── SWIPE GESTURES ──
+function attachSwipeHandlers() {
+  document.querySelectorAll('.feed-item').forEach(el => {
+    let sx = 0, sy = 0, dx = 0;
+    el.addEventListener('touchstart', e => {
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; dx = 0;
+    }, { passive: true });
+    el.addEventListener('touchmove', e => {
+      dx = e.touches[0].clientX - sx;
+      const dy = Math.abs(e.touches[0].clientY - sy);
+      if (Math.abs(dx) > dy && Math.abs(dx) > 10) {
+        el.style.transform = `translateX(${dx}px)`;
+        el.style.opacity = 1 - Math.abs(dx) / 200;
+      }
+    }, { passive: true });
+    el.addEventListener('touchend', () => {
+      const id = parseInt(el.dataset.itemId);
+      if (dx > 80) { completeAction(id); }
+      else if (dx < -80) { snoozeAction(id); }
+      else { el.style.transform = ''; el.style.opacity = ''; }
+    });
+  });
+}
+
+function updateStickyBar(feed) {
+  const fd = feed.data || {};
+  const overdue = fd.overdue || [];
+  const today = fd.today || [];
+  const sticky = document.getElementById('sticky-bar');
+  if (activeTab !== 'feed') return;
+  if (overdue.length > 0) {
+    document.getElementById('sticky-text').textContent = `⚡ ${overdue[0].prospect || overdue[0].type} — overdue`;
+    document.getElementById('sticky-cta').onclick = () => completeAction(overdue[0].id);
+    sticky.classList.add('visible');
+  } else if (today.length > 0) {
+    document.getElementById('sticky-text').textContent = `→ Next: ${today[0].type} · ${today[0].prospect || ''}`;
+    document.getElementById('sticky-cta').onclick = () => completeAction(today[0].id);
+    sticky.classList.add('visible');
+  } else {
+    sticky.classList.remove('visible');
+  }
+}
+
+// ══════════════════════════════════
+// TRAFFIC TAB
+// ══════════════════════════════════
+function loadTraffic() {
+  fetchJSON('/api/v1/ops/traffic').then(data => {
+    trafficData = data;
+    renderTraffic(data);
+  }).catch(err => {
+    document.getElementById('tab-traffic').innerHTML = '<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-title">Load failed</div></div>';
+  });
+}
+
+function renderTraffic(data) {
+  const el = document.getElementById('tab-traffic');
+  const d = data.data || {};
+  const tu = d.totalUnique || 0;
+  const tr = d.totalRevisits || 0;
+  const rr = d.revisitRate || 0;
+  const sm = d.sources || {};
+  const total = Math.max(tu, 1);
+
+  let html = `<div class="section-head">Traffic Intelligence <span class="section-count">7d</span></div>`;
+  html += `<div class="traffic-card">
+    <div class="traffic-title">Last 7 Days</div>
+    <div class="traffic-grid">
+      <div class="tstat"><div class="tstat-val">${tu}</div><div class="tstat-label">Unique Visitors</div></div>
+      <div class="tstat"><div class="tstat-val">${tr}</div><div class="tstat-label">Revisits</div></div>
+      <div class="tstat"><div class="tstat-val">${rr}×</div><div class="tstat-label">Revisit Rate</div></div>
+      <div class="tstat"><div class="tstat-val">${tu > 0 ? Math.round(tr / tu * 100) : 0}%</div><div class="tstat-label">Return %</div></div>
+    </div>
+    <div class="source-bars">
+      ${sourceBar('LinkedIn', sm.LINKEDIN || 0, total, 'fill-li')}
+      ${sourceBar('WhatsApp', sm.WHATSAPP || 0, total, 'fill-wa')}
+      ${sourceBar('Direct', sm.DIRECT || 0, total, 'fill-di')}
+      ${sourceBar('Other', sm.OTHER || 0, total, 'fill-ot')}
+    </div>
+  </div>`;
+
+  if (tu === 0) {
+    html += `<div class="empty-state">
+      <div class="empty-icon">↗</div>
+      <div class="empty-title">No visits yet</div>
+      <div class="empty-sub">Traffic will appear here once<br>outreach drives visitors to advisiq.in</div>
+    </div>`;
+  } else if (tr > tu * 0.3) {
+    html += `<div class="feed-item fi-intel" style="margin:8px 12px 0">
+      <div class="fi-body">
+        <div class="fi-icon">◆</div>
+        <div class="fi-content">
+          <div class="fi-title">Revisit signal detected</div>
+          <div class="fi-sub">${tr} revisits from ${tu} unique visitors — ${Math.round(tr/tu*100)}% return rate</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  el.innerHTML = html;
+  // Animate bars
+  setTimeout(() => {
+    el.querySelectorAll('.sbar-fill').forEach(b => {
+      const w = b.dataset.width;
+      if (w) b.style.width = w + '%';
+    });
+  }, 50);
+}
+
+function sourceBar(label, val, total, cls) {
+  const pct = total > 0 ? Math.min(100, Math.round(val / total * 100)) : 0;
+  return `<div class="sbar-row">
+    <div class="sbar-label">${label}</div>
+    <div class="sbar-track"><div class="sbar-fill ${cls}" style="width:0%" data-width="${pct}"></div></div>
+    <div class="sbar-val">${val}</div>
+  </div>`;
+}
+
+// ══════════════════════════════════
+// PROSPECTS TAB
+// ══════════════════════════════════
+function loadProspects() {
+  fetchJSON('/api/v1/ops/prospects/queue').then(data => {
+    prospectsData = data;
+    renderProspects(data);
+    const ct = (data.data && data.data.count) || 0;
+    const badge = document.getElementById('badge-prospects');
+    badge.textContent = ct;
+    badge.classList.toggle('visible', ct > 0);
+  }).catch(() => {
+    document.getElementById('tab-prospects').innerHTML = '<div class="empty-state"><div class="empty-icon">◎</div><div class="empty-title">No prospects yet</div><div class="empty-sub">Add prospects using the + tab</div></div>';
+  });
+}
+
+function renderProspects(data) {
+  const el = document.getElementById('tab-prospects');
+  const queue = (data.data && data.data.queue) || [];
+
+  if (queue.length === 0) {
+    el.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">◎</div>
+      <div class="empty-title">Pipeline empty</div>
+      <div class="empty-sub">Add your first prospect<br>using the + tab above</div>
+    </div>`;
+    return;
+  }
+
+  let html = `<div class="section-head">Pipeline <span class="section-count">${queue.length}</span></div>`;
+  queue.forEach(p => {
+    const initials = p.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+    const stageClass = stageToClass(p.status);
+    const nextLabel = p.nextAction ? `Next: ${p.nextAction}` : 'No action scheduled';
+    const overdueLabel = p.isOverdue ? ' · <span style="color:var(--red)">OVERDUE</span>' : '';
+
+    html += `<div class="prospect-card">
+      <div class="pc-header">
+        <div class="pc-avatar">${initials}</div>
+        <div class="pc-info">
+          <div class="pc-name">${p.name}</div>
+          <div class="pc-role">${p.role || 'Professional'} · Score ${p.score || 2}</div>
+        </div>
+        <div class="pc-stage ${stageClass}">${(p.status || 'SOURCED').replace(/_/g, ' ')}</div>
+      </div>
+      <div class="pc-next"><span>${nextLabel}</span>${overdueLabel}</div>
+      ${p.personalisationNote ? `<div class="pc-next" style="color:var(--text-dim);font-size:10px;padding-top:0">${p.personalisationNote}</div>` : ''}
+      <div class="pc-actions">
+        <div class="fa fa-copy" onclick="advanceProspect(${p.id}, '${p.status}')">Advance →</div>
+        <div class="fa fa-done" onclick="copyOutreach(${p.id}, '${p.name}', '${p.status}')">Copy Msg</div>
+        <div class="fa fa-red" onclick="closeProspect(${p.id})">Close</div>
+      </div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
+}
+
+function stageToClass(status) {
+  const map = { SOURCED: 'stage-sourced', CONNECTION_SENT: 'stage-sent', ACCEPTED: 'stage-accepted', MSG1_SENT: 'stage-sent', MSG2_SENT: 'stage-sent', MSG3_SENT: 'stage-sent', DEMO_REQUESTED: 'stage-demo', DEMO_SCHEDULED: 'stage-demo', DEMO_DONE: 'stage-demo', BETA_INVITED: 'stage-beta', CLOSED: 'stage-closed' };
+  return map[status] || 'stage-sourced';
+}
+
+const OUTREACH_MESSAGES = {
+  SOURCED: 'Your recent post resonated — I\'ve been exploring a research tool that addresses exactly this advisory challenge. Session-isolated, governed intelligence, no client data stored. Happy to share if you\'re curious.',
+  CONNECTION_SENT: 'Thanks for connecting. I\'ve been researching how regime-aware intelligence can support advisory conversations — built a tool at advisiq.in. Happy to show you a brief for your typical client type in 12 minutes. No agenda beyond practitioner feedback.',
+  ACCEPTED: 'Thanks for connecting. I\'ve been researching how regime-aware intelligence can support advisory conversations — built a tool at advisiq.in. Happy to show you a brief for your typical client type in 12 minutes. No agenda beyond practitioner feedback.',
+  MSG1_SENT: 'Following up briefly — happy to share a sample brief for your typical client type. Just reply with your usual equity/debt/gold split and I\'ll generate one and send it across. No call needed.',
+  MSG2_SENT: 'Last note — I\'m running a small practitioner feedback group for this research tool. If you\'d like to be included, just say so and I\'ll add you. Otherwise advisiq.in is openly accessible.',
+};
+
+function copyOutreach(id, name, status) {
+  const msg = OUTREACH_MESSAGES[status] || OUTREACH_MESSAGES['SOURCED'];
+  copyText(msg, name);
+}
+
+function advanceProspect(id, currentStatus) {
+  const transitions = {
+    SOURCED: 'CONNECTION_SENT', CONNECTION_SENT: 'ACCEPTED', ACCEPTED: 'MSG1_SENT',
+    MSG1_SENT: 'MSG2_SENT', MSG2_SENT: 'MSG3_SENT', MSG3_SENT: 'INTERESTED',
+    DEMO_REQUESTED: 'DEMO_SET', DEMO_SCHEDULED: 'DEMO_DONE', DEMO_DONE: 'BETA_INVITED',
+  };
+  const next = transitions[currentStatus];
+  if (!next) { toast('No next stage available'); return; }
+  fetchJSON('/api/v1/ops/prospects/' + id + '/action', { method: 'POST', body: JSON.stringify({ action: next }) })
+    .then(data => {
+      if (data.status === 'OK') { toast('→ ' + next.replace(/_/g, ' ')); loadProspects(); }
+      else toast('Error: ' + data.error);
+    });
+}
+
+function closeProspect(id) {
+  fetchJSON('/api/v1/ops/prospects/' + id + '/action', { method: 'POST', body: JSON.stringify({ action: 'CLOSED' }) })
+    .then(() => { toast('Prospect closed'); loadProspects(); });
+}
+
+// ── ADD PROSPECT ──
+function addProspect() {
+  const name = document.getElementById('f-name').value.trim();
+  const url = document.getElementById('f-url').value.trim();
+  if (!name || !url) { toast('Name and LinkedIn URL required'); return; }
+
+  const body = {
+    name, linkedin_url: url,
+    role: document.getElementById('f-role').value,
+    organisation: document.getElementById('f-org').value.trim() || null,
+    score: parseInt(document.getElementById('f-score').value),
+    personalisation_note: document.getElementById('f-note').value.trim() || null,
+    source_string: 'S1'
+  };
+
+  fetchJSON('/api/v1/ops/prospects', { method: 'POST', body: JSON.stringify(body) }).then(data => {
+    if (data.status === 'OK') {
+      toast('Added: ' + name);
+      document.getElementById('f-name').value = '';
+      document.getElementById('f-url').value = '';
+      document.getElementById('f-org').value = '';
+      document.getElementById('f-note').value = '';
+      switchTab('prospects');
+      loadProspects();
+    } else if (data.status === 'DUPLICATE') {
+      toast('Already in pipeline');
+    } else {
+      toast('Error: ' + data.error);
+    }
+  }).catch(() => toast('Network error'));
+}
+
+// Init
+document.getElementById('auth-input').focus();
+</script>
+</body>
+</html>
