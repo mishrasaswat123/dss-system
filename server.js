@@ -1653,6 +1653,8 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 (function installTrafficMiddleware(){
   let _sd='',_sv='';
   function salt(){const t=new Date().toISOString().slice(0,10);if(_sd!==t){_sd=t;_sv=crypto.randomBytes(16).toString('hex');}return _sv;}
+  function inferSrc(ref,ua){if(!ref){if(ua&&/mobile|android|iphone/i.test(ua))return 'WHATSAPP ';return 'DIRECT ';}if(/linkedin\.com/i.test(ref))return 'LINKEDIN ';return 'OTHER ';}
+  function inferUA(ua){if(!ua)return 'UNKNOWN ';if(/mobile|android|iphone|ipad/i.test(ua))return 'MOBILE ';return 'DESKTOP ';}
   function inferPage(u){if(!u||u==='/') return 'HOME';if(u.startsWith('/ops'))return 'OPS';if(u.includes('brief'))return 'BRIEF';return 'HOME';}
   app.use((req,res,next)=>{
     if(req.method!=='GET')return next();
