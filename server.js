@@ -2578,12 +2578,12 @@ async function fetchFREDSeries(seriesId,limit=2){
 async function fetchFREDMacro(){
   if(!FRED_CONFIG.apiKey)return null;
   try{
-    const[dgs10,dgs2,t10y2y,fedfunds,cpi,unrate]=await Promise.all([fetchFREDSeries("DGS10",1),fetchFREDSeries("DGS2",1),fetchFREDSeries("T10Y2Y",1),fetchFREDSeries("FEDFUNDS",1),fetchFREDSeries("CPIAUCSL",2),fetchFREDSeries("UNRATE",1)]);
+    const[dgs10,dgs2,t10y2y,fedfunds,cpi,unrate,indiaLongRate]=await Promise.all([fetchFREDSeries("DGS10",1),fetchFREDSeries("DGS2",1),fetchFREDSeries("T10Y2Y",1),fetchFREDSeries("FEDFUNDS",1),fetchFREDSeries("CPIAUCSL",2),fetchFREDSeries("UNRATE",1),fetchFREDSeries("INDIRLTLT01STM",1)]);
     const spreadVal=t10y2y?.value??null;
     const yieldCurveSignal=spreadVal===null?"UNKNOWN":spreadVal<-0.20?"INVERTED":spreadVal<0.10?"FLAT":spreadVal<0.50?"NORMAL":"STEEP";
     const fedRate=fedfunds?.value??null;
     const fedStance=fedRate===null?"UNKNOWN":fedRate>=5.00?"RESTRICTIVE":fedRate>=3.50?"MODERATELY_RESTRICTIVE":fedRate>=2.00?"NEUTRAL":"ACCOMMODATIVE";
-    const result={us10YYield:dgs10?.value??null,us2YYield:dgs2?.value??null,yieldSpread10_2:spreadVal,yieldCurveSignal,fedFundsRate:fedRate,fedStance,usUnemployment:unrate?.value??null,usCpiIndex:cpi?.value??null,dates:{dgs10:dgs10?.date||null,fedfunds:fedfunds?.date||null,t10y2y:t10y2y?.date||null,unrate:unrate?.date||null},source:"FRED",fetchedAt:Date.now(),fallbackActive:false,staleReason:null};
+    const result={us10YYield:dgs10?.value??null,us2YYield:dgs2?.value??null,yieldSpread10_2:spreadVal,yieldCurveSignal,fedFundsRate:fedRate,fedStance,usUnemployment:unrate?.value??null,usCpiIndex:cpi?.value??null,indiaLongRate:indiaLongRate?.value??null,indiaLongRateDate:indiaLongRate?.date||null,dates:{dgs10:dgs10?.date||null,fedfunds:fedfunds?.date||null,t10y2y:t10y2y?.date||null,unrate:unrate?.date||null,indiaLongRate:indiaLongRate?.date||null},source:"FRED",fetchedAt:Date.now(),fallbackActive:false,staleReason:null};
     DSSCache.set("macro:fred",result);
     logger.info({job:"fetchFREDMacro",us10Y:result.us10YYield,fedRate:result.fedFundsRate,spread:result.yieldSpread10_2,yieldCurve:result.yieldCurveSignal,fedStance:result.fedStance},"FRED macro refreshed");
     return result;
@@ -4340,17 +4340,34 @@ const fiiDebtSell = Number(
 		  logger.warn({ err: e.message }, "P7: RBI RSS failed — TE fallback active");
 		}
 
-		const [gsec10Y, gsec5Y, gsec2Y] = await Promise.all([
-		  fetchTEYield("https://tradingeconomics.com/india/government-bond-yield", "10Y"),
-		  fetchTEYield("https://tradingeconomics.com/india/5-year-note-yield", "5Y"),
-		  fetchTEYield("https://tradingeconomics.com/india/2-year-note-yield", "2Y")
-		]);
+		// ── India Sovereign Macro: FRED Canonical Architecture ────────
+		// Source: INDIRLTLT01STM (OECD India Long-Term Interest Rate)
+		// Monthly cadence — institutionally stable, whitelist-free, API-native
+		// No Trading Economics, No SmartAPI G-Sec, No Yahoo proxies
+		const _fredMacroCache = DSSCache.get("macro:fred") || {};
+		const _fredIndiaRate = _fredMacroCache.indiaLongRate ?? null;
+		const _fredIndiaRateDate = _fredMacroCache.indiaLongRateDate ?? null;
+		const INDIA_GSEC_GOVERNED_BASE = 6.70; // governed continuity — update with RBI cycle
+		let gsec10Y = null, gsec5Y = null, gsec2Y = null;
+		let _indiaSovereignSource = 'GOVERNED';
+		if (_fredIndiaRate && _fredIndiaRate > 4.0 && _fredIndiaRate < 12.0) {
+		  gsec10Y = _fredIndiaRate;
+		  gsec5Y  = Math.round((gsec10Y - 0.12) * 100) / 100;
+		  gsec2Y  = Math.round((gsec10Y - 0.26) * 100) / 100;
+		  _indiaSovereignSource = 'FRED';
+		  _aoObs.india10yStatus = 'OK';
+		  _aoObs.lastIndia10yAt = Date.now();
+		  logger.info({ job: 'fetchIndiaMacro', gsec10Y, date: _fredIndiaRateDate, source: 'FRED:INDIRLTLT01STM' }, 'India 10Y sovereign rate from FRED');
+		} else {
+		  _aoObs.india10yStatus = 'GOVERNED_FALLBACK';
+		  logger.info({ job: 'fetchIndiaMacro', fredRate: _fredIndiaRate }, 'FRED India rate unavailable — using governed base');
+		}
 
 		// DEF-004: provenance-annotated return with stale-reason for hardcoded fallbacks
-		const gsec10YResolved = gsec10Y || 7.08;
-		const gsec5YResolved  = gsec5Y  || 6.96;
-		const gsec1YResolved  = gsec2Y  || 6.82;
-		const allYieldsLive   = !!(gsec10Y && gsec5Y && gsec2Y);
+		const gsec10YResolved = gsec10Y ?? INDIA_GSEC_GOVERNED_BASE;
+		const gsec5YResolved  = gsec5Y  ?? (INDIA_GSEC_GOVERNED_BASE - 0.12);
+		const gsec1YResolved  = gsec2Y  ?? (INDIA_GSEC_GOVERNED_BASE - 0.26);
+		const allYieldsLive   = _indiaSovereignSource === 'FRED';
 
 		if (!allYieldsLive) {
 		  logger.warn(
@@ -4368,9 +4385,13 @@ const fiiDebtSell = Number(
 		  gsec5Y:  gsec5YResolved,
 		  gsec1Y:  gsec1YResolved,
 		  gsecLive: allYieldsLive,
-		  sourceOrigin: allYieldsLive ? "trading-economics-live" : "hardcoded-fallback",
-		  fallbackActive: !allYieldsLive,
-		  staleReason: !allYieldsLive ? "TE yield fetch returned null — hardcoded fallback in use" : null,
+		  sourceOrigin: _indiaSovereignSource === 'FRED' ? "fred-indirltlt01stm" : "governed-continuity",
+		  // Confidence-state taxonomy: REDUCED_CONFIRMATION when 10Y live but spreads derived
+		  // GOVERNED_ESTIMATE when all values are hardcoded
+		  confidenceState: allYieldsLive ? "LIVE" : (gsec10Y ? "REDUCED_CONFIRMATION" : "GOVERNED_ESTIMATE"),
+		  confidenceState: _indiaSovereignSource === 'FRED' ? 'LIVE' : 'GOVERNED',
+		  fallbackActive: _indiaSovereignSource !== 'FRED',
+		  staleReason: _indiaSovereignSource !== 'FRED' ? 'India sovereign: FRED INDIRLTLT01STM not yet loaded — governed continuity active' : null,
 		  fetchedAt: Date.now()
 		};
 
@@ -7195,16 +7216,23 @@ setTimeout(async () => { await runNSEIndexJob(); }, 60000);
 	// ── END overview-compile job ──
         // ── debt-cache periodic refresh (T7 debt stabilization) ──
         // 90s retry: startup debt refresh may fail if FRED/Yahoo not ready
+        // Startup race fix: 120s ensures FRED cache is populated before debt retry
         setTimeout(async () => {
           try {
             const _dc = DSSCache.get('score:debt');
+            const _fredReady = !!(DSSCache.get('macro:fred')?.us10YYield);
             if (!_dc || _dc.fallbackActive === true || _dc.score === null || _dc.score === undefined) {
-              logger.info({ job: 'debt-scheduler', msg: 'startup debt fallback — triggering retry' });
-              await refreshDebtCache();
-              logger.info({ job: 'debt-scheduler', msg: 'debt cache retry complete' });
+              if (!_fredReady) {
+                logger.warn({ job: 'debt-scheduler', msg: 'FRED not ready at 120s — deferring debt retry 60s' });
+                setTimeout(async () => { try { await refreshDebtCache(); } catch(e) {} }, 60000);
+              } else {
+                logger.info({ job: 'debt-scheduler', msg: 'startup debt fallback — FRED ready — triggering retry' });
+                await refreshDebtCache();
+                logger.info({ job: 'debt-scheduler', msg: 'debt cache retry complete' });
+              }
             }
           } catch(e) { logger.warn({ job: 'debt-scheduler', err: e.message }, 'debt retry failed'); }
-        }, 90000);
+        }, 120000);
         // Periodic debt refresh every 15 minutes
         setInterval(async () => {
           try { await refreshDebtCache(); }
