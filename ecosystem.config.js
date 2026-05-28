@@ -13,7 +13,7 @@ module.exports = {
       SERVER_PUBLIC_IP: "51.21.94.67",
       LLM_PROVIDER: "groq",
       LLM_MODEL: "llama-3.1-8b-instant",
-      GROQ_API_KEY: "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",
+      GROQ_API_KEY: process.env.GROQ_API_KEY || "",
       FRED_API_KEY: "0fb7e163e8f939ad76fb0050197c7687"
     }
   }]

@@ -4375,12 +4375,23 @@ const fiiDebtSell = Number(
 		};
 
 	  } catch (err) {
-
-		logger.error({
-		  err: err.message
-		}, "Macro fetch failed");
-
-		return null;
+		logger.error({ err: err.message }, "Macro fetch failed — using governed fallback");
+		// Governed fallback: return minimum viable macro object so debt module can compute
+		const _mp = DSSCache.get("monetary:policy") || {};
+		return {
+		  repoRate: _mp.repoRate ?? 6.0,
+		  repoRateSource: "governed-config-fallback",
+		  cpi: 4.75,
+		  cpiSource: "hardcoded",
+		  gsec10Y: null,
+		  gsec5Y: null,
+		  gsec1Y: null,
+		  gsecLive: false,
+		  sourceOrigin: "governed-fallback",
+		  fallbackActive: true,
+		  staleReason: "fetchIndiaMacro exception — governed fallback active: " + err.message,
+		  fetchedAt: Date.now()
+		};
 	  }
 	}
 
@@ -7182,6 +7193,24 @@ setTimeout(async () => { await runNSEIndexJob(); }, 60000);
 	  }, 60000);
 	}, 50000);
 	// ── END overview-compile job ──
+        // ── debt-cache periodic refresh (T7 debt stabilization) ──
+        // 90s retry: startup debt refresh may fail if FRED/Yahoo not ready
+        setTimeout(async () => {
+          try {
+            const _dc = DSSCache.get('score:debt');
+            if (!_dc || _dc.fallbackActive === true || _dc.score === null || _dc.score === undefined) {
+              logger.info({ job: 'debt-scheduler', msg: 'startup debt fallback — triggering retry' });
+              await refreshDebtCache();
+              logger.info({ job: 'debt-scheduler', msg: 'debt cache retry complete' });
+            }
+          } catch(e) { logger.warn({ job: 'debt-scheduler', err: e.message }, 'debt retry failed'); }
+        }, 90000);
+        // Periodic debt refresh every 15 minutes
+        setInterval(async () => {
+          try { await refreshDebtCache(); }
+          catch(e) { logger.warn({ job: 'debt-scheduler', err: e.message }, 'periodic debt refresh failed'); }
+        }, 15 * 60 * 1000);
+        // ── END debt-cache periodic refresh ──
 // ── narrative-gen job (Session 20F) ──
 setTimeout(() => {
   safeExecute(() => { narrativeEngine.synthesize(); }, null);
@@ -7459,32 +7488,54 @@ async function buildDebtPayload() {
 
 	  try {
 
-		const [
-		  us10YData,
-		  us2YData,
-		  dxyData,
-		  goldData,
-		  macro
-		] = [
+		// T7: Datasource priority rebalancing — FRED primary for US10Y, Yahoo secondary
+		// This eliminates Yahoo-DOWN causing debt module fallback
+		const _fredCache = DSSCache.get("macro:fred") || {};
+		const _globalCache = DSSCache.get("equity:global") || {};
 
-		  await fetchYahooQuote(DEBT_SYMBOLS.US10Y),
+		// US10Y: FRED primary (already cached, refreshes independently)
+		const _fredUs10Y = _fredCache.us10YYield ?? null;
+		const _fredUs2Y  = _fredCache.us2YYield  ?? null;
+		const _fredDXY   = _globalCache.dxy       ?? null;
 
-		  await (async () => { await new Promise(r => setTimeout(r, 2000)); return fetchYahooQuote(DEBT_SYMBOLS.US2Y); })(),
+		// Build us10YData from FRED if available, else try Yahoo
+		let us10YData = null;
+		if (_fredUs10Y !== null) {
+		  us10YData = { current: _fredUs10Y, changePct: 0, source: 'FRED' };
+		  logger.info({ job: 'buildDebtPayload', us10Y: _fredUs10Y, source: 'FRED' }, 'US10Y from FRED cache');
+		} else {
+		  logger.warn({ job: 'buildDebtPayload' }, 'FRED US10Y unavailable — attempting Yahoo fallback');
+		  try { us10YData = await fetchYahooQuote(DEBT_SYMBOLS.US10Y); } catch(e) { us10YData = null; }
+		}
 
-		  await (async () => { await new Promise(r => setTimeout(r, 4000)); return fetchYahooQuote(DEBT_SYMBOLS.DXY); })(),
+		// US2Y: FRED primary, Yahoo fallback
+		let us2YData = null;
+		if (_fredUs2Y !== null) {
+		  us2YData = { current: _fredUs2Y, changePct: 0, source: 'FRED' };
+		} else {
+		  try { await new Promise(r => setTimeout(r, 1000)); us2YData = await fetchYahooQuote(DEBT_SYMBOLS.US2Y); } catch(e) { us2YData = null; }
+		}
 
-		  await (async () => { await new Promise(r => setTimeout(r, 6000)); return fetchYahooQuote(DEBT_SYMBOLS.GOLD); })(),
+		// DXY: global cache primary, Yahoo fallback
+		let dxyData = null;
+		if (_fredDXY !== null) {
+		  dxyData = { current: _fredDXY, changePct: 0, source: 'global-cache' };
+		} else {
+		  try { await new Promise(r => setTimeout(r, 2000)); dxyData = await fetchYahooQuote(DEBT_SYMBOLS.DXY); } catch(e) { dxyData = null; }
+		}
 
-		  await fetchIndiaMacro()
-		];
+		// Gold: Yahoo only (no primary alternative — degrade gracefully)
+		let goldData = null;
+		try { await new Promise(r => setTimeout(r, 3000)); goldData = await fetchYahooQuote(DEBT_SYMBOLS.GOLD); } catch(e) { goldData = null; }
 
-		logger.info({ us10Y: !!us10YData, us2Y: !!us2YData, dxy: !!dxyData, gold: !!goldData, macro: !!macro }, "buildDebtPayload: data availability check");
+		// India macro: existing fetchIndiaMacro
+		const macro = await fetchIndiaMacro();
+
+		logger.info({ us10Y: !!us10YData, us10YSrc: us10YData?.source||'none', us2Y: !!us2YData, dxy: !!dxyData, gold: !!goldData, macro: !!macro }, "buildDebtPayload: data availability check");
+
 		// Only us10Y and macro are required — dxy/gold degrade gracefully
-		if (
-		  !us10YData ||
-		  !macro
-		) {
-		  logger.warn({ us10Y: !!us10YData, dxy: !!dxyData, macro: !!macro }, "buildDebtPayload: null guard hit — returning null");
+		if (!us10YData || !macro) {
+		  logger.warn({ us10Y: !!us10YData, fredUs10Y: _fredUs10Y, macro: !!macro }, "buildDebtPayload: null guard hit — returning null");
 		  return null;
 		}
 
@@ -10733,6 +10784,18 @@ LLMCircuitBreaker.restoreFromDB().then(() => {
 
 // ── T2: SmartAPI credential startup validation ───────────────────
 (function validateSmartAPICredentials() {
+  // P0: Validate Groq API key on startup
+  const groqKey = process.env.GROQ_API_KEY || '';
+  if (!groqKey || groqKey.trim() === '') {
+    logger.error({ job: 'startup-validation', severity: 'CRITICAL' },
+      'CRITICAL: GROQ_API_KEY missing — narrative inference unavailable. Rulebased fallback will activate.');
+  } else if (groqKey.length < 20) {
+    logger.error({ job: 'startup-validation', severity: 'CRITICAL' },
+      'CRITICAL: GROQ_API_KEY appears invalid (too short) — may be revoked or malformed. Rotate immediately.');
+  } else {
+    logger.info({ job: 'startup-validation', keyLen: groqKey.length }, 'Groq API key present and valid format');
+  }
+
   const required = {
     AO_API_KEY:    process.env.AO_API_KEY,
     AO_CLIENT_ID:  process.env.AO_CLIENT_ID,
@@ -10868,6 +10931,9 @@ process.on("uncaughtException", (err) => {
 		    repoRateSource: (() => { const mp = DSSCache.get('monetary:policy'); return mp ? mp.source : 'not-loaded'; })(),
 		    repoRate:       (() => { const mp = DSSCache.get('monetary:policy'); return mp ? mp.repoRate : null; })(),
 		    repoRateStale:  (() => { const mp = DSSCache.get('monetary:policy'); return mp ? mp.isStale : null; })(),
+		    // P0: Debt/fallback audit observability
+		    debtCacheStatus: (() => { const d=DSSCache.get('debt:live'); return d ? (d.dataStatus||'loaded') : 'not-loaded'; })(),
+		    groqKeyPresent:  !!(process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 20),
 		  };
 		  DSSCache.set('startup:status', STARTUP_STATUS);
 		  logger.info({ job: 'startup' }, 'STARTUP_STATUS initialised');
