@@ -9731,7 +9731,7 @@ app.post("/api/v1/advisory/brief", (req, res) =>
       portfolioContext:   _hasPortfolio ? (_pce ? 'OK' : 'INVALID_INPUT') : 'NOT_PROVIDED',
       advisoryCognition: _acl ? 'OK' : (_hasPortfolio && _pce ? 'ERROR' : 'SKIPPED'),
       convictionEngine:  _convFull ? 'OK' : 'FALLBACK',
-      durabilityEngine:  _durScore > 0.20 ? 'OK' : _durScore > 0.10 ? 'PARTIAL_DEGRADED' : 'FALLBACK'
+      durabilityEngine:  _durScore > 0.20 ? 'OK' : _durScore >= 0.10 ? 'PARTIAL_DEGRADED' : 'FALLBACK'
     };
 
     // Privacy: log mismatchClass only, never allocation values
@@ -9941,7 +9941,12 @@ app.get("/health", (req, res) => {
 			  if (info.status === "DOWN") {
 				alerts.push({ code: "FETCH_FAILURE_REPEATED", severity: "CRITICAL", source: sourceName });
 			  } else if (info.status === "STALE") {
-				const _alertSev = SECONDARY_SOURCES.includes(sourceName) ? "LOW" : "HIGH";
+				// RBI stale: LOW severity — governed policy fallback (monetary-policy.json) active
+				// Audit confirmed: RBI stale has zero quantified impact on confidence/conviction/durability
+				const GOVERNED_FALLBACK_SOURCES = ['RBI'];
+				const _alertSev = SECONDARY_SOURCES.includes(sourceName) ? "LOW"
+				  : GOVERNED_FALLBACK_SOURCES.includes(sourceName) ? "LOW"
+				  : "HIGH";
 				alerts.push({ code: "STALE_THRESHOLD_BREACH", severity: _alertSev, source: sourceName });
 			  }
 			}
