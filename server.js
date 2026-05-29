@@ -1671,7 +1671,7 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
         const s=inferSrc(req.headers['referer']||req.headers['referrer'],req.headers['user-agent']);
         const u=inferUA(req.headers['user-agent']);
         const p=inferPage(req.path);
-        db.get('SELECT 1 FROM comm_visits WHERE ip_hash=? AND visit_date<? LIMIT 1',[h,vd],(err,row)=>{
+        db.get('SELECT 1 FROM comm_visits WHERE ip_hash=? LIMIT 1',[h],(err,row)=>{
           if(err)return;
           db.run('INSERT INTO comm_visits (ip_hash,visit_date,visit_hour,is_revisit,source,page,ua_class,logged_at) VALUES (?,?,?,?,?,?,?,?)',[h,vd,vh,row?1:0,s,p,u,now],()=>{});
         });
@@ -10739,11 +10739,19 @@ app.post("/api/v1/ops/feed/:id/act",opsAuth,(req,res)=>{
     });
   });
 });
+app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{
+  const now=Date.now();
+  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 100",[],function(err,rows){
+    if(err)return res.status(500).json({status:'ERROR',error:err.message});
+    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue};});
+    res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
+  });
+});
 app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
   const now=Date.now();
   db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,isOverdue:p.nextDue&&p.nextDue<now?1:0};});
+    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,isOverdue:p.nextDue&&p.nextDue<now?1:0};});var DAY=86400000;var q=all.filter(function(p){return !p.nextDue||p.nextDue<=(now+DAY);});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
@@ -10776,7 +10784,7 @@ app.post("/api/v1/ops/prospects/:id/action",opsAuth,(req,res)=>{
   db.run("UPDATE comm_prospects SET status=?,updated_at=? WHERE id=?",[sm2[tr2],now,pid],(err)=>{
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
     var as2={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},ACCEPTED:{t:"MSG1_SEND",d:0},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000},INTERESTED:{t:"DEMO_SCHEDULE",d:0},DEMO_DONE:{t:"BETA_EVALUATE",d:7200000}};
-    var nx=as2[tr2];if(nx)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[pid,nx.t,"PENDING",now+nx.d,now],function(){});
+    db.run("UPDATE comm_actions SET status='COMPLETED',completed_at=? WHERE prospect_id=? AND status='PENDING' AND due_at<=?",[now,pid,now],function(){});var nx=as2[tr2];if(nx)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[pid,nx.t,"PENDING",now+nx.d,now],function(){});
     res.json({status:"OK",timestamp:now,newStatus:sm2[tr2],nextScheduled:nx?nx.t:null});
   });
 });

@@ -366,8 +366,8 @@ function cp(text,label,url){
     const ok=window.confirm('Placeholders remain: '+text.match(/\[[A-Z][A-Z _]+\]/g).join(', ')+'\n\nCopy anyway?');
     if(!ok)return;
   }
-  if(url)doOpen(url);  // open LinkedIn first — synchronous with gesture
-  doCopy(text);        // copy immediately after — still in gesture
+  doCopy(text);
+  if(url)doOpen(url);
   pushTray(text,label);
   toast('📋 '+label);
 }
@@ -472,9 +472,12 @@ function loadAll(){loadFeed();loadQueue();loadPipeline();loadTraffic();}
 // ══════════════════════════
 const T={
 'Connection Request':[
-  {l:'IFA — Market challenge',ph:true,t:`Your post about [THEIR TOPIC] resonated — I've been building a research tool that addresses exactly this advisory challenge. Regime-aware briefings in practitioner language, session-isolated. Happy to share if you're curious.`},
-  {l:'RIA — Governance',ph:true,t:`Saw your post on [THEIR TOPIC]. Building a governed intelligence system for SEBI-registered advisors — uncertainty disclosure, analytical provenance, session isolation. The governance layer may be relevant.`},
-  {l:'Wealth Manager — Cross-asset',ph:true,t:`Your note on [THEIR TOPIC] caught my attention. Building a cross-asset regime tool for advisory professionals — equity-debt-gold posture in governed briefings, practitioner language. Worth a look.`},
+  {l:'IFA',t:"I've been researching how market regimes affect advisory outcomes for IFAs in India. Building a governed intelligence platform around this — would be great to connect and exchange perspectives."},
+  {l:'RIA',t:"I've been building a governed intelligence system focused on macro-aware advisory workflows and SEBI-aligned decision support. Thought it would be valuable to connect."},
+  {l:'Wealth Manager',t:"I've been researching cross-asset regime intelligence and how it can improve long-term advisory conversations for wealth clients. Would be great to connect."},
+  {l:'PMS',t:"Currently building a regime-aware intelligence platform focused on allocation behavior, macro signals, and advisory decision support. Thought it would be valuable to connect."},
+  {l:'Family Office',t:"Exploring how macro regime intelligence can improve long-horizon allocation thinking for HNI and family-office style portfolios. Would be great to connect."},
+  {l:'General',t:"I've been building a macro-aware intelligence platform focused on improving advisory decision workflows and allocation thinking. Thought it would be great to connect."},
 ],
 'First DM':[
   {l:'Standard first DM',t:`Thanks for connecting. I've been researching how regime-aware intelligence can support advisory conversations — the daily challenge of knowing where the market is and being able to say it in your client's language.\n\nBuilt a research tool at advisiq.in that generates governed briefings for different advisory contexts — IFA, wealth manager, institutional desk. Session-isolated, no client data stored.\n\nHappy to show you what it produces for your typical client type — 12 minutes, live brief, no agenda beyond practitioner feedback.`},
@@ -514,10 +517,30 @@ const T={
 ],
 };
 
-function getMsgForStatus(s){
-  const m={SOURCED:T['Connection Request'][0].t,CONNECTION_SENT:T['Connection Request'][0].t,ACCEPTED:T['First DM'][0].t,MSG1_SENT:T['Day 7 Follow-Up'][0].t,MSG2_SENT:T['Day 14 Final'][0].t,DEMO_REQUESTED:T['Demo Scheduling'][0].t,DEMO_SCHEDULED:T['Demo Scheduling'][1].t,DEMO_DONE:T['Post-Demo'][0].t,BETA_INVITED:T['Beta Cohort'][1].t};
-  return m[s]||T['First DM'][0].t;
+function getCRMsg(r){
+  r=(r||'').toLowerCase();
+  if(r.indexOf('ifa')>=0)return T['Connection Request'][0].t;
+  if(r.indexOf('ria')>=0)return T['Connection Request'][1].t;
+  if(r.indexOf('wealth')>=0)return T['Connection Request'][2].t;
+  if(r.indexOf('pms')>=0)return T['Connection Request'][3].t;
+  if(r.indexOf('family')>=0)return T['Connection Request'][4].t;
+  return T['Connection Request'][5].t;
 }
+const STAGE_LABEL={SOURCED:'Sourced',CONNECTION_SENT:'Request Sent',ACCEPTED:'Connected',MSG1_SENT:'Conversation Active',MSG2_SENT:'Followed Up',MSG3_SENT:'Final Sent',DEMO_REQUESTED:'Demo Requested',DEMO_SCHEDULED:'Demo Scheduled',DEMO_DONE:'Demo Done',BETA_INVITED:'Beta Cohort',CLOSED:'Closed'};
+const STAGE_ORDER=['SOURCED','CONNECTION_SENT','ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT','DEMO_REQUESTED','DEMO_SCHEDULED','DEMO_DONE','BETA_INVITED'];
+const AE={
+  CONNECTION_READY:{d:'Send Connection Request',cp:true,msg:function(r){return getCRMsg(r);},nx:'CONNECTION_SENT',lbl:'Request Sent'},
+  ACCEPTED_CHECK:{d:'Check Acceptance',cp:false,msg:null,nx:'ACCEPTED',lbl:'Mark Connected'},
+  MSG1_SEND:{d:'Send First DM',cp:true,msg:function(){return T['First DM'][0].t;},nx:'MSG1_SENT',lbl:'DM Sent'},
+  MSG2_FOLLOW:{d:'Send Day-7 Follow-up',cp:true,msg:function(){return T['Day 7 Follow-Up'][0].t;},nx:'MSG2_SENT',lbl:'Followed Up'},
+  MSG3_FINAL:{d:'Send Final Nudge',cp:true,msg:function(){return T['Day 14 Final'][0].t;},nx:'MSG3_SENT',lbl:'Final Sent'},
+  DEMO_SCHEDULE:{d:'Schedule Demo',cp:true,msg:function(){return T['Demo Scheduling'][0].t;},nx:'DEMO_SET',lbl:'Demo Scheduled'},
+  BETA_EVALUATE:{d:'Send Beta Invite',cp:true,msg:function(){return T['Beta Cohort'][0].t;},nx:'BETA_INVITED',lbl:'Beta Invited'},
+};
+function ra(at,role){var a=AE[at];if(!a)return null;return{d:a.d,cp:a.cp,msg:a.cp&&a.msg?a.msg(role):null,nx:a.nx,lbl:a.lbl};}
+function sl(s){return STAGE_LABEL[s]||(s?s.replace(/_/g,' '):'');}
+function stageCls(s){var m={SOURCED:'cs-src',CONNECTION_SENT:'cs-sent',ACCEPTED:'cs-sent',MSG1_SENT:'cs-sent',MSG2_SENT:'cs-sent',MSG3_SENT:'cs-sent',DEMO_REQUESTED:'cs-demo',DEMO_SCHEDULED:'cs-demo',DEMO_DONE:'cs-demo',BETA_INVITED:'cs-beta',CLOSED:'cs-done'};return m[s]||'cs-src';}
+function getMsgForStatus(s,role){var a;if(s==='SOURCED')a=AE['CONNECTION_READY'];else if(s==='CONNECTION_SENT')a=AE['ACCEPTED_CHECK'];else if(s==='ACCEPTED')a=AE['MSG1_SEND'];else if(s==='MSG1_SENT')a=AE['MSG2_FOLLOW'];else if(s==='MSG2_SENT')a=AE['MSG3_FINAL'];else if(s==='DEMO_REQUESTED')a=AE['DEMO_SCHEDULE'];else if(s==='DEMO_DONE')a=AE['BETA_EVALUATE'];if(a&&a.cp&&a.msg)return a.msg(role);return T['First DM'][0].t;}
 function hasPH(t){return /\[[A-Z][A-Z _]+\]/.test(t);}
 function nextSt(s){const m={SOURCED:'CONNECTION_SENT',CONNECTION_SENT:'ACCEPTED',ACCEPTED:'MSG1_SENT',MSG1_SENT:'MSG2_SENT',MSG2_SENT:'MSG3_SENT',MSG3_SENT:'INTERESTED',DEMO_REQUESTED:'DEMO_SET',DEMO_SCHEDULED:'DEMO_DONE',DEMO_DONE:'BETA_INVITED'};return m[s]||null;}
 function nextLbl(s){const m={SOURCED:'Sent ✓',CONNECTION_SENT:'Accepted ✓',ACCEPTED:'DM Sent ✓',MSG1_SENT:'Followed Up ✓',MSG2_SENT:'Final Sent ✓',MSG3_SENT:'Demo Set ✓',DEMO_REQUESTED:'Demo Set ✓',DEMO_SCHEDULED:'Demo Done ✓',DEMO_DONE:'Beta Invited ✓'};return m[s]||'Advance →';}
@@ -657,103 +680,96 @@ function loadQueue(){
   });
 }
 function renderQueue(pq,feed){
-  const el=document.getElementById('pane-queue');
-  const queue=(pq.data&&pq.data.queue)||[];
-  const ov=(feed&&feed.data&&feed.data.overdue)||[];
-  if(!queue.length&&!ov.length){el.innerHTML=`<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Source prospects, then add via + tab.<br>The queue sequences everything automatically.</div><div class="empty-action" onclick="go('source')">🔍 Go to Source</div></div>`;return;}
-  let html='';
+  var el=document.getElementById('pane-queue');
+  var queue=(pq.data&&pq.data.queue)||[];
+  var ov=(feed&&feed.data&&feed.data.overdue)||[];
+  if(!queue.length&&!ov.length){el.innerHTML='<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Source prospects, then add via + tab.<br>The queue sequences everything automatically.</div><div class="empty-action" onclick="go(&apos;source&apos;)">🔍 Go to Source</div></div>';return;}
+  // Build _pmap for delegation
+  window._pmap=window._pmap||{};
+  ov.forEach(function(o){window._pmap[o.id]={msg:null,name:o.prospect||o.type,liUrl:null,status:null,cp:false};});
+  queue.forEach(function(p){
+    var a=p.nextAction?ra(p.nextAction,p.role):null;
+    window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};
+  });
+  var html='';
   if(ov.length){
-    html+=`<div class="sec">⚡ Overdue <span class="sec-ct">${ov.length}</span></div>`;
+    html+='<div class="sec">⚡ Overdue <span class="sec-ct">'+ov.length+'</span></div>';
     html+='<div class="swipe-hint"><span>← snooze</span><span>done →</span></div>';
-    ov.forEach(o=>{const hrs=Math.floor((o.overdueMs||0)/3600000);html+=prospectCard({id:o.id,name:o.prospect||o.type,sub:o.type,stage:'OVERDUE',liUrl:null,msg:null,note:null,isOverdue:true,overdueHrs:hrs});});
+    ov.forEach(function(o){
+      var hrs=Math.floor((o.overdueMs||0)/3600000);
+      html+=prospectCard({id:o.id,name:o.prospect||o.type,stage:'OVERDUE',liUrl:null,note:null,isOverdue:true,overdueHrs:hrs,at:null,role:null});
+    });
   }
-  const stages={SOURCED:'Ready to Connect',CONNECTION_SENT:'Awaiting Acceptance',ACCEPTED:'Send First DM',MSG1_SENT:'Day 7 Follow-Up',MSG2_SENT:'Day 14 Final',DEMO_REQUESTED:'Schedule Demo',DEMO_SCHEDULED:'Demo Upcoming',DEMO_DONE:'Post-Demo Follow-Up',BETA_INVITED:'Onboard to Cohort'};
-  const grouped={};
-  queue.forEach(p=>{const g=stages[p.status]||p.status;if(!grouped[g])grouped[g]=[];grouped[g].push(p);});
-  for(const[stage,ps]of Object.entries(grouped)){
-    html+=`<div class="sec">${stage} <span class="sec-ct">${ps.length}</span></div>`;
-    ps.forEach(p=>{html+=prospectCard({id:p.id,name:p.name,sub:(p.role||'Professional')+' · Score '+(p.score||2),stage:p.status,liUrl:p.linkedin_url,msg:getMsgForStatus(p.status),note:p.personalisationNote,isOverdue:false});});
-  }
+  // Group by next ACTION display name (not status label)
+  var grouped={};
+  queue.forEach(function(p){
+    var a=p.nextAction?ra(p.nextAction,p.role):null;
+    var g=a?a.d:sl(p.status);
+    if(!grouped[g])grouped[g]=[];
+    grouped[g].push(p);
+  });
+  Object.keys(grouped).forEach(function(stage){
+    var ps=grouped[stage];
+    html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';
+    ps.forEach(function(p){
+      html+=prospectCard({id:p.id,name:p.name,stage:p.status,liUrl:p.linkedin_url,note:p.personalisationNote,isOverdue:false,at:p.nextAction,role:p.role});
+    });
+  });
   el.innerHTML=html;
   attachSwipe('#pane-queue .card[data-id]');
 }
-function prospectCard({id,name,sub,stage,liUrl,msg,note,isOverdue,overdueHrs}){
-  const init=initials(name);
-  const msgPH=msg&&hasPH(msg);
-  let chips='';
-  if(msg&&liUrl){
-    // Primary: combined copy+open
-    const escapedMsg=JSON.stringify(msg);const escapedName=JSON.stringify(name);const escapedUrl=JSON.stringify(liUrl);
-    chips+=`<button class="btn btn-both btn-full" onclick="cp(${escapedMsg},${escapedName},${escapedUrl})">📋 Copy + Open ↗</button>`;
-    chips+=`<button class="btn btn-open" onclick="openOnly(${escapedUrl})">Open ↗</button>`;
-  }else if(msg){
-    const escapedMsg=JSON.stringify(msg);const escapedName=JSON.stringify(name);
-    chips+=`<button class="btn btn-copy" onclick="cpOnly(${escapedMsg},${escapedName})">📋 Copy Msg</button>`;
-  }else if(liUrl){
-    const escapedUrl=JSON.stringify(liUrl);
-    chips+=`<button class="btn btn-open" onclick="openOnly(${escapedUrl})">Open LinkedIn ↗</button>`;
-  }
-  if(msgPH)chips+=`<div style="width:100%;font-family:var(--mono);font-size:10px;color:var(--am);padding:2px 0">⚠ Edit [BRACKETS] before sending</div>`;
+
+function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
+  var init=initials(name);
+  var a=at?ra(at,role):null;
+  var chips='';
   if(isOverdue){
-    chips+=`<button class="btn btn-done btn-full" onclick="doneAct(${id})">✓ Done</button>`;
-    chips+=`<button class="btn btn-snooze" onclick="snoozeAct(${id})">+24h</button>`;
-  }else if(stage){
-    const nx=nextSt(stage);
-    if(nx){const lbl=nextLbl(stage);chips+=`<button class="btn btn-adv" onclick="advP(${id},${JSON.stringify(nx)})">${lbl}</button>`;}
-    if(stage==='DEMO_DONE')chips+=`<button class="btn btn-note" onclick="openNotes(${id})">📝 Note</button>`;
-  }
-  chips+=`<button class="btn btn-close" onclick="closeP(${id})">Close</button>`;
-  return `<div class="card swipeable" id="qc-${id}" data-id="${id}">
-    <div class="card-top">
-      <div class="card-av">${init}</div>
-      <div class="card-info"><div class="card-name">${name}</div><div class="card-sub">${sub}</div></div>
-      <div class="card-stage ${stageCls(stage)}">${(stage||'SOURCED').replace(/_/g,' ')}</div>
-    </div>
-    ${note?`<div class="card-note">${note}</div>`:''}
-    ${msgPH?`<div class="card-warn">⚠ Edit [BRACKETS] before sending</div>`:''}
-    <div class="actions">${chips}</div>
-  </div>`;
+    chips+='<button class="btn btn-done btn-full" data-pid="'+id+'" data-pact="done">✓ Done</button>';
+    chips+='<button class="btn btn-snooze" data-pid="'+id+'" data-pact="snooze">+24h</button>';
+  }else if(a){
+    if(a.cp&&liUrl)chips+='<button class="btn btn-both btn-full" data-pid="'+id+'" data-pact="cpopen">📋 Copy + Open ↗</button>';
+    else if(a.cp)chips+='<button class="btn btn-copy btn-full" data-pid="'+id+'" data-pact="copy">📋 Copy</button>';
+    else chips+='<button class="btn btn-open btn-full" data-pid="'+id+'" data-pact="open">Open LinkedIn ↗</button>';
+    if(a.cp&&liUrl)chips+='<button class="btn btn-open" data-pid="'+id+'" data-pact="open">Open ↗</button>';
+    chips+='<button class="btn btn-adv" data-pid="'+id+'" data-pact="adv" data-nx="'+a.nx+'">'+a.lbl+'</button>';
+  }else if(liUrl)chips+='<button class="btn btn-open btn-full" data-pid="'+id+'" data-pact="open">Open LinkedIn ↗</button>';
+  chips+='<button class="btn btn-close" data-pid="'+id+'" data-pact="close">Close</button>';
+  var lbl=a?a.d:sl(stage);
+  return '<div class="card swipeable" id="qc-'+id+'" data-id="'+id+'">'+'<div class="card-top"><div class="card-av">'+init+'</div><div class="card-info"><div class="card-name">'+name+'</div><div class="card-sub">'+(role||'Professional')+' · <span style="color:var(--ac)">'+lbl+'</span></div></div><div class="card-stage '+stageCls(stage)+'">'+sl(stage)+'</div></div>'+(note?'<div class="card-note">'+note+'</div>':'')+'<div class="actions">'+chips+'</div></div>';
 }
 
-// ── PIPELINE TAB ──
-function loadPipeline(){
-  fx('/api/v1/ops/prospects/queue').then(data=>{
-    renderPipeline(data);
-    const ct=(data.data&&data.data.count)||0;setBadge('b-pipeline',ct);
-  }).catch(()=>{document.getElementById('pane-pipeline').innerHTML=`<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add first prospect via the + tab.</div><div class="empty-action" onclick="go('add')">+ Add Prospect</div></div>`;});
-}
 function renderPipeline(data){
-  const el=document.getElementById('pane-pipeline');
-  const q=(data.data&&data.data.queue)||[];
-  if(!q.length){el.innerHTML=`<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.<br>All status tracking is automatic.</div><div class="empty-action" onclick="go('add')">+ Add Prospect</div></div>`;return;}
-  let html=`<div class="sec">Pipeline <span class="sec-ct">${q.length}</span></div>`;
-  q.forEach(p=>{
-    const msg=getMsgForStatus(p.status);
-    const msgPH=hasPH(msg);
-    let chips='';
-    if(p.linkedin_url){
-      chips+=`<button class="btn btn-both" onclick="cp(${JSON.stringify(msg)},${JSON.stringify(p.name)},${JSON.stringify(p.linkedin_url)})">📋 Copy + Open ↗</button>`;
-      chips+=`<button class="btn btn-open" onclick="openOnly(${JSON.stringify(p.linkedin_url)})">Open ↗</button>`;
-    }else{chips+=`<button class="btn btn-copy" onclick="cpOnly(${JSON.stringify(msg)},${JSON.stringify(p.name)})">📋 Copy</button>`;}
-    const nx=nextSt(p.status);
-    if(nx)chips+=`<button class="btn btn-adv" onclick="advP(${p.id},${JSON.stringify(nx)})">${nextLbl(p.status)}</button>`;
-    if(p.status==='DEMO_DONE')chips+=`<button class="btn btn-note" onclick="openNotes(${p.id})">📝 Note</button>`;
-    chips+=`<button class="btn btn-close" onclick="closeP(${p.id})">Close</button>`;
-    html+=`<div class="card">
-      <div class="card-top">
-        <div class="card-av">${initials(p.name)}</div>
-        <div class="card-info"><div class="card-name">${p.name}</div><div class="card-sub">${p.role||'Professional'} · Score ${p.score||2}</div></div>
-        <div class="card-stage ${stageCls(p.status)}">${(p.status||'SOURCED').replace(/_/g,' ')}</div>
-      </div>
-      ${p.personalisationNote?`<div class="card-note">${p.personalisationNote}</div>`:''}
-      ${msgPH?`<div class="card-warn">⚠ Edit [BRACKETS] before sending</div>`:''}
-      <div class="actions">${chips}</div>
-    </div>`;
+  var el=document.getElementById('pane-pipeline');
+  var q=(data.data&&data.data.queue)||[];
+  if(!q.length){el.innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.</div><div class="empty-action" onclick="go(&apos;add&apos;)">+ Add Prospect</div></div>';return;}
+  window._pmap=window._pmap||{};
+  q.forEach(function(p){
+    var a=p.nextAction?ra(p.nextAction,p.role):null;
+    window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};
+  });
+  var groups={};STAGE_ORDER.forEach(function(s){groups[s]=[];});
+  q.forEach(function(p){var s=p.status||'SOURCED';if(groups[s])groups[s].push(p);else{groups[s]=[];groups[s].push(p);}});
+  var html='<div class="sec">Relationship Pipeline <span class="sec-ct">'+q.length+'</span></div>';
+  STAGE_ORDER.forEach(function(stage){
+    var ps=groups[stage];if(!ps||!ps.length)return;
+    html+='<div style="padding:10px 12px 4px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px"><span>'+sl(stage)+'</span><span style="background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1px 7px;color:var(--t2)">'+ps.length+'</span></div>';
+    ps.forEach(function(p){
+      var chips=p.linkedin_url?'<button class="btn btn-open" data-pid="'+p.id+'" data-pact="open">Open ↗</button>':'';
+      chips+='<button class="btn btn-close" data-pid="'+p.id+'" data-pact="close">Close</button>';
+      html+='<div class="card"><div class="card-top"><div class="card-av">'+initials(p.name)+'</div><div class="card-info"><div class="card-name">'+p.name+'</div><div class="card-sub">'+(p.role||'Professional')+'</div></div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+chips+'</div></div>';
+    });
   });
   el.innerHTML=html;
 }
 
-// ── TRAFFIC TAB ──
+function loadPipeline(){
+  fx('/api/v1/ops/prospects/pipeline').then(function(data){
+    renderPipeline(data);
+  }).catch(function(){
+    document.getElementById('pane-pipeline').innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Load failed</div><div class="empty-s">Check connection and retry.</div></div>';
+  });
+}
+
 function loadTraffic(){
   fx('/api/v1/ops/traffic').then(data=>{renderTraffic(data);}).catch(()=>{document.getElementById('pane-traffic').innerHTML=`<div class="empty"><div class="empty-ico">↗</div><div class="empty-h">Load failed</div></div>`;});
 }
@@ -794,7 +810,7 @@ function renderAdd(){
   </div>`;
 }
 function addP(){
-  const name=document.getElementById('fn').value.trim();const url=document.getElementById('fu').value.trim();
+  const name=document.getElementById('fn').value.trim();var rawUrl=document.getElementById('fu').value.trim();var url=rawUrl&&!rawUrl.startsWith('http')?'https://'+rawUrl:rawUrl;
   if(!name||!url){toast('Name and LinkedIn URL required');return;}
   const body={name,linkedin_url:url,role:document.getElementById('fr').value,organisation:document.getElementById('fo').value.trim()||null,score:parseInt(document.getElementById('fs').value),personalisation_note:document.getElementById('fp').value.trim()||null,source_string:'S1'};
   fx('/api/v1/ops/prospects',{method:'POST',body:JSON.stringify(body)}).then(d=>{
@@ -876,91 +892,88 @@ function startDaily(lowEnergy){
     dailyItems=[];
     ov.forEach(o=>dailyItems.push({type:'feed',id:o.id,name:o.prospect||o.type,sub:o.type,msg:null,liUrl:null,status:null,note:null,isOverdue:true}));
     const limit=lowEnergy?2:5;let added=0;
-    q.forEach(p=>{if(added>=limit)return;dailyItems.push({type:'prospect',id:p.id,name:p.name,sub:(p.role||'')+' · '+(p.status||'').replace(/_/g,' '),msg:getMsgForStatus(p.status),liUrl:p.linkedin_url||null,status:p.status,note:p.personalisationNote,isOverdue:false});added++;});
+    q.forEach(p=>{
+      if(added>=limit)return;
+      // Only show in daily if action due within 48h or overdue
+      if(p.nextDue&&p.nextDue>(Date.now()+172800000))return;
+      dailyItems.push({type:'prospect',id:p.id,name:p.name,role:p.role||'',liUrl:p.linkedin_url||null,status:p.status,note:p.personalisationNote,isOverdue:false,at:p.nextAction,nextDue:p.nextDue});
+      added++;
+    });
     dailyIdx=0;renderDailyStep();
   });
 }
 function exitDaily(){document.getElementById('daily').classList.remove('on');}
 function renderDailyStep(){
-  const el=document.getElementById('dm-body');
-  const pct=dailyItems.length?Math.round(dailyIdx/dailyItems.length*100):100;
+  var el=document.getElementById('dm-body');
+  var pct=dailyItems.length?Math.round(dailyIdx/dailyItems.length*100):100;
   document.getElementById('dm-prog').style.width=pct+'%';
-  if(dailyIdx>=dailyItems.length){
-    el.innerHTML=`<div class="dm-done"><div class="dm-done-ico">✓</div><div class="dm-done-h">Session complete</div><div class="dm-done-s">${dailyItems.length} action${dailyItems.length!==1?'s':''} processed.<br>Return tomorrow.</div></div>`;
-    return;
-  }
-  const item=dailyItems[dailyIdx];
-  const msgPH=item.msg&&hasPH(item.msg);
-  const showLow=dailyIdx===0;
-  const escapedMsg=item.msg?JSON.stringify(item.msg):'""';
-  const escapedName=JSON.stringify(item.name);
-  const escapedUrl=item.liUrl?JSON.stringify(item.liUrl):'""';
-  const nx=item.status?nextSt(item.status):null;
-  const lbl=item.status?nextLbl(item.status):'✓ Done';
-
-  let html=`${showLow?`<button class="dm-low-btn" onclick="exitDaily();startDaily(true)">⚡ Low energy? Minimum cadence (2 actions)</button>`:''}
-  <div class="dm-meta">Action ${dailyIdx+1} of ${dailyItems.length}</div>
-  <div class="dm-step">${item.isOverdue?'⚡ OVERDUE':(item.status||'Outreach').replace(/_/g,' ')}</div>
-  <div class="dm-card">
-    <div class="dm-card-top">
-      <div class="dm-card-name">${item.name}</div>
-      <div class="dm-card-meta">${item.sub}</div>
-    </div>
-    ${item.note?`<div class="dm-card-note">${item.note}</div>`:''}
-    ${msgPH?`<div class="dm-card-warn">⚠ Edit [BRACKETS] before sending</div>`:''}
-    <div class="dm-actions">`;
-
-  if(item.msg&&item.liUrl){
-    html+=`<button class="dm-btn dm-btn-both" onclick="cp(${escapedMsg},${escapedName},${escapedUrl})">📋 Copy + Open LinkedIn ↗</button>`;
-    html+=`<button class="dm-btn dm-btn-open" onclick="cpOnly(${escapedMsg},${escapedName})">📋 Copy only</button>`;
-    html+=`<button class="dm-btn dm-btn-open" onclick="openOnly(${escapedUrl})">Open LinkedIn only ↗</button>`;
-  }else if(item.msg){
-    html+=`<button class="dm-btn dm-btn-copy" onclick="cpOnly(${escapedMsg},${escapedName})">📋 Copy Message</button>`;
-  }else if(item.liUrl){
-    html+=`<button class="dm-btn dm-btn-open" onclick="openOnly(${escapedUrl})">Open LinkedIn ↗</button>`;
-  }
-
-  html+=`<div class="dm-row">
-    <button class="dm-btn dm-btn-adv" onclick="dmAdv()">${item.isOverdue?'✓ Done':lbl}</button>
-    <button class="dm-btn dm-btn-skip" onclick="dmSkip()">Skip</button>
-  </div>
-  ${item.status==='DEMO_DONE'?`<button class="dm-btn dm-btn-open" onclick="openNotes(${item.id})">📝 Add demo note</button>`:''}
-    </div>
-  </div>`;
-  el.innerHTML=html;
+  if(dailyIdx>=dailyItems.length){el.innerHTML='<div class="dm-done"><div class="dm-done-ico">✓</div><div class="dm-done-h">Session complete</div><div class="dm-done-s">'+dailyItems.length+' action'+(dailyItems.length!==1?'s':'')+' processed.<br>Return tomorrow.</div></div>';return;}
+  var item=dailyItems[dailyIdx];window._dmItem=item;
+  var showLow=dailyIdx===0;
+  var act=item.at?ra(item.at,item.role):null;
+  var disp=act?act.d:sl(item.status);
+  var advLbl=act?act.lbl:'✓ Done';
+  var html=(showLow?'<button class="dm-low-btn" onclick="exitDaily();startDaily(true)">⚡ Low energy? Minimum cadence (2 actions)</button>':'')
+    +'<div class="dm-meta">Action '+(dailyIdx+1)+' of '+dailyItems.length+'</div>'
+    +'<div class="dm-step">'+disp+'</div>'
+    +'<div class="dm-card"><div class="dm-card-top"><div class="dm-card-name">'+item.name+'</div><div class="dm-card-meta">'+(item.role||'Professional')+'</div></div>'
+    +(item.note?'<div class="dm-card-note">'+item.note+'</div>':'')
+    +'<div class="dm-actions">';
+  if(item.isOverdue)html+='<button class="dm-btn dm-btn-adv" onclick="dmAdv()">✓ Done</button>';
+  else if(act){
+    if(act.cp&&item.liUrl)html+='<button class="dm-btn dm-btn-both" onclick="dmCpOpen()">📋 Copy + Open LinkedIn ↗</button>';
+    else if(act.cp)html+='<button class="dm-btn dm-btn-copy" onclick="dmCpOnly()">📋 Copy Message</button>';
+    else html+='<button class="dm-btn dm-btn-open" onclick="dmOpenOnly()">Open LinkedIn ↗</button>';
+    if(act.cp&&item.liUrl)html+='<button class="dm-btn dm-btn-open" onclick="dmOpenOnly()">Open LinkedIn Only ↗</button>';
+    html+='<div class="dm-row"><button class="dm-btn dm-btn-adv" onclick="dmAdv()">'+advLbl+'</button><button class="dm-btn dm-btn-skip" onclick="dmSkip()">Skip</button></div>';
+  }else html+='<div class="dm-row"><button class="dm-btn dm-btn-adv" onclick="dmAdv()">✓ Done</button><button class="dm-btn dm-btn-skip" onclick="dmSkip()">Skip</button></div>';
+  html+='</div></div>';el.innerHTML=html;
 }
+
 function dmAdv(){
-  const item=dailyItems[dailyIdx];
-  if(item.type==='feed')doneAct(item.id);
-  else if(item.status){const nx=nextSt(item.status);if(nx)advP(item.id,nx);}
+  var item=dailyItems[dailyIdx];
+  if(item.type==='feed'){doneAct(item.id);}
+  else{var act=item.at?ra(item.at,item.role):null;if(act&&act.nx)advP(item.id,act.nx);else if(item.status){var nx=nextSt(item.status);if(nx)advP(item.id,nx);}}
   dailyIdx++;renderDailyStep();
 }
 function dmSkip(){dailyIdx++;renderDailyStep();}
+function dmCpOpen(){var i=window._dmItem;if(!i)return;var a=i.at?ra(i.at,i.role):null;var m=a&&a.cp?a.msg:null;if(m)cp(m,i.name,i.liUrl||'');else if(i.liUrl)openOnly(i.liUrl);}
+function dmCpOnly(){var i=window._dmItem;if(!i)return;var a=i.at?ra(i.at,i.role):null;var m=a&&a.cp?a.msg:null;if(m)cpOnly(m,i.name);}
+function dmOpenOnly(){var i=window._dmItem;if(i&&i.liUrl)openOnly(i.liUrl);}
 
 
 // ── DELEGATED CLICK HANDLER ──
-document.addEventListener('click', function(e){
-  var el = e.target.closest('[data-tkey]');
-  if(el){
-    var parts = el.dataset.tkey.split('|||');
-    var grp=parts[0], idx=parseInt(parts[1]);
-    if(T[grp] && T[grp][idx]){ cpOnly(T[grp][idx].t, T[grp][idx].l); }
-    return;
-  }
-  var sl = e.target.closest('[data-skey]');
-  if(sl){
-    var parts = sl.dataset.skey.split('|||');
-    var sidx=parseInt(parts[0]), sact=parts[1];
-    var s=SEARCHES[sidx];
-    if(!s)return;
-    if(sact==='copy'){ cpOnly(s.q, s.l); }
-    else if(sact==='open'){
-      var liUrl='https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(s.q)+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH';
-      openOnly(liUrl);
+document.addEventListener('click',function(e){
+  // Template group copy (data-tkey)
+  var tk=e.target.closest('[data-tkey]');
+  if(tk){var pts=tk.dataset.tkey.split('|||');var g=pts[0],i=parseInt(pts[1]);if(T[g]&&T[g][i])cpOnly(T[g][i].t,T[g][i].l);return;}
+  // Source search (data-skey)
+  var sk=e.target.closest('[data-skey]');
+  if(sk){var pts=sk.dataset.skey.split('|||');var si=parseInt(pts[0]),sa=pts[1];var s=SEARCHES[si];if(!s)return;
+    if(sa==='copy')cpOnly(s.q,s.l);
+    else if(sa==='open')openOnly('https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(s.q)+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH');
+    return;}
+  // Prospect card actions (data-pid)
+  var pb=e.target.closest('[data-pid]');
+  if(pb){
+    var pid=parseInt(pb.dataset.pid);
+    var pa=pb.dataset.pact;
+    var pm=window._pmap&&window._pmap[pid];
+    if(pa==='cpopen'){
+      if(pm&&pm.cp&&pm.msg){cp(pm.msg,pm.name,pm.liUrl||'');}
+      else if(pm&&pm.liUrl){openOnly(pm.liUrl);}
+      return;
     }
+    if(pa==='copy'){if(pm&&pm.cp&&pm.msg)cpOnly(pm.msg,pm.name);return;}
+    if(pa==='open'){if(pm&&pm.liUrl)openOnly(pm.liUrl);return;}
+    if(pa==='adv'){var nx=pb.dataset.nx||(pm&&pm.nx);if(nx)advP(pid,nx);return;}
+    if(pa==='done'){doneAct(pid);return;}
+    if(pa==='snooze'){snoozeAct(pid);return;}
+    if(pa==='note'){openNotes(pid);return;}
+    if(pa==='close'){closeP(pid);return;}
     return;
   }
-}, true);
+},true);
 
 // ── INIT ──
 document.getElementById('auth-pw').focus();
