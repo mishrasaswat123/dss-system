@@ -424,8 +424,28 @@ function tick(){const n=new Date();document.getElementById('clock').textContent=
 
 // ── FETCH ──
 function fx(url,opts={}){
-  return fetch(API+url,{...opts,headers:{'x-ops-auth':AUTH,'Content-Type':'application/json',...(opts.headers||{})}}).then(r=>r.json());
+  var extraHeaders={'x-ops-auth':AUTH,'Content-Type':'application/json'};
+  if(VISITOR_ID)extraHeaders['x-visitor-id']=VISITOR_ID;
+  extraHeaders['x-visitor-type']='FOUNDER';
+  return fetch(API+url,{...opts,headers:{...extraHeaders,...(opts.headers||{})}}).then(r=>r.json());
 }
+
+
+// ── VISITOR IDENTITY ──
+// Persistent visitor ID — survives page refresh, cleared only on storage clear
+function getVisitorId(){
+  try{
+    var vid=localStorage.getItem('advisiq_vid');
+    if(!vid){
+      vid=(typeof crypto.randomUUID==='function')
+        ?crypto.randomUUID()
+        :'vid-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+      localStorage.setItem('advisiq_vid',vid);
+    }
+    return vid;
+  }catch(e){return null;}
+}
+var VISITOR_ID=getVisitorId();
 
 // ── AUTH ──
 function doAuth(){
@@ -617,24 +637,53 @@ function renderSource(){
 
 // ── FEED TAB ──
 function loadFeed(){
-  Promise.all([fx('/api/v1/ops/brief'),fx('/api/v1/ops/feed')]).then(([brief,feed])=>{
-    renderFeed(brief,feed);
+  Promise.all([fx('/api/v1/ops/brief'),fx('/api/v1/ops/feed'),fx('/api/v1/ops/prospects/pipeline')]).then(([brief,feed,pipeline])=>{
+    renderFeed(brief,feed,pipeline);
     const oc=(feed.data&&feed.data.counts&&feed.data.counts.overdue)||0;
     setBadge('b-feed',oc);
     updateSticky(feed);
   }).catch(e=>{document.getElementById('pane-feed').innerHTML=`<div class="empty"><div class="empty-ico">⚠</div><div class="empty-h">Load failed</div><div class="empty-s">${e.message}</div></div>`;});
 }
-function renderFeed(brief,feed){
+function renderFeed(brief,feed,pipeline){
   const el=document.getElementById('pane-feed');
   const d=brief.data||{};
   const oc=d.overdueCount||0,pe=d.pendingEvents||0,yv=d.yesterdayUniqueCount||0;
   const now=new Date();
+  // Compute funnel metrics from pipeline data
+  var pq=(pipeline&&pipeline.data&&pipeline.data.queue)||[];
+  var total=pq.length;
+  var requested=pq.filter(function(p){return p.status==='CONNECTION_SENT';}).length;
+  var connected=pq.filter(function(p){return ['ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT'].indexOf(p.status)>=0;}).length;
+  var demo=pq.filter(function(p){return ['DEMO_REQUESTED','DEMO_SCHEDULED','DEMO_DONE'].indexOf(p.status)>=0;}).length;
+  var beta=pq.filter(function(p){return p.status==='BETA_INVITED';}).length;
+  var connRate=total>0?Math.round(connected/total*100):0;
+  var demoRate=connected>0?Math.round(demo/connected*100):0;
+  var betaRate=demo>0?Math.round(beta/demo*100):0;
+  var nowDate=new Date();
   let html=`<div class="brief">
-    <div class="brief-day">${now.toLocaleDateString('en-IN',{weekday:'long'})} · ${now.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} · Operational Brief</div>
+    <div class="brief-day">${nowDate.toLocaleDateString('en-IN',{weekday:'long'})} · ${nowDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} · Operational Brief</div>
     <div class="brief-grid">
       <div class="bstat"><div class="bstat-n ${oc>0?'red':'grn'}">${oc}</div><div class="bstat-l">Overdue</div></div>
-      <div class="bstat"><div class="bstat-n ${pe>0?'amb':''}">${pe}</div><div class="bstat-l">Events</div></div>
       <div class="bstat"><div class="bstat-n ${yv>0?'grn':''}">${yv}</div><div class="bstat-l">Visitors</div></div>
+      <div class="bstat"><div class="bstat-n">${total}</div><div class="bstat-l">Prospects</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
+      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Connected</span>
+        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--gn)">${connected}</span>
+      </div>
+      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Conv Rate</span>
+        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${connRate>0?'var(--gn)':'var(--t3)'}">${connRate}%</span>
+      </div>
+      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Demos</span>
+        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--am)">${demo}</span>
+      </div>
+      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Beta</span>
+        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--pu)">${beta}</span>
+      </div>
     </div>
     <div class="brief-lines">${(d.lines||[]).map(l=>`<div class="brief-line">· ${l}</div>`).join('')}</div>
   </div>`;
@@ -741,22 +790,100 @@ function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
 function renderPipeline(data){
   var el=document.getElementById('pane-pipeline');
   var q=(data.data&&data.data.queue)||[];
-  if(!q.length){el.innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.</div><div class="empty-action" onclick="go(&apos;add&apos;)">+ Add Prospect</div></div>';return;}
+  if(!q.length){el.innerHTML='<div class="empty"><div class="empty-ico">\u25ce</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.</div><div class="empty-action" onclick="go(&apos;add&apos;)">+ Add Prospect</div></div>';return;}
+
+  // Build _pmap for delegation
   window._pmap=window._pmap||{};
   q.forEach(function(p){
-    var a=p.nextAction?ra(p.nextAction,p.role):null;
-    window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};
+    var sn2=nextFromStatus(p.status);
+    var a2=sn2.at?ra(sn2.at,p.role):null;
+    window._pmap[p.id]={msg:a2&&a2.cp?a2.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a2?a2.cp:false,nx:a2?a2.nx:null};
   });
-  var groups={};STAGE_ORDER.forEach(function(s){groups[s]=[];});
+
+  // Group by stage
+  var groups={};
+  STAGE_ORDER.forEach(function(s){groups[s]=[];});
   q.forEach(function(p){var s=p.status||'SOURCED';if(groups[s])groups[s].push(p);else{groups[s]=[];groups[s].push(p);}});
-  var html='<div class="sec">Relationship Pipeline <span class="sec-ct">'+q.length+'</span></div>';
+
+  // ── PRIORITY 3: Funnel summary header ──
+  var FUNNEL_STAGES=[
+    {key:'SOURCED',label:'Sourced'},
+    {key:'CONNECTION_SENT',label:'Request Sent'},
+    {key:'ACCEPTED',label:'Connected'},
+    {key:'MSG1_SENT',label:'Conversation'},
+    {key:'DEMO_REQUESTED',label:'Demo Req'},
+    {key:'DEMO_SCHEDULED',label:'Demo Set'},
+    {key:'DEMO_DONE',label:'Demo Done'},
+    {key:'BETA_INVITED',label:'Beta'},
+  ];
+  var convCount=(groups['ACCEPTED']||[]).length+(groups['MSG1_SENT']||[]).length+(groups['MSG2_SENT']||[]).length+(groups['MSG3_SENT']||[]).length;
+  var demoCount=(groups['DEMO_REQUESTED']||[]).length+(groups['DEMO_SCHEDULED']||[]).length+(groups['DEMO_DONE']||[]).length;
+  var betaCount=(groups['BETA_INVITED']||[]).length;
+  var connCount=(groups['CONNECTION_SENT']||[]).length;
+
+  var summaryHtml='<div style="margin:10px 10px 0;background:var(--acb);border:1px solid var(--b2);border-radius:10px;padding:12px 14px">'
+    +'<div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ac);margin-bottom:8px">Active Pipeline</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap">';
+  var funnelItems=[
+    {l:'Prospects',n:q.length,c:'var(--tx)'},
+    {l:'Requested',n:connCount,c:'var(--ac)'},
+    {l:'Connected',n:convCount,c:'var(--gn)'},
+    {l:'Demo',n:demoCount,c:'var(--am)'},
+    {l:'Beta',n:betaCount,c:'var(--pu)'},
+  ];
+  funnelItems.forEach(function(f){
+    summaryHtml+='<div style="background:rgba(0,0,0,.25);border-radius:7px;padding:7px 10px;min-width:60px;text-align:center">'
+      +'<div style="font-family:var(--mono);font-size:18px;font-weight:700;color:'+f.c+';line-height:1">'+f.n+'</div>'
+      +'<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px;letter-spacing:.06em">'+f.l+'</div>'
+      +'</div>';
+  });
+  summaryHtml+='</div></div>';
+
+  var html='<div class="sec">Relationship Pipeline <span class="sec-ct">'+q.length+'</span></div>'+summaryHtml;
+
+  // ── PRIORITY 1+6: Compressed cards with next action + overdue ──
+  var now2=Date.now();
   STAGE_ORDER.forEach(function(stage){
     var ps=groups[stage];if(!ps||!ps.length)return;
-    html+='<div style="padding:10px 12px 4px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px"><span>'+sl(stage)+'</span><span style="background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1px 7px;color:var(--t2)">'+ps.length+'</span></div>';
+    html+='<div style="padding:10px 12px 4px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px">'
+      +'<span>'+sl(stage)+'</span>'
+      +'<span style="background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1px 7px;color:var(--t2)">'+ps.length+'</span></div>';
     ps.forEach(function(p){
-      var chips=p.linkedin_url?'<button class="btn btn-open" data-pid="'+p.id+'" data-pact="open">Open ↗</button>':'';
-      chips+='<button class="btn btn-close" data-pid="'+p.id+'" data-pact="close">Close</button>';
-      html+='<div class="card"><div class="card-top"><div class="card-av">'+initials(p.name)+'</div><div class="card-info"><div class="card-name">'+p.name+'</div><div class="card-sub">'+(p.role||'Professional')+'</div></div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+chips+'</div></div>';
+      // Derive next action from STATUS (governance-correct — not from DB action queue)
+      var sn=nextFromStatus(p.status);
+      var nextLabel=sn.d;
+      var isOverdue=p.nextDue&&p.nextDue<now2;
+      var daysAway=p.nextDue?Math.round(Math.abs(p.nextDue-now2)/86400000):null;
+      var roleStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' · Score '+(p.score||2)+'</div>';
+      var nextStr='';
+      if(isOverdue){
+        nextStr='<div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:3px">\u26a0 '+nextLabel+' overdue by '+daysAway+'d</div>';
+      }else if(p.nextDue){
+        var d=new Date(p.nextDue);
+        var dateStr=d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+        nextStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">Next: '+nextLabel+' \u00b7 '+dateStr+'</div>';
+      }else{
+        nextStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">'+nextLabel+'</div>';
+      }
+
+      // Compressed card: avatar + name + stage badge on one line, next action below, Open button
+      html+='<div class="card" style="'+(isOverdue?'border-color:#5a1020;background:var(--rdb);':'')+'">'
+        +'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px">'
+        +'<div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div>'
+        +'<div style="flex:1;min-width:0">'
+        +'<div style="display:flex;align-items:center;gap:6px">'
+        +'<div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div>'
+        +'<div class="card-stage '+stageCls(p.status)+'" style="flex-shrink:0">'+sl(p.status)+'</div>'
+        +'</div>'
+        +roleStr
+        +nextStr
+        +'</div>'
+        +'</div>'
+        +'<div style="padding:0 12px 9px;display:flex;gap:6px;align-items:center">'
+        +(p.linkedin_url?'<button class="btn btn-open" data-pid="'+p.id+'" data-pact="open" style="flex:1">Open Profile \u2197</button>':'')
+        +'<button class="btn btn-close" data-pid="'+p.id+'" data-pact="close" style="padding:0 12px;font-size:11px;min-height:36px">Close</button>'
+        +'</div>'
+        +'</div>';
     });
   });
   el.innerHTML=html;
@@ -907,7 +1034,31 @@ function renderDailyStep(){
   var el=document.getElementById('dm-body');
   var pct=dailyItems.length?Math.round(dailyIdx/dailyItems.length*100):100;
   document.getElementById('dm-prog').style.width=pct+'%';
-  if(dailyIdx>=dailyItems.length){el.innerHTML='<div class="dm-done"><div class="dm-done-ico">✓</div><div class="dm-done-h">Session complete</div><div class="dm-done-s">'+dailyItems.length+' action'+(dailyItems.length!==1?'s':'')+' processed.<br>Return tomorrow.</div></div>';return;}
+  if(dailyIdx>=dailyItems.length){
+    // Fetch summary for completion screen
+    fx('/api/v1/ops/prospects/pipeline').then(function(pd){
+      var pq2=(pd&&pd.data&&pd.data.queue)||[];
+      var overdue2=pq2.filter(function(p){return p.nextDue&&p.nextDue<Date.now();}).length;
+      var thisWeek=pq2.filter(function(p){return p.nextDue&&p.nextDue>Date.now()&&p.nextDue<Date.now()+604800000;}).length;
+      var nextDue=pq2.filter(function(p){return p.nextDue&&p.nextDue>Date.now();}).sort(function(a,b){return a.nextDue-b.nextDue;})[0];
+      var nextDateStr=nextDue?new Date(nextDue.nextDue).toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short'}):'None';
+      el.innerHTML='<div class="dm-done">'
+        +'<div class="dm-done-ico">✓</div>'
+        +'<div class="dm-done-h">Session complete</div>'
+        +'<div class="dm-done-s">'+dailyItems.length+' action'+(dailyItems.length!==1?'s':'')+' processed.</div>'
+        +'<div style="background:var(--s2);border:1px solid var(--b2);border-radius:10px;padding:12px 14px;margin-top:16px;width:100%;max-width:340px;text-align:left">'
+        +'<div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);margin-bottom:8px">Session Summary</div>'
+        +'<div style="font-family:var(--mono);font-size:12px;color:var(--t2);display:flex;flex-direction:column;gap:5px">'
+        +(overdue2>0?'<div style="color:var(--rd)">⚠ '+overdue2+' action'+(overdue2!==1?'s':'')+' still overdue</div>':'<div style="color:var(--gn)">✓ No overdue actions</div>')
+        +'<div>Upcoming this week: <span style="color:var(--tx)">'+thisWeek+'</span></div>'
+        +'<div>Next due: <span style="color:var(--ac)">'+nextDateStr+'</span></div>'
+        +'</div></div>'
+        +'</div>';
+    }).catch(function(){
+      el.innerHTML='<div class="dm-done"><div class="dm-done-ico">✓</div><div class="dm-done-h">Session complete</div><div class="dm-done-s">'+dailyItems.length+' action'+(dailyItems.length!==1?'s':'')+' processed.<br>Return tomorrow.</div></div>';
+    });
+    return;
+  }
   var item=dailyItems[dailyIdx];window._dmItem=item;
   var showLow=dailyIdx===0;
   var act=item.at?ra(item.at,item.role):null;
@@ -942,6 +1093,23 @@ function dmCpOnly(){var i=window._dmItem;if(!i)return;var a=i.at?ra(i.at,i.role)
 function dmOpenOnly(){var i=window._dmItem;if(i&&i.liUrl)openOnly(i.liUrl);}
 
 
+
+// Status → next expected action (derived from lifecycle state, not DB queue)
+// This is the governance-correct mapping for display purposes
+const STATUS_NEXT={
+  SOURCED:        {at:'CONNECTION_READY', d:'Send Connection Request'},
+  CONNECTION_SENT:{at:'ACCEPTED_CHECK',  d:'Check Acceptance'},
+  ACCEPTED:       {at:'MSG1_SEND',       d:'Send First DM'},
+  MSG1_SENT:      {at:'MSG2_FOLLOW',     d:'Send Day-7 Follow-up'},
+  MSG2_SENT:      {at:'MSG3_FINAL',      d:'Send Final Nudge'},
+  MSG3_SENT:      {at:null,             d:'Awaiting Response'},
+  DEMO_REQUESTED: {at:'DEMO_SCHEDULE',   d:'Schedule Demo'},
+  DEMO_SCHEDULED: {at:null,             d:'Demo Upcoming'},
+  DEMO_DONE:      {at:'BETA_EVALUATE',   d:'Send Beta Invite'},
+  BETA_INVITED:   {at:null,             d:'Awaiting Feedback'},
+};
+// Get next action display info from prospect STATUS (not DB action queue)
+function nextFromStatus(status){return STATUS_NEXT[status]||{at:null,d:'—'};}
 // ── DELEGATED CLICK HANDLER ──
 document.addEventListener('click',function(e){
   // Template group copy (data-tkey)

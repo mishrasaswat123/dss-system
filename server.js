@@ -1671,9 +1671,13 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
         const s=inferSrc(req.headers['referer']||req.headers['referrer'],req.headers['user-agent']);
         const u=inferUA(req.headers['user-agent']);
         const p=inferPage(req.path);
-        db.get('SELECT 1 FROM comm_visits WHERE ip_hash=? LIMIT 1',[h],(err,row)=>{
-          if(err)return;
-          db.run('INSERT INTO comm_visits (ip_hash,visit_date,visit_hour,is_revisit,source,page,ua_class,logged_at) VALUES (?,?,?,?,?,?,?,?)',[h,vd,vh,row?1:0,s,p,u,now],()=>{});
+      const vid=req.headers['x-visitor-id']||null;
+      const vtype=(req.headers['x-visitor-type']||'PUBLIC').trim();
+      if(vtype==='FOUNDER')return;
+      const dedupeKey=vid||h;
+      const dedupeField=vid?'visitor_id':'ip_hash';
+      db.get('SELECT 1 FROM comm_visits WHERE '+dedupeField+'=? LIMIT 1',[dedupeKey],(err,row)=>{
+        db.run('INSERT INTO comm_visits (ip_hash,visit_date,visit_hour,is_revisit,source,page,ua_class,visitor_id,visitor_type,logged_at) VALUES (?,?,?,?,?,?,?,?,?,?)',[h,vd,vh,row?1:0,s,p,u,vid,vtype,now],function(){});
         });
       }catch(e){}
     });
@@ -10702,7 +10706,7 @@ app.get("/api/v1/ops/brief",opsAuth,(req,res)=>{
   const yd=new Date(now-86400000).toISOString().slice(0,10);
   db.get("SELECT COUNT(*) as c FROM comm_actions WHERE status=? AND due_at IS NOT NULL AND due_at<?",["PENDING",now],(e1,r1)=>{
     db.get("SELECT COUNT(*) as c FROM comm_ops_events WHERE delivered=0",[],(e2,r2)=>{
-      db.get("SELECT COUNT(DISTINCT ip_hash) as c FROM comm_visits WHERE visit_date=?",[yd],(e3,r3)=>{
+      db.get("SELECT COUNT(DISTINCT COALESCE(visitor_id,ip_hash)) as c FROM comm_visits WHERE visit_date=? AND (visitor_type IS NULL OR visitor_type!='FOUNDER')",[yd],(e3,r3)=>{
         const oc=(r1&&r1.c)||0,pe=(r2&&r2.c)||0,yv=(r3&&r3.c)||0;
         res.json({status:"OK",timestamp:now,data:{overdueCount:oc,pendingEvents:pe,yesterdayUniqueCount:yv,lines:[oc>0?String(oc)+" overdue":"No overdue",String(pe)+" events",yv>0?String(yv)+" visitors":"No visits","ops ready"],generatedAt:now}});
       });
@@ -10757,7 +10761,7 @@ app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
 });
 app.get("/api/v1/ops/traffic",opsAuth,(req,res)=>{
   const ago=new Date(Date.now()-604800000).toISOString().slice(0,10);
-  db.all("SELECT visit_date,source,COUNT(DISTINCT ip_hash) as u,SUM(is_revisit) as rv FROM comm_visits WHERE visit_date>=? GROUP BY visit_date,source ORDER BY visit_date DESC",[ago],(err,rows)=>{
+  db.all("SELECT visit_date,source,COUNT(DISTINCT COALESCE(visitor_id,ip_hash)) as u,SUM(is_revisit) as rv FROM comm_visits WHERE visit_date>=? AND (visitor_type IS NULL OR visitor_type!='FOUNDER') GROUP BY visit_date,source ORDER BY visit_date DESC",[ago],(err,rows)=>{
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
     var tu=0,tr=0,sm={LINKEDIN:0,WHATSAPP:0,DIRECT:0,OTHER:0};
     (rows||[]).forEach(function(r){tu+=r.u;tr+=r.rv;if(sm[r.source]!==undefined)sm[r.source]+=r.u;else sm.OTHER+=r.u;});
