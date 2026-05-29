@@ -1860,17 +1860,39 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 		function loadMemory() {
 		  try {
 			const data = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf-8"));
-
+			// Governance-validated restoration — each field individually validated before trust
+			// Additive only: no logic changes, no threshold changes
+			const safeSignalsHistory = Array.isArray(data.signalsHistory) ? data.signalsHistory : [];
+			const safeV8RegimeHistory = Array.isArray(data.v8_regimeHistory) ? data.v8_regimeHistory : [];
+			const safeCycles = typeof data.cyclesSinceChange === 'number' && data.cyclesSinceChange >= 0
+			  ? data.cyclesSinceChange : 0;
+			const safeLastRegimeChangeTs = typeof data.lastRegimeChangeTs === 'number'
+			  ? data.lastRegimeChangeTs : null;
+			const safeLastSnapshot = data.lastSnapshot && typeof data.lastSnapshot === 'object'
+			  && typeof data.lastSnapshot.regime === 'string'
+			  ? data.lastSnapshot : null;
+			const safeAlerts = Array.isArray(data.alerts) ? data.alerts : [];
+			if (safeSignalsHistory.length > 0) {
+			  logger.info({ job: 'loadMemory', cycles: safeCycles, signals: safeSignalsHistory.length,
+			    lastRegime: safeLastSnapshot?.regime || 'unknown' }, 'Durability state restored from memory.json');
+			}
 			return {
-			  decisions: data.decisions || [],
-			  regimeHistory: data.regimeHistory || [],      
+			  decisions:          data.decisions || [],
+			  regimeHistory:      data.regimeHistory || [],
+			  signalsHistory:     safeSignalsHistory,
+			  v8_regimeHistory:   safeV8RegimeHistory,
+			  cyclesSinceChange:  safeCycles,
+			  lastRegimeChangeTs: safeLastRegimeChangeTs,
+			  lastSnapshot:       safeLastSnapshot,
+			  alerts:             safeAlerts,
 			};
-		  } catch {
-		  return {
-			decisions: [],
-			regimeHistory: []
-		  };
-		}
+		  } catch(e) {
+			logger.warn({ job: 'loadMemory', err: e.message }, 'memory.json load failed — starting with clean state');
+			return {
+			  decisions: [], regimeHistory: [], signalsHistory: [], v8_regimeHistory: [],
+			  cyclesSinceChange: 0, lastRegimeChangeTs: null, lastSnapshot: null, alerts: [],
+			};
+		  }
 		}
 
 		function saveMemory(mem) {
