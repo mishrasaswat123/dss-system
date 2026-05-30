@@ -321,7 +321,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font-
   <div class="body" id="pane-pipeline" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
   <div class="body" id="pane-traffic" style="display:none"><div class="loading"><span class="spin"></span>loading...</div></div>
   <div class="body" id="pane-add" style="display:none"></div>
-  <div id="sticky"><div class="sticky-txt" id="sticky-txt"></div><button class="sticky-act" id="sticky-act">Act →</button></div>
+  
 </div>
 
 <div id="toast"></div>
@@ -474,7 +474,7 @@ function go(tab){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===tab));
   document.querySelectorAll('.body').forEach(p=>p.style.display='none');
   document.getElementById('pane-'+tab).style.display='block';
-  document.getElementById('sticky').classList.remove('on');
+  var _st=document.getElementById('sticky');if(_st)_st.classList.remove('on');
   hideTray();
   if(tab==='feed')loadFeed();
   else if(tab==='queue')loadQueue();
@@ -640,75 +640,83 @@ function loadFeed(){
   Promise.all([fx('/api/v1/ops/brief'),fx('/api/v1/ops/feed'),fx('/api/v1/ops/prospects/pipeline')]).then(([brief,feed,pipeline])=>{
     renderFeed(brief,feed,pipeline);
     const oc=(feed.data&&feed.data.counts&&feed.data.counts.overdue)||0;
-    setBadge('b-feed',oc);
+    // Feed badge = overdue items not yet moved to Queue
+    try{
+      var _fa=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);
+      var _fov=(feed.data&&feed.data.overdue)||[];
+      var _unacted=_fov.filter(function(i){return !i.prospect_id||_fa.indexOf(Number(i.prospect_id))<0;}).length;
+      setBadge('b-feed',_unacted);
+    }catch(e){setBadge('b-feed',oc);}
     updateSticky(feed);
   }).catch(e=>{document.getElementById('pane-feed').innerHTML=`<div class="empty"><div class="empty-ico">⚠</div><div class="empty-h">Load failed</div><div class="empty-s">${e.message}</div></div>`;});
 }
+function actOnOverdue(){
+  var ids=(window._feedOverdue||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
+  if(!ids.length){go('queue');return;}
+  try{
+    var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+    var parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]');
+    ids.forEach(function(id){
+      var n=Number(id);if(isNaN(n))return;
+      // Add to acted
+      if(acted.indexOf(n)<0)acted.push(n);
+      // Remove from parked — re-acting overrides park
+      parked=parked.filter(function(x){return Number(x)!==n;});
+    });
+    localStorage.setItem('advisiq_acted',JSON.stringify(acted));
+    localStorage.setItem('advisiq_parked',JSON.stringify(parked));
+  }catch(e){}
+  go('queue');
+}
+
 function renderFeed(brief,feed,pipeline){
-  const el=document.getElementById('pane-feed');
-  const d=brief.data||{};
-  const oc=d.overdueCount||0,pe=d.pendingEvents||0,yv=d.yesterdayUniqueCount||0;
-  const now=new Date();
-  // Compute funnel metrics from pipeline data
+  var el=document.getElementById('pane-feed');
+  var d=brief.data||{},oc=d.overdueCount||0,yv=d.yesterdayUniqueCount||0;
+  var nowDate=new Date();
   var pq=(pipeline&&pipeline.data&&pipeline.data.queue)||[];
   var total=pq.length;
-  var requested=pq.filter(function(p){return p.status==='CONNECTION_SENT';}).length;
-  var connected=pq.filter(function(p){return ['ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT'].indexOf(p.status)>=0;}).length;
+  var conn=pq.filter(function(p){return ['ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT'].indexOf(p.status)>=0;}).length;
   var demo=pq.filter(function(p){return ['DEMO_REQUESTED','DEMO_SCHEDULED','DEMO_DONE'].indexOf(p.status)>=0;}).length;
   var beta=pq.filter(function(p){return p.status==='BETA_INVITED';}).length;
-  var connRate=total>0?Math.round(connected/total*100):0;
-  var demoRate=connected>0?Math.round(demo/connected*100):0;
-  var betaRate=demo>0?Math.round(beta/demo*100):0;
-  var nowDate=new Date();
-  let html=`<div class="brief">
-    <div class="brief-day">${nowDate.toLocaleDateString('en-IN',{weekday:'long'})} · ${nowDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})} · Operational Brief</div>
-    <div class="brief-grid">
-      <div class="bstat"><div class="bstat-n ${oc>0?'red':'grn'}">${oc}</div><div class="bstat-l">Overdue</div></div>
-      <div class="bstat"><div class="bstat-n ${yv>0?'grn':''}">${yv}</div><div class="bstat-l">Visitors</div></div>
-      <div class="bstat"><div class="bstat-n">${total}</div><div class="bstat-l">Prospects</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
-      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Connected</span>
-        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--gn)">${connected}</span>
-      </div>
-      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Conv Rate</span>
-        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${connRate>0?'var(--gn)':'var(--t3)'}">${connRate}%</span>
-      </div>
-      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Demos</span>
-        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--am)">${demo}</span>
-      </div>
-      <div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Beta</span>
-        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--pu)">${beta}</span>
-      </div>
-    </div>
-    <div class="brief-lines">${(d.lines||[]).map(l=>`<div class="brief-line">· ${l}</div>`).join('')}</div>
-  </div>`;
-  const fd=feed.data||{};const ov=fd.overdue||[],td=fd.today||[],ev=fd.events||[];
-  if(ov.length>0){
-    html+=`<div class="sec">⚡ Overdue <span class="sec-ct">${ov.length}</span></div>`;
-    html+='<div class="swipe-hint"><span>← snooze</span><span>done →</span></div>';
-    ov.forEach(item=>{const hrs=Math.floor((item.overdueMs||0)/3600000);
-      html+=feedCard(item.id,item.prospect||item.type,item.type+' · '+hrs+'h overdue','urgent','⚡',true);
-    });
+  var connRate=total>0?Math.round(conn/total*100):0;
+  var html='<div class="brief"><div class="brief-day">'+nowDate.toLocaleDateString('en-IN',{weekday:'long'})+' · '+nowDate.toLocaleDateString('en-IN',{day:'numeric',month:'short'})+' · Operational Brief</div><div class="brief-grid"><div class="bstat"><div class="bstat-n '+(oc>0?'red':'grn')+'">'+oc+'</div><div class="bstat-l">Overdue</div></div><div class="bstat"><div class="bstat-n '+(yv>0?'grn':'')+'">'+yv+'</div><div class="bstat-l">Visitors</div></div><div class="bstat"><div class="bstat-n">'+total+'</div><div class="bstat-l">Prospects</div></div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px"><div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between"><span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Connected</span><span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--gn)">'+conn+'</span></div><div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between"><span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Conv Rate</span><span style="font-family:var(--mono);font-size:13px;font-weight:700;color:'+(connRate>0?'var(--gn)':'var(--t3)')+'">'+connRate+'%</span></div><div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between"><span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Demos</span><span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--am)">'+demo+'</span></div><div style="background:rgba(0,0,0,.2);border-radius:7px;padding:7px 8px;display:flex;justify-content:space-between"><span style="font-family:var(--mono);font-size:10px;color:var(--t3)">Beta</span><span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--pu)">'+beta+'</span></div></div><div class="brief-lines">'+(d.lines||[]).map(function(l){return '<div class="brief-line">· '+l+'</div>';}).join('')+'</div></div>';
+  var fd=feed.data||{},ev=fd.events||[];
+  // Define _allOv first — used by both overdue and today dedup
+  var _allOv=fd.overdue||[];
+  // Filter overdue: hide items already in Queue (advisiq_acted)
+  try{
+    var _acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+    var ov=_allOv.filter(function(i){return !i.prospect_id||_acted.indexOf(i.prospect_id)<0;});
+  }catch(e){var ov=_allOv;}
+  window._feedOverdue=_allOv;
+  // Filter Today: hide prospects already shown in Overdue (by id or name)
+  var _ovPids=_allOv.map(function(o){return o.prospect_id;}).filter(Boolean);
+  var _ovNames=_allOv.map(function(o){return o.prospect;}).filter(Boolean);
+  var td=(fd.today||[]).filter(function(i){
+    if(i.prospect_id&&_ovPids.indexOf(i.prospect_id)>=0)return false;
+    if(i.prospect&&_ovNames.indexOf(i.prospect)>=0)return false;
+    return true;
+  }); // store full list for actOnOverdue()
+  if(ov.length){
+    html+='<div class="sec">⚡ Overdue <span class="sec-ct">'+ov.length+'</span></div>';
+    html+='<div style="margin:4px 10px 0;background:var(--rdb);border:1px solid #5a1020;border-radius:10px;overflow:hidden">';
+    ov.forEach(function(item){var hrs=Math.floor((item.overdueMs||0)/3600000);html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:2px">'+item.type+' · '+hrs+'h overdue</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--rd)">⚠</div></div>';});
+    html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" data-action="act-overdue" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+ov.length+' Item'+(ov.length!==1?'s':'')+' in Queue</button></div></div>';
   }
-  if(td.length>0){
-    html+=`<div class="sec">Today <span class="sec-ct">${td.length}</span></div>`;
-    td.forEach(item=>{html+=feedCard(item.id,item.prospect||item.type,item.type,'','→',true);});
+  var td_filtered=td.filter(function(i){return !!i.prospect;});
+  if(td_filtered.length){
+    var td=td_filtered;
+    html+='<div class="sec">Today <span class="sec-ct">'+td.length+'</span></div>';
+    html+='<div style="margin:4px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:10px;overflow:hidden">';
+    td.forEach(function(item){if(item.prospect)html+='<div style="padding:9px 14px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+item.prospect+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">'+item.type+'</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--ac)">today</div></div>';});
+    html+='<div style="padding:10px 14px"><button class="btn btn-copy btn-full" onclick="go(&apos;queue&apos;)" style="min-height:46px">→ Execute in Queue</button></div></div>';
   }
-  if(ev.length>0){
-    html+=`<div class="sec">Events <span class="sec-ct">${ev.length}</span></div>`;
-    ev.forEach(e=>{html+=feedCard(e.id,e.title,e.body,'cohort','🔔',false);});
-  }
-  if(!ov.length&&!td.length&&!ev.length){
-    html+=`<div class="empty"><div class="empty-ico">✓</div><div class="empty-h">All clear</div><div class="empty-s">No pending actions.<br>Tap ▶ Daily to run outreach.</div><div class="empty-action" onclick="startDaily(false)">▶ Start Daily Session</div></div>`;
-  }
+  if(ev.length){html+='<div class="sec">Events <span class="sec-ct">'+ev.length+'</span></div>';ev.forEach(function(e){html+='<div class="card cohort"><div class="card-top"><div class="card-info"><div class="card-name">'+e.title+'</div><div class="card-sub">'+e.body+'</div></div></div></div>';});}
+  if(!ov.length&&!td.length&&!ev.length){html+='<div class="empty"><div class="empty-ico">✓</div><div class="empty-h">All clear</div><div class="empty-s">No pending actions.<br>Tap ► Daily to run outreach.</div><div class="empty-action" onclick="startDaily(false)">► Start Daily Session</div></div>';}
   el.innerHTML=html;
-  attachSwipe('#pane-feed .card[data-id]');
+  updateSticky(feed);
 }
+
 function feedCard(id,name,sub,cls,ico,showAct){
   const cv=cls?`card ${cls}`:'card';
   let btns='';
@@ -721,51 +729,41 @@ function feedCard(id,name,sub,cls,ico,showAct){
 
 // ── QUEUE TAB ──
 function loadQueue(){
-  Promise.all([fx('/api/v1/ops/prospects/queue'),fx('/api/v1/ops/feed')]).then(([pq,feed])=>{
-    renderQueue(pq,feed);
-    const ct=(pq.data&&pq.data.count)||0;setBadge('b-queue',ct);
-  }).catch(()=>{
-    document.getElementById('pane-queue').innerHTML=`<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Add prospects via the + tab<br>They appear here ready to execute.</div><div class="empty-action" onclick="go('add')">+ Add First Prospect</div></div>`;
-  });
+  fx('/api/v1/ops/prospects/queue').then(function(pq){
+    renderQueue(pq,null);
+    // Badge = acted items not yet parked
+    try{
+      var _a=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);
+      var _pk=JSON.parse(localStorage.getItem('advisiq_parked')||'[]').map(Number);
+      var _ct=_a.filter(function(x){return _pk.indexOf(x)<0;}).length;
+    }catch(e){var _ct=0;}
+    setBadge('b-queue',_ct);
+  }).catch(function(){document.getElementById('pane-queue').innerHTML='<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Source prospects via + tab.</div></div>';});
 }
-function renderQueue(pq,feed){
+
+function renderQueue(pq,_unused){
   var el=document.getElementById('pane-queue');
-  var queue=(pq.data&&pq.data.queue)||[];
-  var ov=(feed&&feed.data&&feed.data.overdue)||[];
-  if(!queue.length&&!ov.length){el.innerHTML='<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Source prospects, then add via + tab.<br>The queue sequences everything automatically.</div><div class="empty-action" onclick="go(&apos;source&apos;)">🔍 Go to Source</div></div>';return;}
-  // Build _pmap for delegation
-  window._pmap=window._pmap||{};
-  ov.forEach(function(o){window._pmap[o.id]={msg:null,name:o.prospect||o.type,liUrl:null,status:null,cp:false};});
-  queue.forEach(function(p){
-    var a=p.nextAction?ra(p.nextAction,p.role):null;
-    window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};
-  });
-  var html='';
-  if(ov.length){
-    html+='<div class="sec">⚡ Overdue <span class="sec-ct">'+ov.length+'</span></div>';
-    html+='<div class="swipe-hint"><span>← snooze</span><span>done →</span></div>';
-    ov.forEach(function(o){
-      var hrs=Math.floor((o.overdueMs||0)/3600000);
-      html+=prospectCard({id:o.id,name:o.prospect||o.type,stage:'OVERDUE',liUrl:null,note:null,isOverdue:true,overdueHrs:hrs,at:null,role:null});
-    });
+  var queue=(pq&&pq.data&&pq.data.queue)||[];
+  // Queue shows ONLY prospects explicitly moved from Feed via actOnOverdue()
+  var acted=[],parked=[];
+  try{acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);}catch(e){}
+  try{parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]').map(Number);}catch(e){}
+  queue=queue.filter(function(p){return acted.indexOf(Number(p.id))>=0&&parked.indexOf(Number(p.id))<0;});
+
+  if(!queue.length){
+    el.innerHTML='<div class="empty"><div class="empty-ico">→</div>'
+      +'<div class="empty-h">Queue empty</div>'
+      +'<div class="empty-s">Go to Feed and tap “Act on N Items” to begin.</div>'
+      +'<div class="empty-action" onclick="go(&apos;feed&apos;)">↲ Go to Feed</div></div>';
+    return;
   }
-  // Group by next ACTION display name (not status label)
+  window._pmap=window._pmap||{};
+  queue.forEach(function(p){var a=p.nextAction?ra(p.nextAction,p.role):null;window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};});
   var grouped={};
-  queue.forEach(function(p){
-    var a=p.nextAction?ra(p.nextAction,p.role):null;
-    var g=a?a.d:sl(p.status);
-    if(!grouped[g])grouped[g]=[];
-    grouped[g].push(p);
-  });
-  Object.keys(grouped).forEach(function(stage){
-    var ps=grouped[stage];
-    html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';
-    ps.forEach(function(p){
-      html+=prospectCard({id:p.id,name:p.name,stage:p.status,liUrl:p.linkedin_url,note:p.personalisationNote,isOverdue:false,at:p.nextAction,role:p.role});
-    });
-  });
+  queue.forEach(function(p){var a=p.nextAction?ra(p.nextAction,p.role):null;var g=a?a.d:sl(p.status);if(!grouped[g])grouped[g]=[];grouped[g].push(p);});
+  var html='';
+  Object.keys(grouped).forEach(function(stage){var ps=grouped[stage];html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';ps.forEach(function(p){html+=prospectCard({id:p.id,name:p.name,stage:p.status,liUrl:p.linkedin_url,note:p.personalisationNote,isOverdue:false,at:p.nextAction,role:p.role});});});
   el.innerHTML=html;
-  attachSwipe('#pane-queue .card[data-id]');
 }
 
 function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
@@ -782,108 +780,33 @@ function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
     if(a.cp&&liUrl)chips+='<button class="btn btn-open" data-pid="'+id+'" data-pact="open">Open ↗</button>';
     chips+='<button class="btn btn-adv" data-pid="'+id+'" data-pact="adv" data-nx="'+a.nx+'">'+a.lbl+'</button>';
   }else if(liUrl)chips+='<button class="btn btn-open btn-full" data-pid="'+id+'" data-pact="open">Open LinkedIn ↗</button>';
-  chips+='<button class="btn btn-close" data-pid="'+id+'" data-pact="close">Close</button>';
+  chips+='<button class="btn btn-snooze" data-pid="'+id+'" data-pact="park">Park</button>';
   var lbl=a?a.d:sl(stage);
-  return '<div class="card swipeable" id="qc-'+id+'" data-id="'+id+'">'+'<div class="card-top"><div class="card-av">'+init+'</div><div class="card-info"><div class="card-name">'+name+'</div><div class="card-sub">'+(role||'Professional')+' · <span style="color:var(--ac)">'+lbl+'</span></div></div><div class="card-stage '+stageCls(stage)+'">'+sl(stage)+'</div></div>'+(note?'<div class="card-note">'+note+'</div>':'')+'<div class="actions">'+chips+'</div></div>';
+  return '<div class="card swipeable" id="qc-'+id+'" data-id="'+id+'"><div class="card-top"><div class="card-av">'+init+'</div><div class="card-info"><div class="card-name">'+name+'</div><div class="card-sub">'+(role||'Professional')+' · <span style="color:var(--ac)">'+lbl+'</span></div></div><div class="card-stage '+stageCls(stage)+'">'+sl(stage)+'</div></div>'+(note?'<div class="card-note">'+note+'</div>':'')+'<div class="actions">'+chips+'</div></div>';
 }
 
 function renderPipeline(data){
   var el=document.getElementById('pane-pipeline');
-  var q=(data.data&&data.data.queue)||[];
-  if(!q.length){el.innerHTML='<div class="empty"><div class="empty-ico">\u25ce</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.</div><div class="empty-action" onclick="go(&apos;add&apos;)">+ Add Prospect</div></div>';return;}
-
-  // Build _pmap for delegation
+  var q=(data&&data.data&&data.data.queue)||[];
+  if(!q.length){el.innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.</div><div class="empty-action" onclick="go(&apos;add&apos;)">+ Add Prospect</div></div>';return;}
   window._pmap=window._pmap||{};
-  q.forEach(function(p){
-    var sn2=nextFromStatus(p.status);
-    var a2=sn2.at?ra(sn2.at,p.role):null;
-    window._pmap[p.id]={msg:a2&&a2.cp?a2.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a2?a2.cp:false,nx:a2?a2.nx:null};
-  });
-
-  // Group by stage
-  var groups={};
-  STAGE_ORDER.forEach(function(s){groups[s]=[];});
+  q.forEach(function(p){window._pmap[p.id]={msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:false};});
+  var groups={};STAGE_ORDER.forEach(function(s){groups[s]=[];});
   q.forEach(function(p){var s=p.status||'SOURCED';if(groups[s])groups[s].push(p);else{groups[s]=[];groups[s].push(p);}});
-
-  // ── PRIORITY 3: Funnel summary header ──
-  var FUNNEL_STAGES=[
-    {key:'SOURCED',label:'Sourced'},
-    {key:'CONNECTION_SENT',label:'Request Sent'},
-    {key:'ACCEPTED',label:'Connected'},
-    {key:'MSG1_SENT',label:'Conversation'},
-    {key:'DEMO_REQUESTED',label:'Demo Req'},
-    {key:'DEMO_SCHEDULED',label:'Demo Set'},
-    {key:'DEMO_DONE',label:'Demo Done'},
-    {key:'BETA_INVITED',label:'Beta'},
-  ];
-  var convCount=(groups['ACCEPTED']||[]).length+(groups['MSG1_SENT']||[]).length+(groups['MSG2_SENT']||[]).length+(groups['MSG3_SENT']||[]).length;
-  var demoCount=(groups['DEMO_REQUESTED']||[]).length+(groups['DEMO_SCHEDULED']||[]).length+(groups['DEMO_DONE']||[]).length;
-  var betaCount=(groups['BETA_INVITED']||[]).length;
-  var connCount=(groups['CONNECTION_SENT']||[]).length;
-
-  var summaryHtml='<div style="margin:10px 10px 0;background:var(--acb);border:1px solid var(--b2);border-radius:10px;padding:12px 14px">'
-    +'<div style="font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ac);margin-bottom:8px">Active Pipeline</div>'
-    +'<div style="display:flex;gap:6px;flex-wrap:wrap">';
-  var funnelItems=[
-    {l:'Prospects',n:q.length,c:'var(--tx)'},
-    {l:'Requested',n:connCount,c:'var(--ac)'},
-    {l:'Connected',n:convCount,c:'var(--gn)'},
-    {l:'Demo',n:demoCount,c:'var(--am)'},
-    {l:'Beta',n:betaCount,c:'var(--pu)'},
-  ];
-  funnelItems.forEach(function(f){
-    summaryHtml+='<div style="background:rgba(0,0,0,.25);border-radius:7px;padding:7px 10px;min-width:60px;text-align:center">'
-      +'<div style="font-family:var(--mono);font-size:18px;font-weight:700;color:'+f.c+';line-height:1">'+f.n+'</div>'
-      +'<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px;letter-spacing:.06em">'+f.l+'</div>'
-      +'</div>';
-  });
-  summaryHtml+='</div></div>';
-
-  var html='<div class="sec">Relationship Pipeline <span class="sec-ct">'+q.length+'</span></div>'+summaryHtml;
-
-  // ── PRIORITY 1+6: Compressed cards with next action + overdue ──
+  var total=q.length,conn=q.filter(function(p){return ['ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT'].indexOf(p.status)>=0;}).length,demo=q.filter(function(p){return ['DEMO_REQUESTED','DEMO_SCHEDULED','DEMO_DONE'].indexOf(p.status)>=0;}).length,beta=q.filter(function(p){return p.status==='BETA_INVITED';}).length;
+  var html='<div class="sec">Relationship Pipeline <span class="sec-ct">'+total+'</span></div><div style="margin:0 10px 6px;background:var(--acb);border:1px solid var(--b2);border-radius:10px;padding:10px 14px"><div style="display:flex;gap:8px;flex-wrap:wrap">';
+  [{l:'Prospects',n:total,c:'var(--tx)'},{l:'Connected',n:conn,c:'var(--gn)'},{l:'Demo',n:demo,c:'var(--am)'},{l:'Beta',n:beta,c:'var(--pu)'}].forEach(function(f){html+='<div style="background:rgba(0,0,0,.25);border-radius:7px;padding:7px 10px;text-align:center"><div style="font-family:var(--mono);font-size:18px;font-weight:700;color:'+f.c+';line-height:1">'+f.n+'</div><div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px">'+f.l+'</div></div>';});
+  html+='</div></div>';
   var now2=Date.now();
   STAGE_ORDER.forEach(function(stage){
     var ps=groups[stage];if(!ps||!ps.length)return;
-    html+='<div style="padding:10px 12px 4px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px">'
-      +'<span>'+sl(stage)+'</span>'
-      +'<span style="background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1px 7px;color:var(--t2)">'+ps.length+'</span></div>';
+    html+='<div style="padding:8px 12px 4px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px"><span>'+sl(stage)+'</span><span style="background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1px 7px;color:var(--t2)">'+ps.length+'</span></div>';
     ps.forEach(function(p){
-      // Derive next action from STATUS (governance-correct — not from DB action queue)
-      var sn=nextFromStatus(p.status);
-      var nextLabel=sn.d;
-      var isOverdue=p.nextDue&&p.nextDue<now2;
-      var daysAway=p.nextDue?Math.round(Math.abs(p.nextDue-now2)/86400000):null;
+      var sn=nextFromStatus(p.status),isOv=p.nextDue&&p.nextDue<now2,dAway=p.nextDue?Math.round(Math.abs(p.nextDue-now2)/86400000):null;
+      var nextStr=isOv?'<div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:3px">⚠ '+sn.d+' overdue by '+dAway+'d</div>':p.nextDue?'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">Next: '+sn.d+' · '+new Date(p.nextDue).toLocaleDateString('en-IN',{day:'numeric',month:'short'})+'</div>':'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">'+sn.d+'</div>';
       var roleStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' · Score '+(p.score||2)+'</div>';
-      var nextStr='';
-      if(isOverdue){
-        nextStr='<div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:3px">\u26a0 '+nextLabel+' overdue by '+daysAway+'d</div>';
-      }else if(p.nextDue){
-        var d=new Date(p.nextDue);
-        var dateStr=d.toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-        nextStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">Next: '+nextLabel+' \u00b7 '+dateStr+'</div>';
-      }else{
-        nextStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">'+nextLabel+'</div>';
-      }
-
-      // Compressed card: avatar + name + stage badge on one line, next action below, Open button
-      html+='<div class="card" style="'+(isOverdue?'border-color:#5a1020;background:var(--rdb);':'')+'">'
-        +'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px">'
-        +'<div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div>'
-        +'<div style="flex:1;min-width:0">'
-        +'<div style="display:flex;align-items:center;gap:6px">'
-        +'<div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div>'
-        +'<div class="card-stage '+stageCls(p.status)+'" style="flex-shrink:0">'+sl(p.status)+'</div>'
-        +'</div>'
-        +roleStr
-        +nextStr
-        +'</div>'
-        +'</div>'
-        +'<div style="padding:0 12px 9px;display:flex;gap:6px;align-items:center">'
-        +(p.linkedin_url?'<button class="btn btn-open" data-pid="'+p.id+'" data-pact="open" style="flex:1">Open Profile \u2197</button>':'')
-        +'<button class="btn btn-close" data-pid="'+p.id+'" data-pact="close" style="padding:0 12px;font-size:11px;min-height:36px">Close</button>'
-        +'</div>'
-        +'</div>';
+      var openBtn=p.linkedin_url?'<button class="btn btn-open btn-full" data-pid="'+p.id+'" data-pact="open">Open Profile ↗</button>':'';
+      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+openBtn+'</div></div>';
     });
   });
   el.innerHTML=html;
@@ -948,6 +871,22 @@ function addP(){
 }
 
 // ── ACTION HANDLERS ──
+function parkAct(id){
+  swipeOut(id,'l');
+  try{
+    // Remove from acted (leaves Queue)
+    var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+    var _pid=parseInt(id);acted=acted.filter(function(x){return parseInt(x)!==_pid;});
+    localStorage.setItem('advisiq_acted',JSON.stringify(acted));
+    // Add to parked (suppressed in Feed until session reset)
+    var parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]');
+    if(parked.indexOf(id)<0)parked.push(id);
+    localStorage.setItem('advisiq_parked',JSON.stringify(parked));
+  }catch(e){}
+  toast('Parked — returns to Feed next session');
+  setTimeout(function(){go('feed');loadFeed();},200);
+}
+
 function doneAct(id){swipeOut(id,'r');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(()=>{loadFeed();loadQueue();},400);});}
 function snoozeAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'SNOOZE_24H'})}).then(()=>toast('Snoozed 24h'));}
 function dismissAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'DISMISS'})}).then(()=>toast('Dismissed'));}
@@ -957,8 +896,16 @@ function swipeOut(id,dir){
 }
 function advP(id,action){
   fx('/api/v1/ops/prospects/'+id+'/action',{method:'POST',body:JSON.stringify({action})}).then(d=>{
-    if(d.status==='OK'){toast('→ '+action.replace(/_/g,' '));loadQueue();loadPipeline();}
-    else toast('Error: '+(d.error||'unknown'));
+    if(d.status==='OK'){
+      toast('→ '+action.replace(/_/g,' '));
+      // Option A: remove from advisiq_acted after successful transition
+      try{
+        var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+        var _dpid=parseInt(id);acted=acted.filter(function(x){return parseInt(x)!==_dpid;});
+        localStorage.setItem('advisiq_acted',JSON.stringify(acted));
+      }catch(e){}
+      loadQueue();loadPipeline();
+    }else toast('Error: '+(d.error||'unknown'));
   });
 }
 function closeP(id){
@@ -967,36 +914,10 @@ function closeP(id){
 }
 
 // ── SWIPE GESTURES ──
-function attachSwipe(sel){
-  document.querySelectorAll(sel||'.card[data-id]').forEach(el=>{
-    let sx=0,sy=0,dx=0,moved=false;
-    el.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;moved=false;},{passive:true});
-    el.addEventListener('touchmove',e=>{
-      const cx=e.touches[0].clientX,cy=e.touches[0].clientY;
-      dx=cx-sx;const dy=Math.abs(cy-sy);
-      if(Math.abs(dx)>dy&&Math.abs(dx)>12){moved=true;el.style.transform=`translateX(${dx}px)`;el.style.opacity=String(1-Math.abs(dx)/220);}
-    },{passive:true});
-    el.addEventListener('touchend',()=>{
-      if(!moved){el.style.transform='';el.style.opacity='';return;}
-      const id=parseInt(el.dataset.id);
-      if(dx>80)doneAct(id);
-      else if(dx<-80)snoozeAct(id);
-      else{el.style.transform='';el.style.opacity='';}
-    });
-  });
-}
+// attachSwipe removed
 
-// ── STICKY ──
-function updateSticky(feed){
-  const fd=feed.data||{};const ov=fd.overdue||[];const td=fd.today||[];
-  const st=document.getElementById('sticky');
-  if(CUR!=='feed'){st.classList.remove('on');return;}
-  if(ov.length){document.getElementById('sticky-txt').textContent='⚡ '+(ov[0].prospect||ov[0].type)+' overdue';document.getElementById('sticky-act').onclick=()=>doneAct(ov[0].id);st.classList.add('on');}
-  else if(td.length){document.getElementById('sticky-txt').textContent='→ Next: '+(td[0].prospect||td[0].type);document.getElementById('sticky-act').onclick=()=>doneAct(td[0].id);st.classList.add('on');}
-  else st.classList.remove('on');
-}
+function updateSticky(){} // removed — sticky bar deprecated
 
-// ── BADGES ──
 function setBadge(id,n){const el=document.getElementById(id);if(!el)return;el.textContent=n;el.classList.toggle('on',n>0);}
 
 // ── NOTES ──
@@ -1013,22 +934,20 @@ function saveNotes(){
 function startDaily(lowEnergy){
   document.getElementById('daily').classList.add('on');
   document.getElementById('dm-body').innerHTML='<div class="loading"><span class="spin"></span>Loading queue...</div>';
-  Promise.all([fx('/api/v1/ops/prospects/queue'),fx('/api/v1/ops/feed')]).then(([pq,feed])=>{
-    const ov=(feed.data&&feed.data.overdue)||[];
+  fx('/api/v1/ops/prospects/queue').then(function(pq){
     const q=(pq.data&&pq.data.queue)||[];
     dailyItems=[];
-    ov.forEach(o=>dailyItems.push({type:'feed',id:o.id,name:o.prospect||o.type,sub:o.type,msg:null,liUrl:null,status:null,note:null,isOverdue:true}));
     const limit=lowEnergy?2:5;let added=0;
     q.forEach(p=>{
       if(added>=limit)return;
-      // Only show in daily if action due within 48h or overdue
       if(p.nextDue&&p.nextDue>(Date.now()+172800000))return;
       dailyItems.push({type:'prospect',id:p.id,name:p.name,role:p.role||'',liUrl:p.linkedin_url||null,status:p.status,note:p.personalisationNote,isOverdue:false,at:p.nextAction,nextDue:p.nextDue});
       added++;
     });
     dailyIdx=0;renderDailyStep();
-  });
+  }).catch(function(){document.getElementById('dm-body').innerHTML='<div class="loading">Load failed</div>';});
 }
+
 function exitDaily(){document.getElementById('daily').classList.remove('on');}
 function renderDailyStep(){
   var el=document.getElementById('dm-body');
@@ -1082,11 +1001,13 @@ function renderDailyStep(){
 }
 
 function dmAdv(){
-  var item=dailyItems[dailyIdx];
-  if(item.type==='feed'){doneAct(item.id);}
-  else{var act=item.at?ra(item.at,item.role):null;if(act&&act.nx)advP(item.id,act.nx);else if(item.status){var nx=nextSt(item.status);if(nx)advP(item.id,nx);}}
+  const item=dailyItems[dailyIdx];
+  const ae=item.at?ra(item.at,item.role):null;
+  if(ae&&ae.nx)advP(item.id,ae.nx);
+  else if(item.status){const nx=nextSt(item.status);if(nx)advP(item.id,nx);}
   dailyIdx++;renderDailyStep();
 }
+
 function dmSkip(){dailyIdx++;renderDailyStep();}
 function dmCpOpen(){var i=window._dmItem;if(!i)return;var a=i.at?ra(i.at,i.role):null;var m=a&&a.cp?a.msg:null;if(m)cp(m,i.name,i.liUrl||'');else if(i.liUrl)openOnly(i.liUrl);}
 function dmCpOnly(){var i=window._dmItem;if(!i)return;var a=i.at?ra(i.at,i.role):null;var m=a&&a.cp?a.msg:null;if(m)cpOnly(m,i.name);}
@@ -1112,37 +1033,26 @@ const STATUS_NEXT={
 function nextFromStatus(status){return STATUS_NEXT[status]||{at:null,d:'—'};}
 // ── DELEGATED CLICK HANDLER ──
 document.addEventListener('click',function(e){
-  // Template group copy (data-tkey)
+  var ab=e.target.closest('[data-action="act-overdue"]');
+  if(ab){actOnOverdue();return;}
   var tk=e.target.closest('[data-tkey]');
-  if(tk){var pts=tk.dataset.tkey.split('|||');var g=pts[0],i=parseInt(pts[1]);if(T[g]&&T[g][i])cpOnly(T[g][i].t,T[g][i].l);return;}
-  // Source search (data-skey)
+  if(tk){var pts=tk.dataset.tkey.split('|||'),g=pts[0],i=parseInt(pts[1]);if(T[g]&&T[g][i])cpOnly(T[g][i].t,T[g][i].l);return;}
   var sk=e.target.closest('[data-skey]');
-  if(sk){var pts=sk.dataset.skey.split('|||');var si=parseInt(pts[0]),sa=pts[1];var s=SEARCHES[si];if(!s)return;
-    if(sa==='copy')cpOnly(s.q,s.l);
-    else if(sa==='open')openOnly('https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(s.q)+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH');
-    return;}
-  // Prospect card actions (data-pid)
+  if(sk){var pts=sk.dataset.skey.split('|||'),si=parseInt(pts[0]),sa=pts[1],s=SEARCHES[si];if(!s)return;if(sa==='copy')cpOnly(s.q,s.l);else if(sa==='open')openOnly('https://www.linkedin.com/search/results/people/?keywords='+encodeURIComponent(s.q)+'&network=%5B%22S%22%2C%22O%22%5D&origin=FACETED_SEARCH');return;}
   var pb=e.target.closest('[data-pid]');
-  if(pb){
-    var pid=parseInt(pb.dataset.pid);
-    var pa=pb.dataset.pact;
-    var pm=window._pmap&&window._pmap[pid];
-    if(pa==='cpopen'){
-      if(pm&&pm.cp&&pm.msg){cp(pm.msg,pm.name,pm.liUrl||'');}
-      else if(pm&&pm.liUrl){openOnly(pm.liUrl);}
-      return;
-    }
-    if(pa==='copy'){if(pm&&pm.cp&&pm.msg)cpOnly(pm.msg,pm.name);return;}
-    if(pa==='open'){if(pm&&pm.liUrl)openOnly(pm.liUrl);return;}
+  if(pb){var pid=parseInt(pb.dataset.pid),pa=pb.dataset.pact,pm=window._pmap&&window._pmap[pid];
+    if(pa==='cpopen'&&pm&&pm.cp){cp(pm.msg,pm.name,pm.liUrl||'');return;}
+    if(pa==='cpopen'&&pm&&!pm.cp&&pm.liUrl){openOnly(pm.liUrl);return;}
+    if(pa==='copy'&&pm&&pm.cp){cpOnly(pm.msg,pm.name);return;}
+    if(pa==='open'&&pm&&pm.liUrl){openOnly(pm.liUrl);return;}
     if(pa==='adv'){var nx=pb.dataset.nx||(pm&&pm.nx);if(nx)advP(pid,nx);return;}
     if(pa==='done'){doneAct(pid);return;}
     if(pa==='snooze'){snoozeAct(pid);return;}
     if(pa==='note'){openNotes(pid);return;}
     if(pa==='close'){closeP(pid);return;}
-    return;
-  }
+    if(pa==='park'){parkAct(pid);return;}
+    return;}
 },true);
-
 // ── INIT ──
 document.getElementById('auth-pw').focus();
 </script>

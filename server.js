@@ -10748,8 +10748,8 @@ app.get("/api/v1/ops/feed",opsAuth,(req,res)=>{
       if(e2)td=[];
       db.all("SELECT * FROM comm_ops_events WHERE delivered=0 ORDER BY triggered_at DESC LIMIT 5",[],( e3,ev)=>{
         if(e3)ev=[];
-        var om=(ov||[]).map(function(a){return{id:a.id,type:a.action_type,urgency:"OVERDUE",prospect:a.name||null,dueAt:a.due_at,overdueMs:now-a.due_at};});
-        var tm=(td||[]).map(function(a){return{id:a.id,type:a.action_type,urgency:"TODAY",prospect:a.name||null,dueAt:a.due_at};});
+        var om=(ov||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"OVERDUE",prospect:a.name||null,dueAt:a.due_at,overdueMs:now-a.due_at};});
+        var tm=(td||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"TODAY",prospect:a.name||null,dueAt:a.due_at};});
         var em=(ev||[]).map(function(e){return{id:e.id,type:e.event_type,priority:e.priority,title:e.title,body:e.body};});
         res.json({status:"OK",timestamp:now,data:{overdue:om,today:tm,events:em,counts:{overdue:om.length,today:tm.length,events:em.length}}});
       });
