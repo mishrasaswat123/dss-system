@@ -1503,12 +1503,16 @@ const ERROR_ENUM = Object.freeze({
                 db.run('CREATE INDEX IF NOT EXISTS idx_visits_hash ON comm_visits(ip_hash)');
                 db.run(`CREATE TABLE IF NOT EXISTS comm_ops_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, priority TEXT DEFAULT 'MORNING', title TEXT NOT NULL, body TEXT NOT NULL, prospect_ref TEXT, triggered_at INTEGER NOT NULL, delivered INTEGER DEFAULT 0, dismissed INTEGER DEFAULT 0)`);
                 db.run('CREATE INDEX IF NOT EXISTS idx_ops_events_pri ON comm_ops_events(priority, delivered)');
-                db.run(`CREATE TABLE IF NOT EXISTS comm_prospects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT, organisation TEXT, linkedin_url TEXT UNIQUE NOT NULL, score INTEGER DEFAULT 2, source_string TEXT DEFAULT 'S1', last_post_observed TEXT, personalisation_note TEXT, status TEXT DEFAULT 'SOURCED', interaction_count INTEGER DEFAULT 0, last_interaction_at INTEGER, added_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+                db.run(`CREATE TABLE IF NOT EXISTS comm_prospects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT, organisation TEXT, linkedin_url TEXT UNIQUE, score INTEGER DEFAULT 2, source_string TEXT DEFAULT 'S1', last_post_observed TEXT, personalisation_note TEXT, status TEXT DEFAULT 'SOURCED', interaction_count INTEGER DEFAULT 0, last_interaction_at INTEGER, added_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
                 db.run('CREATE INDEX IF NOT EXISTS idx_prospects_status ON comm_prospects(status)');
                 db.run(`CREATE TABLE IF NOT EXISTS comm_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, prospect_id INTEGER, action_type TEXT NOT NULL, status TEXT DEFAULT 'PENDING', due_at INTEGER, completed_at INTEGER, note TEXT, outcome TEXT, objection TEXT, logged_at INTEGER NOT NULL)`);
                 db.run('CREATE INDEX IF NOT EXISTS idx_actions_due ON comm_actions(due_at, status)');
                 db.run('CREATE INDEX IF NOT EXISTS idx_actions_prospect ON comm_actions(prospect_id)');
                 db.run(`ALTER TABLE comm_actions ADD COLUMN force_feed INTEGER DEFAULT 0`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] force_feed:',e.message);else console.log('[schema] force_feed column ready');});
+                db.run(`ALTER TABLE comm_prospects ADD COLUMN prospect_type TEXT DEFAULT 'LINKEDIN'`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] prospect_type:',e.message);else console.log('[schema] prospect_type ready');});
+                db.run(`ALTER TABLE comm_prospects ADD COLUMN whatsapp_number TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] whatsapp_number:',e.message);else console.log('[schema] whatsapp_number ready');});
+                db.run(`ALTER TABLE comm_prospects ADD COLUMN latest_wa_context TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] latest_wa_context:',e.message);else console.log('[schema] latest_wa_context ready');});
+                db.run(`ALTER TABLE comm_prospects ADD COLUMN wa_reply_override TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] wa_reply_override:',e.message);else console.log('[schema] wa_reply_override ready');});
 		});
 		const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 		// ===============================
@@ -1675,6 +1679,7 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
       const vid=req.headers['x-visitor-id']||null;
       const vtype=(req.headers['x-visitor-type']||'PUBLIC').trim();
       if(vtype==='FOUNDER')return;
+      if(p==='OPS')return; // OPS visits always founder
       const dedupeKey=vid||h;
       const dedupeField=vid?'visitor_id':'ip_hash';
       db.get('SELECT 1 FROM comm_visits WHERE '+dedupeField+'=? LIMIT 1',[dedupeKey],(err,row)=>{
@@ -10798,6 +10803,16 @@ app.post("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
     });
   });
 });
+app.post("/api/v1/ops/prospects/:prospect_id/park-to-feed",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.prospect_id);
+  db.get("SELECT id FROM comm_actions WHERE prospect_id=? AND status='PENDING' ORDER BY due_at ASC LIMIT 1",[pid],(err,row)=>{
+    if(err||!row)return res.json({status:"OK",noop:true});
+    db.run("UPDATE comm_actions SET force_feed=1 WHERE id=?",[row.id],(e)=>{
+      if(e)return res.status(500).json({status:"ERROR",error:e.message});
+      res.json({status:"OK",prospect_id:pid});
+    });
+  });
+});
 app.delete("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
   const pid=parseInt(req.params.prospect_id);
   if(!pid)return res.status(400).json({status:"ERROR",error:"Invalid prospect_id"});
@@ -10808,17 +10823,17 @@ app.delete("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
 });
 app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{
   const now=Date.now();
-  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 100",[],function(err,rows){
+  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 100",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue};});
+    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null};});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
 app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
   const now=Date.now();
-  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
+  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed, p.prospect_type, p.whatsapp_number, p.latest_wa_context, p.wa_reply_override FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0};});var DAY=86400000;var q=all.filter(function(p){return p.forceFeed===1||!p.nextDue||p.nextDue<=(now+DAY);});
+    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null};});var DAY=86400000;var WA_STATUSES=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED"];var q=all.filter(function(p){return p.forceFeed===1||(p.prospectType==="WHATSAPP"&&WA_STATUSES.indexOf(p.status)>=0)||!p.nextDue||p.nextDue<=(now+DAY);});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
@@ -10833,24 +10848,44 @@ app.get("/api/v1/ops/traffic",opsAuth,(req,res)=>{
 });
 app.post("/api/v1/ops/prospects",opsAuth,(req,res)=>{
   const b=req.body||{};
-  if(!b.name||!b.linkedin_url)return res.status(400).json({status:"ERROR",error:"name and linkedin_url required"});
+  const isWA=(b.prospect_type==='WHATSAPP');
+  if(!b.name)return res.status(400).json({status:"ERROR",error:"name required"});
+  if(isWA&&!b.whatsapp_number)return res.status(400).json({status:"ERROR",error:"whatsapp_number required for WhatsApp prospects"});
+  if(!isWA&&!b.linkedin_url)return res.status(400).json({status:"ERROR",error:"linkedin_url required for LinkedIn prospects"});
   const now=Date.now();
-  db.run("INSERT OR IGNORE INTO comm_prospects (name,role,organisation,linkedin_url,score,source_string,last_post_observed,personalisation_note,status,added_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",[b.name,b.role||null,b.organisation||null,b.linkedin_url,b.score||2,b.source_string||"S1",b.last_post_observed||null,b.personalisation_note||null,"SOURCED",now,now],function(err){
+  const initStatus=isWA?"WHATSAPP_NEW":"SOURCED";
+  const initAction=isWA?"WA_OPENING":"CONNECTION_READY";
+  db.run("INSERT OR IGNORE INTO comm_prospects (name,role,organisation,linkedin_url,whatsapp_number,score,source_string,last_post_observed,personalisation_note,prospect_type,status,added_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",[b.name,b.role||null,b.organisation||null,isWA?null:(b.linkedin_url||null),isWA?(b.whatsapp_number||null):null,b.score||2,b.source_string||"S1",b.last_post_observed||null,b.personalisation_note||null,isWA?"WHATSAPP":"LINKEDIN",initStatus,now,now],function(err){
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
     if(this.changes===0)return res.json({status:"DUPLICATE"});
     const lid=this.lastID;
-    db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[lid,"CONNECTION_READY","PENDING",now,now],function(){});
+    db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[lid,initAction,"PENDING",isWA?now-1000:now,now],function(){});
     res.json({status:"OK",timestamp:now,data:{id:lid,name:b.name}});
+  });
+});
+app.patch("/api/v1/ops/prospects/:id/context",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id),ctx=(req.body&&req.body.context)||null;
+  db.run("UPDATE comm_prospects SET latest_wa_context=?,updated_at=? WHERE id=?",[ctx,Date.now(),pid],(e)=>{
+    if(e)return res.status(500).json({status:"ERROR",error:e.message});
+    res.json({status:"OK",prospect_id:pid});
+  });
+});
+app.patch("/api/v1/ops/prospects/:id/reply-override",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id),reply=(req.body&&req.body.reply)||null;
+  db.run("UPDATE comm_prospects SET wa_reply_override=?,updated_at=? WHERE id=?",[reply,Date.now(),pid],(e)=>{
+    if(e)return res.status(500).json({status:"ERROR",error:e.message});
+    res.json({status:"OK",prospect_id:pid});
   });
 });
 app.post("/api/v1/ops/prospects/:id/action",opsAuth,(req,res)=>{
   const pid=parseInt(req.params.id),tr2=(req.body&&req.body.action)||null,now=Date.now();
-  const VALID=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","INTERESTED","NOT_INTERESTED","DEMO_SET","DEMO_DONE","BETA_INVITED","CLOSED"];
+  const VALID=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","INTERESTED","NOT_INTERESTED","DEMO_SET","DEMO_DONE","BETA_INVITED","CLOSED","WA_CONVERSATION","WA_DEMO_REQUESTED"];
   if(VALID.indexOf(tr2)===-1)return res.status(400).json({status:"ERROR",error:"Invalid action"});
-  var sm2={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",INTERESTED:"DEMO_REQUESTED",NOT_INTERESTED:"CLOSED",DEMO_SET:"DEMO_SCHEDULED",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
+  var sm2={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",INTERESTED:"DEMO_REQUESTED",WA_CONVERSATION:"CONVERSATION_ACTIVE",WA_DEMO_REQUESTED:"DEMO_REQUESTED",NOT_INTERESTED:"CLOSED",DEMO_SET:"DEMO_SCHEDULED",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
   db.run("UPDATE comm_prospects SET status=?,updated_at=? WHERE id=?",[sm2[tr2],now,pid],(err)=>{
+    db.run("UPDATE comm_prospects SET wa_reply_override=NULL WHERE id=?",[pid]);
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
-    var as2={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},ACCEPTED:{t:"MSG1_SEND",d:0},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000},INTERESTED:{t:"DEMO_SCHEDULE",d:0},DEMO_DONE:{t:"BETA_EVALUATE",d:7200000}};
+    var as2={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},ACCEPTED:{t:"MSG1_SEND",d:0},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000},INTERESTED:{t:"DEMO_SCHEDULE",d:0},WA_CONVERSATION:{t:"WA_FOLLOW",d:259200000},WA_DEMO_REQUESTED:{t:"DEMO_SCHEDULE",d:0},DEMO_DONE:{t:"BETA_EVALUATE",d:7200000}};
     db.run("UPDATE comm_actions SET status='COMPLETED',completed_at=? WHERE prospect_id=? AND status='PENDING' AND due_at<=?",[now,pid,now],function(){});var nx=as2[tr2];if(nx)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[pid,nx.t,"PENDING",now+nx.d,now],function(){});
     res.json({status:"OK",timestamp:now,newStatus:sm2[tr2],nextScheduled:nx?nx.t:null});
   });

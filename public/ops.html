@@ -546,8 +546,27 @@ function getCRMsg(r){
   if(r.indexOf('family')>=0)return T['Connection Request'][4].t;
   return T['Connection Request'][5].t;
 }
-const STAGE_LABEL={SOURCED:'Sourced',CONNECTION_SENT:'Request Sent',ACCEPTED:'Connected',MSG1_SENT:'Conversation Active',MSG2_SENT:'Followed Up',MSG3_SENT:'Final Sent',DEMO_REQUESTED:'Demo Requested',DEMO_SCHEDULED:'Demo Scheduled',DEMO_DONE:'Demo Done',BETA_INVITED:'Beta Cohort',CLOSED:'Closed'};
-const STAGE_ORDER=['SOURCED','CONNECTION_SENT','ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT','DEMO_REQUESTED','DEMO_SCHEDULED','DEMO_DONE','BETA_INVITED'];
+const WA_OPENING_CANONICAL="Hi [CONTACT_NAME] — hope things are going well on your side.\n\nOver the last few months I've been working on something that came directly out of all those years we spent in wealth management and private banking.\n\nOne thing I realised after moving into tech is:\nthe hardest part of advisory was never \"product knowledge\" — it was consistently forming a defensible market posture for different kinds of clients during uncertain markets.\n\nEspecially those situations where:\n\n- clients are anxious,\n- markets are noisy,\n- research views are conflicting,\n- and relationship managers still need to sound calm, structured, and credible.\n\nMost advisors don't have an institutional research desk sitting behind them every morning.\n\nSo I built a governed market intelligence platform as a research project to see whether advisory-oriented market reasoning could be structured better.\n\nNot a stock recommendation engine.\nNot a trading platform.\nNot a chatbot.\n\nIt basically generates regime-aware advisory briefs in the language of:\n\n- IFAs,\n- wealth managers,\n- private bankers,\n- family office style discussions, etc.\n\nIt also explicitly discloses uncertainty instead of pretending to always \"know.\"\n\nWould genuinely value your practitioner feedback on whether this actually solves a real advisory pain point or if I'm overthinking the problem.\n\nIt's live here:\nhttps://advisiq.in\n\nIf you get 10–15 mins sometime, try generating a few briefs using different client risk profiles/audience types and tell me honestly:\n\n- what feels useful,\n- what feels unrealistic,\n- what's missing,\n- and whether you'd actually use something like this before client conversations.\n\nNo sales pitch here — this is still very much a practitioner-feedback phase.\n\nWould value your brutally honest take.";
+const WA_TEMPLATES={
+  NO_RESPONSE:"Hi [CONTACT_NAME] — just checking in on my earlier message in case it got buried. No rush at all — whenever you get a quiet moment, would genuinely value your honest read.\n\nhttps://advisiq.in",
+  WILL_REVIEW:"Hi [CONTACT_NAME] — no rush at all. Whenever you get to it, I’d value your honest reaction — even a quick “this solves something real” or “this feels off” would be useful.\n\nhttps://advisiq.in",
+  WANTS_CLARIFICATION:"Hi [CONTACT_NAME] — happy to clarify. The platform doesn’t generate stock calls or trade ideas. It structures macro regime context — essentially helping an advisor answer “what is the market environment right now and what does that mean for different client risk profiles?” before client conversations. Would a quick walkthrough make more sense than trying to explain it over text?",
+  INTERESTED:"Hi [CONTACT_NAME] — glad it resonates. Would love to get your more detailed practitioner reaction — especially on whether the brief format actually fits into how you prepare for client conversations. Worth a 20-minute discussion sometime this week?",
+  WANTS_WALKTHROUGH:"Hi [CONTACT_NAME] — absolutely. I’ll keep it tight — 20 minutes, practitioner-focused, your honest reactions throughout. What does your schedule look like this week or next?",
+  FEEDBACK_PROVIDED:"Hi [CONTACT_NAME] — really appreciate that. That kind of practitioner read is exactly what I’m trying to get at this stage. Would it be worth a proper conversation — I can walk you through how it currently handles that and get your reaction in real time?",
+  NOT_RELEVANT:"Hi [CONTACT_NAME] — completely understand, and appreciate the honest feedback. That’s genuinely useful to know. If anything changes or you come across someone this might be more relevant for, do keep me in mind."
+};
+const WA_CLASSIFICATION_LABELS={NO_RESPONSE:"No Response",WILL_REVIEW:"Will Review",WANTS_CLARIFICATION:"Wants Clarification",INTERESTED:"Interested",WANTS_WALKTHROUGH:"Wants Walkthrough",FEEDBACK_PROVIDED:"Feedback Provided",NOT_RELEVANT:"Not Relevant"};
+const WA_RECOMMENDED_STATUS={NO_RESPONSE:"CONVERSATION_ACTIVE",WILL_REVIEW:"CONVERSATION_ACTIVE",WANTS_CLARIFICATION:"CONVERSATION_ACTIVE",INTERESTED:"DEMO_REQUESTED",WANTS_WALKTHROUGH:"DEMO_REQUESTED",FEEDBACK_PROVIDED:"CONVERSATION_ACTIVE",NOT_RELEVANT:"CLOSED"};
+const WA_LIFECYCLE=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED","CLOSED"];
+const WA_ACTION_MAP={CONVERSATION_ACTIVE:"WA_CONVERSATION",DEMO_REQUESTED:"WA_DEMO_REQUESTED",DEMO_SCHEDULED:"DEMO_SET",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
+const WA_ADJACENT={WHATSAPP_NEW:["CONVERSATION_ACTIVE","CLOSED"],CONVERSATION_ACTIVE:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
+function classifyWaContext(t){if(!t||!t.trim())return"NO_RESPONSE";var s=t.toLowerCase();if(/not for me|retail only|not applicable|no thanks/.test(s))return"NOT_RELEVANT";if(/show me|walk me|next week|happy to|call|meet/.test(s))return"WANTS_WALKTHROUGH";if(/interesting|looks good|makes sense|relevant|useful/.test(s))return"INTERESTED";if(/feels|missing|unrealistic|would use|gap|problem/.test(s))return"FEEDBACK_PROVIDED";if(/how does|what is|explain|differ|understand|not sure/.test(s))return"WANTS_CLARIFICATION";if(/will review|weekend|later|check it out|look at it/.test(s))return"WILL_REVIEW";return"NO_RESPONSE";}
+function waReplyText(p,cls){if(p.waReplyOverride)return p.waReplyOverride;var tpl=p.status==="WHATSAPP_NEW"?WA_OPENING_CANONICAL:(WA_TEMPLATES[cls]||WA_TEMPLATES.NO_RESPONSE);return tpl.replace(/\[CONTACT_NAME\]/g,p.name);}
+function getWaClassification(p){try{var s=localStorage.getItem("wa_cls_"+p.id);if(s)return s;}catch(e){}return classifyWaContext(p.latestWaContext);}
+function setWaClassification(pid,cls){try{localStorage.setItem("wa_cls_"+pid,cls);}catch(e){}}
+const STAGE_LABEL={WHATSAPP_NEW:'WhatsApp New',CONVERSATION_ACTIVE:'Conversation Active',SOURCED:'Sourced',CONNECTION_SENT:'Request Sent',ACCEPTED:'Connected',MSG1_SENT:'Conversation Active',MSG2_SENT:'Followed Up',MSG3_SENT:'Final Sent',DEMO_REQUESTED:'Demo Requested',DEMO_SCHEDULED:'Demo Scheduled',DEMO_DONE:'Demo Done',BETA_INVITED:'Beta Cohort',CLOSED:'Closed'};
+const STAGE_ORDER=['WHATSAPP_NEW','CONVERSATION_ACTIVE','SOURCED','CONNECTION_SENT','ACCEPTED','MSG1_SENT','MSG2_SENT','MSG3_SENT','DEMO_REQUESTED','DEMO_SCHEDULED','DEMO_DONE','BETA_INVITED'];
 const AE={
   CONNECTION_READY:{d:'Send Connection Request',cp:true,msg:function(r){return getCRMsg(r);},nx:'CONNECTION_SENT',lbl:'Request Sent'},
   ACCEPTED_CHECK:{d:'Check Acceptance',cp:false,msg:null,nx:'ACCEPTED',lbl:'Mark Connected'},
@@ -653,9 +672,24 @@ function loadFeed(){
   }).catch(e=>{document.getElementById('pane-feed').innerHTML=`<div class="empty"><div class="empty-ico">⚠</div><div class="empty-h">Load failed</div><div class="empty-s">${e.message}</div></div>`;});
 }
 function actOnOverdue(){
-  var ovIds=(window._feedOverdue||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
-  var mIds=(window._feedManual||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
-  var ids=ovIds.concat(mIds.filter(function(x){return ovIds.indexOf(x)<0;}));
+  var ids=(window._feedOverdue||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
+  if(!ids.length){go('queue');return;}
+  try{
+    var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+    var parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]');
+    ids.forEach(function(id){
+      var n=Number(id);if(isNaN(n))return;
+      if(acted.indexOf(n)<0)acted.push(n);
+      parked=parked.filter(function(x){return Number(x)!==n;});
+    });
+    localStorage.setItem('advisiq_acted',JSON.stringify(acted));
+    localStorage.setItem('advisiq_parked',JSON.stringify(parked));
+  }catch(e){}
+  loadFeed();
+  go('queue');
+}
+function actOnManual(){
+  var ids=(window._feedManual||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
   if(!ids.length){go('queue');return;}
   try{
     var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
@@ -669,11 +703,13 @@ function actOnOverdue(){
     localStorage.setItem('advisiq_parked',JSON.stringify(parked));
   }catch(e){}
   // Clear force_feed for manual items
-  mIds.forEach(function(pid){
+  ids.forEach(function(pid){
     fx('/api/v1/ops/send-to-feed/'+pid,{method:'DELETE'}).catch(function(){});
   });
+  loadFeed();
   go('queue');
 }
+
 function renderFeed(brief,feed,pipeline){
   var el=document.getElementById('pane-feed');
   var d=brief.data||{},oc=d.overdueCount||0,yv=d.yesterdayUniqueCount||0;
@@ -725,7 +761,7 @@ function renderFeed(brief,feed,pipeline){
     html+='<div style="margin:4px 10px 0;background:var(--amb);border:1px solid #604008;border-radius:10px;overflow:hidden">';
     _fm.forEach(function(item){html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--am);margin-top:2px">'+item.type+' · founder-prioritized</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--am)">📌</div></div>';
     });
-    html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" data-action="act-overdue" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+(_fm.length+(window._feedOverdue||[]).length)+'  Item'+((_fm.length+(window._feedOverdue||[]).length)!==1?'s':'')+' in Queue</button></div></div>';
+    html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" onclick="actOnManual()" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+_fm.length+' Manual Item'+(_fm.length!==1?'s':'')+' in Queue</button></div></div>';
   }
   if(!ov.length&&!td.length&&!ev.length){html+='<div class="empty"><div class="empty-ico">✓</div><div class="empty-h">All clear</div><div class="empty-s">No pending actions.<br>Tap ► Daily to run outreach.</div><div class="empty-action" onclick="startDaily(false)">► Start Daily Session</div></div>';}
   el.innerHTML=html;
@@ -763,7 +799,7 @@ function renderQueue(pq,_unused){
   var acted=[],parked=[];
   try{acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);}catch(e){}
   try{parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]').map(Number);}catch(e){}
-  queue=queue.filter(function(p){return (p.forceFeed===1||(acted.indexOf(Number(p.id))>=0))&&parked.indexOf(Number(p.id))<0;});
+  queue=queue.filter(function(p){return acted.indexOf(Number(p.id))>=0&&parked.indexOf(Number(p.id))<0;});
 
   if(!queue.length){
     el.innerHTML='<div class="empty"><div class="empty-ico">→</div>'
@@ -773,14 +809,110 @@ function renderQueue(pq,_unused){
     return;
   }
   window._pmap=window._pmap||{};
-  queue.forEach(function(p){var a=p.nextAction?ra(p.nextAction,p.role):null;window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};});
+  window._waProspects={};
+  // Track WA prospect IDs so Feed MANUAL can exclude them
+  var _waQIds=[];
+
+  queue.forEach(function(p){
+    var a=p.nextAction?ra(p.nextAction,p.role):null;
+    window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};
+    if(p.prospectType==='WHATSAPP'){window._waProspects[p.id]=p;_waQIds.push(Number(p.id));}
+  });
   var grouped={};
-  queue.forEach(function(p){var a=p.nextAction?ra(p.nextAction,p.role):null;var g=a?a.d:sl(p.status);if(!grouped[g])grouped[g]=[];grouped[g].push(p);});
+  queue.forEach(function(p){
+    if(p.prospectType==='WHATSAPP'){if(!grouped['__WA__'])grouped['__WA__']=[];grouped['__WA__'].push(p);return;}
+    var a=p.nextAction?ra(p.nextAction,p.role):null;var g=a?a.d:sl(p.status);if(!grouped[g])grouped[g]=[];grouped[g].push(p);
+  });
   var html='';
-  Object.keys(grouped).forEach(function(stage){var ps=grouped[stage];html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';ps.forEach(function(p){html+=prospectCard({id:p.id,name:p.name,stage:p.status,liUrl:p.linkedin_url,note:p.personalisationNote,isOverdue:false,at:p.nextAction,role:p.role});});});
+  if(grouped['__WA__']&&grouped['__WA__'].length){html+='<div class="sec">WhatsApp <span class="sec-ct">'+grouped['__WA__'].length+'</span></div>';grouped['__WA__'].forEach(function(p){html+=waProspectCard(p);});}
+  Object.keys(grouped).forEach(function(stage){if(stage==='__WA__')return;var ps=grouped[stage];html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';ps.forEach(function(p){html+=prospectCard({id:p.id,name:p.name,stage:p.status,liUrl:p.linkedin_url,note:p.personalisationNote,isOverdue:false,at:p.nextAction,role:p.role});});});
   el.innerHTML=html;
 }
 
+function waProspectCard(p){
+  var cls=getWaClassification(p);
+  var recStatus=WA_RECOMMENDED_STATUS[cls]||'CONVERSATION_ACTIVE';
+  var reply=waReplyText(p,cls);
+  var hasOverride=!!p.waReplyOverride;
+  var statusOpts=WA_LIFECYCLE.map(function(s){return '<option value="'+s+'"'+(s===recStatus?' selected':'')+'>'+(STAGE_LABEL[s]||s)+'</option>';}).join('');
+  var clsOpts=Object.keys(WA_CLASSIFICATION_LABELS).map(function(k){return '<option value="'+k+'"'+(k===cls?' selected':'')+'>'+WA_CLASSIFICATION_LABELS[k]+'</option>';}).join('');
+  var ctxSafe=(p.latestWaContext||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+  var rp=reply.length>140?reply.substring(0,140)+'...':reply;
+  var h='<div class="card" id="qc-'+p.id+'">';
+  h+='<div style="padding:10px 12px;display:flex;align-items:center;gap:8px">';
+  h+='<div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div>';
+  h+='<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px">';
+  h+='<div style="font-size:13px;font-weight:600;color:var(--tx);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.name+'</div>';
+  h+='<div style="font-family:var(--mono);font-size:9px;background:#0a2010;color:#18c97a;border:1px solid #0a4020;border-radius:4px;padding:1px 5px">WA</div>';
+  h+='<div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div>';
+  h+='</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' \xb7 Score '+(p.score||2)+'</div></div></div>';
+  h+='<div style="padding:0 12px 8px"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Latest Response</div>';
+  h+='<textarea id="wa-ctx-'+p.id+'" style="width:100%;background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--tx);resize:none;min-height:54px;box-sizing:border-box" placeholder="Paste prospect reply here..." onblur="saveWaContext('+p.id+',this.value)">'+ctxSafe+'</textarea></div>';
+  h+='<div style="padding:0 12px 8px;display:flex;gap:8px">';
+  h+='<div style="flex:1"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px">Classification</div>';
+  h+='<select class="ff-sel" style="width:100%;font-size:11px;padding:6px 8px" onchange="onWaClsChange('+p.id+',this.value)">'+clsOpts+'</select></div>';
+  h+='<div style="flex:1"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px">Next Status</div>';
+  h+='<select class="ff-sel" id="wa-st-'+p.id+'" style="width:100%;font-size:11px;padding:6px 8px">'+statusOpts+'</select></div></div>';
+  h+='<div style="padding:0 12px 8px"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Suggested Reply'+(hasOverride?' \u270e Edited':'')+'</div>';
+  h+='<div id="wa-rp-'+p.id+'" style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--t2);white-space:pre-wrap;word-break:break-word;max-height:80px;overflow:hidden">'+rp+'</div></div>';
+  h+='<div class="actions">';
+  h+='<button class="btn btn-both btn-full" onclick="openWa('+p.id+')">Open WhatsApp</button>';
+  h+='<button class="btn btn-note" onclick="editWaReply('+p.id+')">Edit Reply</button>';
+  h+='<button class="btn btn-adv btn-full" onclick="updateWaStatus('+p.id+')">Update Next Status</button>';
+  h+='<button class="btn btn-snooze" onclick="parkAct('+p.id+')">Park</button>';
+  h+='</div></div>';
+  return h;
+}
+function saveWaContext(id,val){
+  fx('/api/v1/ops/prospects/'+id+'/context',{method:'PATCH',body:JSON.stringify({context:val||null})}).catch(function(){});
+  if(!localStorage.getItem('wa_cls_'+id))updateWaCardClassification(id,classifyWaContext(val));
+}
+function onWaClsChange(id,cls){setWaClassification(id,cls);updateWaCardClassification(id,cls);}
+function updateWaCardClassification(id,cls){
+  var rec=WA_RECOMMENDED_STATUS[cls]||'CONVERSATION_ACTIVE';
+  var st=document.getElementById('wa-st-'+id);if(st)st.value=rec;
+  var rp=document.getElementById('wa-rp-'+id);
+  if(rp&&window._waProspects&&window._waProspects[id]){var reply=waReplyText(window._waProspects[id],cls);rp.textContent=reply.length>140?reply.substring(0,140)+'...':reply;}
+}
+function openWa(id){
+  var p=window._waProspects&&window._waProspects[id];if(!p){toast('Prospect not loaded');return;}
+  var msg=waReplyText(p,getWaClassification(p));
+  var num=(p.whatsappNumber||'').replace(/[^0-9+]/g,'');
+  if(!num){toast('No WhatsApp number stored');return;}
+  doOpen('https://wa.me/'+num+'?text='+encodeURIComponent(msg));
+}
+function editWaReply(id){
+  var p=window._waProspects&&window._waProspects[id];if(!p)return;
+  var cur=waReplyText(p,getWaClassification(p));
+  var rp=document.getElementById('wa-rp-'+id);if(!rp)return;
+  rp.style.maxHeight='none';
+  var ta=document.createElement('textarea');
+  ta.id='wa-edit-'+id;ta.value=cur;
+  ta.style.cssText='width:100%;background:var(--s3);border:1px solid var(--ac);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--tx);resize:none;min-height:120px;box-sizing:border-box';
+  var br=document.createElement('div');br.style.cssText='display:flex;gap:6px;margin-top:6px';
+  br.innerHTML='<button class="btn btn-adv btn-full" onclick="confirmWaEdit('+id+')">Confirm</button><button class="btn btn-snooze btn-full" onclick="loadQueue()">Cancel</button>';
+  rp.innerHTML='';rp.appendChild(ta);rp.appendChild(br);
+}
+function confirmWaEdit(id){
+  var ta=document.getElementById('wa-edit-'+id);if(!ta)return;
+  var val=ta.value.trim();
+  fx('/api/v1/ops/prospects/'+id+'/reply-override',{method:'PATCH',body:JSON.stringify({reply:val||null})}).then(function(d){
+    if(d.status==='OK'){if(window._waProspects&&window._waProspects[id])window._waProspects[id].waReplyOverride=val||null;toast('\u270e Reply saved');loadQueue();}
+    else toast('Save failed');
+  }).catch(function(){toast('Network error');});
+}
+function updateWaStatus(id){
+  var st=document.getElementById('wa-st-'+id);if(!st)return;
+  var sel=st.value;
+  var p=window._waProspects&&window._waProspects[id];
+  var cur=p?p.status:'WHATSAPP_NEW';
+  var adj=WA_ADJACENT[cur]||[];
+  var act=WA_ACTION_MAP[sel];
+  if(!act){toast('No transition available');return;}
+  if(adj.indexOf(sel)<0){if(!window.confirm('Move directly from '+(STAGE_LABEL[cur]||cur)+' to '+(STAGE_LABEL[sel]||sel)+'?'))return;}
+  advP(id,act);
+  try{localStorage.removeItem('wa_cls_'+id);}catch(e){}
+}
 function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
   var init=initials(name);
   var a=at?ra(at,role):null;
@@ -820,7 +952,7 @@ function renderPipeline(data){
       var sn=nextFromStatus(p.status),isOv=p.nextDue&&p.nextDue<now2,dAway=p.nextDue?Math.round(Math.abs(p.nextDue-now2)/86400000):null;
       var nextStr=isOv?'<div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:3px">⚠ '+sn.d+' overdue by '+dAway+'d</div>':p.nextDue?'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">Next: '+sn.d+' · '+new Date(p.nextDue).toLocaleDateString('en-IN',{day:'numeric',month:'short'})+'</div>':'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">'+sn.d+'</div>';
       var roleStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' · Score '+(p.score||2)+'</div>';
-      var openBtn=p.linkedin_url?'<button class="btn btn-open btn-full" data-pid="'+p.id+'" data-pact="open">Open Profile ↗</button>':'';
+      var openBtn=(p.prospectType==='WHATSAPP')?'':(p.linkedin_url?'<button class="btn btn-open btn-full" data-pid="'+p.id+'" data-pact="open">Open Profile ↗</button>':'');
       var feedBtn='<button class="btn btn-note btn-full" onclick="sendToFeed('+p.id+')">📌 Send To Feed</button>';
       html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+openBtn+feedBtn+'</div></div>';
     });
@@ -862,32 +994,52 @@ function tbar(l,v,tot,c){const p=Math.min(100,Math.round(v/tot*100));return `<di
 
 // ── ADD TAB ──
 function renderAdd(){
-  document.getElementById('pane-add').innerHTML=`
-  <div class="sec">Add Prospect</div>
-  <div class="form">
-    <div class="form-title">New Prospect</div>
-    <div class="ff"><label class="ff-label">Full Name *</label><input class="ff-in" id="fn" type="text" placeholder="Rajesh Kumar" autocomplete="off"></div>
-    <div class="ff"><label class="ff-label">Role</label><div class="ff-wrap"><select class="ff-sel" id="fr"><option>IFA</option><option>RIA</option><option>Wealth Manager</option><option>PMS</option><option>Family Office</option><option>Other</option></select></div></div>
-    <div class="ff"><label class="ff-label">Organisation</label><input class="ff-in" id="fo" type="text" placeholder="Optional" autocomplete="off"></div>
-    <div class="ff"><label class="ff-label">LinkedIn URL *</label><input class="ff-in" id="fu" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off"></div>
-    <div class="ff"><label class="ff-label">Priority Score</label><div class="ff-wrap"><select class="ff-sel" id="fs"><option value="3">3 — Priority (posts about market)</option><option value="2" selected>2 — Standard</option><option value="1">1 — Low</option></select></div></div>
-    <div class="ff"><label class="ff-label">What did they post about?</label><input class="ff-in" id="fp" type="text" placeholder="Personalisation note" autocomplete="off"></div>
-    <button class="form-btn" onclick="addP()">Add to Pipeline → Queue</button>
-  </div>`;
+  var ch=window._addChannel||'LINKEDIN';
+  var isWA=ch==='WHATSAPP';
+  var h='<div class="sec">Add Prospect</div><div class="form"><div class="form-title">New Prospect</div>';
+  h+='<div style="display:flex;gap:8px;margin-bottom:12px">';
+  h+='<button class="btn '+(isWA?'btn-snooze':'btn-both')+' btn-full" onclick="setAddChannel(\'LINKEDIN\')" >LinkedIn</button>';
+  h+='<button class="btn '+(isWA?'btn-both':'btn-snooze')+' btn-full" onclick="setAddChannel(\'WHATSAPP\')" >WhatsApp</button>';
+  h+='</div>';
+  h+='<div class="ff"><label class="ff-label">Full Name *</label><input class="ff-in" id="fn" type="text" placeholder="Rajesh Kumar" autocomplete="off"></div>';
+  h+='<div class="ff"><label class="ff-label">Role</label><div class="ff-wrap"><select class="ff-sel" id="fr"><option>IFA</option><option>RIA</option><option>Wealth Manager</option><option>PMS</option><option>Family Office</option><option>Other</option></select></div></div>';
+  h+='<div class="ff"><label class="ff-label">Organisation</label><input class="ff-in" id="fo" type="text" placeholder="Optional" autocomplete="off"></div>';
+  if(!isWA)h+='<div class="ff"><label class="ff-label">LinkedIn URL *</label><input class="ff-in" id="fu" type="url" placeholder="https://linkedin.com/in/..." autocomplete="off"></div>';
+  if(isWA)h+='<div class="ff"><label class="ff-label">WhatsApp Number *</label><input class="ff-in" id="fwa" type="tel" placeholder="+91XXXXXXXXXX" autocomplete="off"></div>';
+  h+='<div class="ff"><label class="ff-label">Priority Score</label><div class="ff-wrap"><select class="ff-sel" id="fs"><option value="3">3 — Priority</option><option value="2" selected>2 — Standard</option><option value="1">1 — Low</option></select></div></div>';
+  h+='<div class="ff"><label class="ff-label">Personalisation Remarks</label><input class="ff-in" id="fp" type="text" placeholder="Context about this contact" autocomplete="off"></div>';
+  h+='<button class="form-btn" onclick="addP()">'+(isWA?'Add WhatsApp Prospect →':'Add to Pipeline → Queue')+'</button></div>';
+  document.getElementById('pane-add').innerHTML=h;
 }
+function setAddChannel(ch){window._addChannel=ch;renderAdd();}
 function addP(){
-  const name=document.getElementById('fn').value.trim();var rawUrl=document.getElementById('fu').value.trim();var url=rawUrl&&!rawUrl.startsWith('http')?'https://'+rawUrl:rawUrl;
-  if(!name||!url){toast('Name and LinkedIn URL required');return;}
-  const body={name,linkedin_url:url,role:document.getElementById('fr').value,organisation:document.getElementById('fo').value.trim()||null,score:parseInt(document.getElementById('fs').value),personalisation_note:document.getElementById('fp').value.trim()||null,source_string:'S1'};
-  fx('/api/v1/ops/prospects',{method:'POST',body:JSON.stringify(body)}).then(d=>{
-    if(d.status==='OK'){toast('Added: '+name);['fn','fu','fo','fp'].forEach(id=>document.getElementById(id).value='');go('queue');}
+  var ch=window._addChannel||'LINKEDIN';
+  var name=(document.getElementById('fn').value||'').trim();
+  if(!name){toast('Name required');return;}
+  var body={name:name,role:document.getElementById('fr').value,organisation:(document.getElementById('fo').value||'').trim()||null,score:parseInt(document.getElementById('fs').value),personalisation_note:(document.getElementById('fp').value||'').trim()||null,source_string:'S1',prospect_type:ch};
+  if(ch==='WHATSAPP'){
+    var wnum=(document.getElementById('fwa')?document.getElementById('fwa').value||'':'').trim();
+    if(!wnum){toast('WhatsApp number required');return;}
+    body.whatsapp_number=wnum;
+  } else {
+    var rawUrl=(document.getElementById('fu')?document.getElementById('fu').value||'':'').trim();
+    var url=rawUrl&&!rawUrl.startsWith('http')?'https://'+rawUrl:rawUrl;
+    if(!url){toast('LinkedIn URL required');return;}
+    body.linkedin_url=url;
+  }
+  fx('/api/v1/ops/prospects',{method:'POST',body:JSON.stringify(body)}).then(function(d){
+    if(d.status==='OK'){toast('Added: '+name);['fn','fu','fo','fp','fwa'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});go('queue');}
     else if(d.status==='DUPLICATE')toast('Already in pipeline');
     else toast('Error: '+(d.error||'unknown'));
-  }).catch(()=>toast('Network error'));
+  }).catch(function(){toast('Network error');});
 }
 
 // ── ACTION HANDLERS ──
 function parkAct(id){
+  // WA prospects: set force_feed=1 so they appear in Feed MANUAL after park
+  if(window._waProspects&&window._waProspects[id]){
+    fx('/api/v1/ops/prospects/'+id+'/park-to-feed',{method:'POST'}).catch(function(){});
+  }
   swipeOut(id,'l');
   try{
     // Remove from acted (leaves Queue)
@@ -900,10 +1052,10 @@ function parkAct(id){
     localStorage.setItem('advisiq_parked',JSON.stringify(parked));
   }catch(e){}
   toast('Parked — returns to Feed next session');
-  setTimeout(function(){go('feed');loadFeed();},200);
+  setTimeout(function(){go('feed');loadFeed();loadQueue();},200);
 }
 
-function doneAct(id){swipeOut(id,'r');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(()=>{loadFeed();loadQueue();},400);});}
+function doneAct(id){swipeOut(id,'r');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(()=>{loadFeed();loadQueue();loadPipeline();},400);});}
 function snoozeAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'SNOOZE_24H'})}).then(()=>toast('Snoozed 24h'));}
 function dismissAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'DISMISS'})}).then(()=>toast('Dismissed'));}
 function swipeOut(id,dir){
@@ -911,6 +1063,12 @@ function swipeOut(id,dir){
   if(el){el.classList.add(dir==='r'?'sw-out-r':'sw-out-l');setTimeout(()=>el.remove(),200);}
 }
 function sendToFeed(id){
+  // Clear from advisiq_acted so it must be re-acted in Feed before entering Queue
+  try{
+    var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+    acted=acted.filter(function(x){return Number(x)!==Number(id);});
+    localStorage.setItem('advisiq_acted',JSON.stringify(acted));
+  }catch(e){}
   fx('/api/v1/ops/send-to-feed/'+id,{method:'POST'}).then(function(d){
     if(d.status==='OK'){toast('📌 Added to Feed');loadFeed();}
     else toast('Error: '+(d.error||'unknown'));
@@ -926,7 +1084,7 @@ function advP(id,action){
         var _dpid=parseInt(id);acted=acted.filter(function(x){return parseInt(x)!==_dpid;});
         localStorage.setItem('advisiq_acted',JSON.stringify(acted));
       }catch(e){}
-      loadQueue();loadPipeline();
+      loadQueue();loadPipeline();loadFeed();
     }else toast('Error: '+(d.error||'unknown'));
   });
 }
@@ -1040,6 +1198,8 @@ function dmOpenOnly(){var i=window._dmItem;if(i&&i.liUrl)openOnly(i.liUrl);}
 // Status → next expected action (derived from lifecycle state, not DB queue)
 // This is the governance-correct mapping for display purposes
 const STATUS_NEXT={
+  WHATSAPP_NEW:       {at:'WA_OPENING',d:'Send Opening Message'},
+  CONVERSATION_ACTIVE:{at:'WA_FOLLOW', d:'Send Follow-up'},
   SOURCED:        {at:'CONNECTION_READY', d:'Send Connection Request'},
   CONNECTION_SENT:{at:'ACCEPTED_CHECK',  d:'Check Acceptance'},
   ACCEPTED:       {at:'MSG1_SEND',       d:'Send First DM'},
