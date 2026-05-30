@@ -10816,9 +10816,9 @@ app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{
 });
 app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
   const now=Date.now();
-  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
+  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,isOverdue:p.nextDue&&p.nextDue<now?1:0};});var DAY=86400000;var q=all.filter(function(p){return !p.nextDue||p.nextDue<=(now+DAY);});
+    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0};});var DAY=86400000;var q=all.filter(function(p){return p.forceFeed===1||!p.nextDue||p.nextDue<=(now+DAY);});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });

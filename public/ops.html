@@ -723,8 +723,9 @@ function renderFeed(brief,feed,pipeline){
   if(_fm.length){
     html+='<div class="sec">📌 Manual <span class="sec-ct">'+_fm.length+'</span></div>';
     html+='<div style="margin:4px 10px 0;background:var(--amb);border:1px solid #604008;border-radius:10px;overflow:hidden">';
-    _fm.forEach(function(item){html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--am);margin-top:2px">'+item.type+' · founder-prioritized</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--am)">📌</div></div>';});
-    html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" data-action="act-overdue" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+(_fm.length+(window._feedOverdue||[]).length)+' Item'+((_fm.length+(window._feedOverdue||[]).length)!==1?'s ":" ")+' in Queue</button></div></div>';
+    _fm.forEach(function(item){html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--am);margin-top:2px">'+item.type+' · founder-prioritized</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--am)">📌</div></div>';
+    });
+    html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" data-action="act-overdue" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+(_fm.length+(window._feedOverdue||[]).length)+'  Item'+((_fm.length+(window._feedOverdue||[]).length)!==1?'s':'')+' in Queue</button></div></div>';
   }
   if(!ov.length&&!td.length&&!ev.length){html+='<div class="empty"><div class="empty-ico">✓</div><div class="empty-h">All clear</div><div class="empty-s">No pending actions.<br>Tap ► Daily to run outreach.</div><div class="empty-action" onclick="startDaily(false)">► Start Daily Session</div></div>';}
   el.innerHTML=html;
@@ -762,7 +763,7 @@ function renderQueue(pq,_unused){
   var acted=[],parked=[];
   try{acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);}catch(e){}
   try{parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]').map(Number);}catch(e){}
-  queue=queue.filter(function(p){return acted.indexOf(Number(p.id))>=0&&parked.indexOf(Number(p.id))<0;});
+  queue=queue.filter(function(p){return (p.forceFeed===1||(acted.indexOf(Number(p.id))>=0))&&parked.indexOf(Number(p.id))<0;});
 
   if(!queue.length){
     el.innerHTML='<div class="empty"><div class="empty-ico">→</div>'
