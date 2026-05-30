@@ -1508,6 +1508,7 @@ const ERROR_ENUM = Object.freeze({
                 db.run(`CREATE TABLE IF NOT EXISTS comm_actions (id INTEGER PRIMARY KEY AUTOINCREMENT, prospect_id INTEGER, action_type TEXT NOT NULL, status TEXT DEFAULT 'PENDING', due_at INTEGER, completed_at INTEGER, note TEXT, outcome TEXT, objection TEXT, logged_at INTEGER NOT NULL)`);
                 db.run('CREATE INDEX IF NOT EXISTS idx_actions_due ON comm_actions(due_at, status)');
                 db.run('CREATE INDEX IF NOT EXISTS idx_actions_prospect ON comm_actions(prospect_id)');
+                db.run(`ALTER TABLE comm_actions ADD COLUMN force_feed INTEGER DEFAULT 0`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] force_feed:',e.message);else console.log('[schema] force_feed column ready');});
 		});
 		const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 		// ===============================
@@ -10758,10 +10759,16 @@ app.get("/api/v1/ops/feed",opsAuth,(req,res)=>{
       if(e2)td=[];
       db.all("SELECT * FROM comm_ops_events WHERE delivered=0 ORDER BY triggered_at DESC LIMIT 5",[],( e3,ev)=>{
         if(e3)ev=[];
-        var om=(ov||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"OVERDUE",prospect:a.name||null,dueAt:a.due_at,overdueMs:now-a.due_at};});
-        var tm=(td||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"TODAY",prospect:a.name||null,dueAt:a.due_at};});
-        var em=(ev||[]).map(function(e){return{id:e.id,type:e.event_type,priority:e.priority,title:e.title,body:e.body};});
-        res.json({status:"OK",timestamp:now,data:{overdue:om,today:tm,events:em,counts:{overdue:om.length,today:tm.length,events:em.length}}});
+        db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.force_feed=1 AND a.due_at>=? ORDER BY a.logged_at DESC LIMIT 10",["PENDING",now],(e4,mf)=>{
+          if(e4)mf=[];
+          var ovIds=new Set((ov||[]).map(function(a){return a.prospect_id;}));
+          mf=(mf||[]).filter(function(a){return !ovIds.has(a.prospect_id);});
+          var om=(ov||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"OVERDUE",prospect:a.name||null,dueAt:a.due_at,overdueMs:now-a.due_at};});
+          var mm=(mf||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"MANUAL",prospect:a.name||null,dueAt:a.due_at};});
+          var tm=(td||[]).map(function(a){return{id:a.id,prospect_id:a.prospect_id,type:a.action_type,urgency:"TODAY",prospect:a.name||null,dueAt:a.due_at};});
+          var em=(ev||[]).map(function(e){return{id:e.id,type:e.event_type,priority:e.priority,title:e.title,body:e.body};});
+          res.json({status:"OK",timestamp:now,data:{overdue:om,manual:mm,today:tm,events:em,counts:{overdue:om.length,manual:mm.length,today:tm.length,events:em.length}}});
+        });
       });
     });
   });
@@ -10778,6 +10785,25 @@ app.post("/api/v1/ops/feed/:id/act",opsAuth,(req,res)=>{
       if(act==="COMPLETE"&&a.prospect_id){var nx={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000}};var n=nx[a.action_type];if(n)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[a.prospect_id,n.t,"PENDING",now+n.d,now],function(){});}
       res.json({status:"OK",timestamp:now,action:act,itemId:id});
     });
+  });
+});
+app.post("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.prospect_id),now=Date.now();
+  if(!pid)return res.status(400).json({status:"ERROR",error:"Invalid prospect_id"});
+  db.get("SELECT id FROM comm_actions WHERE prospect_id=? AND status='PENDING' ORDER BY due_at ASC LIMIT 1",[pid],(err,row)=>{
+    if(err||!row)return res.status(404).json({status:"NOT_FOUND",error:"No pending action for prospect"});
+    db.run("UPDATE comm_actions SET force_feed=1 WHERE id=?",[row.id],(e)=>{
+      if(e)return res.status(500).json({status:"ERROR",error:e.message});
+      res.json({status:"OK",prospect_id:pid,action_id:row.id});
+    });
+  });
+});
+app.delete("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.prospect_id);
+  if(!pid)return res.status(400).json({status:"ERROR",error:"Invalid prospect_id"});
+  db.run("UPDATE comm_actions SET force_feed=0 WHERE prospect_id=? AND force_feed=1 AND status='PENDING'",[pid],(e)=>{
+    if(e)return res.status(500).json({status:"ERROR",error:e.message});
+    res.json({status:"OK",prospect_id:pid});
   });
 });
 app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{

@@ -645,30 +645,35 @@ function loadFeed(){
       var _fa=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);
       var _fov=(feed.data&&feed.data.overdue)||[];
       var _unacted=_fov.filter(function(i){return !i.prospect_id||_fa.indexOf(Number(i.prospect_id))<0;}).length;
-      setBadge('b-feed',_unacted);
+      var _fman=(feed.data&&feed.data.manual)||[];
+      var _unactedMan=_fman.filter(function(i){return !i.prospect_id||_fa.indexOf(Number(i.prospect_id))<0;}).length;
+      setBadge('b-feed',_unacted+_unactedMan);
     }catch(e){setBadge('b-feed',oc);}
     updateSticky(feed);
   }).catch(e=>{document.getElementById('pane-feed').innerHTML=`<div class="empty"><div class="empty-ico">⚠</div><div class="empty-h">Load failed</div><div class="empty-s">${e.message}</div></div>`;});
 }
 function actOnOverdue(){
-  var ids=(window._feedOverdue||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
+  var ovIds=(window._feedOverdue||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
+  var mIds=(window._feedManual||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
+  var ids=ovIds.concat(mIds.filter(function(x){return ovIds.indexOf(x)<0;}));
   if(!ids.length){go('queue');return;}
   try{
     var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
     var parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]');
     ids.forEach(function(id){
       var n=Number(id);if(isNaN(n))return;
-      // Add to acted
       if(acted.indexOf(n)<0)acted.push(n);
-      // Remove from parked — re-acting overrides park
       parked=parked.filter(function(x){return Number(x)!==n;});
     });
     localStorage.setItem('advisiq_acted',JSON.stringify(acted));
     localStorage.setItem('advisiq_parked',JSON.stringify(parked));
   }catch(e){}
+  // Clear force_feed for manual items
+  mIds.forEach(function(pid){
+    fx('/api/v1/ops/send-to-feed/'+pid,{method:'DELETE'}).catch(function(){});
+  });
   go('queue');
 }
-
 function renderFeed(brief,feed,pipeline){
   var el=document.getElementById('pane-feed');
   var d=brief.data||{},oc=d.overdueCount||0,yv=d.yesterdayUniqueCount||0;
@@ -689,6 +694,7 @@ function renderFeed(brief,feed,pipeline){
     var ov=_allOv.filter(function(i){return !i.prospect_id||_acted.indexOf(i.prospect_id)<0;});
   }catch(e){var ov=_allOv;}
   window._feedOverdue=_allOv;
+  window._feedManual=(feed.data&&feed.data.manual)||[];
   // Filter Today: hide prospects already shown in Overdue (by id or name)
   var _ovPids=_allOv.map(function(o){return o.prospect_id;}).filter(Boolean);
   var _ovNames=_allOv.map(function(o){return o.prospect;}).filter(Boolean);
@@ -712,6 +718,14 @@ function renderFeed(brief,feed,pipeline){
     html+='<div style="padding:10px 14px"><button class="btn btn-copy btn-full" onclick="go(&apos;queue&apos;)" style="min-height:46px">→ Execute in Queue</button></div></div>';
   }
   if(ev.length){html+='<div class="sec">Events <span class="sec-ct">'+ev.length+'</span></div>';ev.forEach(function(e){html+='<div class="card cohort"><div class="card-top"><div class="card-info"><div class="card-name">'+e.title+'</div><div class="card-sub">'+e.body+'</div></div></div></div>';});}
+  var _fm=window._feedManual||[];
+  try{var _fmActed=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);_fm=_fm.filter(function(i){return !i.prospect_id||_fmActed.indexOf(Number(i.prospect_id))<0;});}catch(e){}
+  if(_fm.length){
+    html+='<div class="sec">📌 Manual <span class="sec-ct">'+_fm.length+'</span></div>';
+    html+='<div style="margin:4px 10px 0;background:var(--amb);border:1px solid #604008;border-radius:10px;overflow:hidden">';
+    _fm.forEach(function(item){html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--am);margin-top:2px">'+item.type+' · founder-prioritized</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--am)">📌</div></div>';});
+    html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" data-action="act-overdue" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+(_fm.length+(window._feedOverdue||[]).length)+' Item'+((_fm.length+(window._feedOverdue||[]).length)!==1?'s ":" ")+' in Queue</button></div></div>';
+  }
   if(!ov.length&&!td.length&&!ev.length){html+='<div class="empty"><div class="empty-ico">✓</div><div class="empty-h">All clear</div><div class="empty-s">No pending actions.<br>Tap ► Daily to run outreach.</div><div class="empty-action" onclick="startDaily(false)">► Start Daily Session</div></div>';}
   el.innerHTML=html;
   updateSticky(feed);
@@ -806,7 +820,8 @@ function renderPipeline(data){
       var nextStr=isOv?'<div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:3px">⚠ '+sn.d+' overdue by '+dAway+'d</div>':p.nextDue?'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">Next: '+sn.d+' · '+new Date(p.nextDue).toLocaleDateString('en-IN',{day:'numeric',month:'short'})+'</div>':'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:3px">'+sn.d+'</div>';
       var roleStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' · Score '+(p.score||2)+'</div>';
       var openBtn=p.linkedin_url?'<button class="btn btn-open btn-full" data-pid="'+p.id+'" data-pact="open">Open Profile ↗</button>':'';
-      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+openBtn+'</div></div>';
+      var feedBtn='<button class="btn btn-note btn-full" onclick="sendToFeed('+p.id+')">📌 Send To Feed</button>';
+      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+openBtn+feedBtn+'</div></div>';
     });
   });
   el.innerHTML=html;
@@ -893,6 +908,12 @@ function dismissAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{metho
 function swipeOut(id,dir){
   const el=document.getElementById('fi-'+id)||document.getElementById('qc-'+id);
   if(el){el.classList.add(dir==='r'?'sw-out-r':'sw-out-l');setTimeout(()=>el.remove(),200);}
+}
+function sendToFeed(id){
+  fx('/api/v1/ops/send-to-feed/'+id,{method:'POST'}).then(function(d){
+    if(d.status==='OK'){toast('📌 Added to Feed');loadFeed();}
+    else toast('Error: '+(d.error||'unknown'));
+  }).catch(function(){toast('Network error');});
 }
 function advP(id,action){
   fx('/api/v1/ops/prospects/'+id+'/action',{method:'POST',body:JSON.stringify({action})}).then(d=>{
