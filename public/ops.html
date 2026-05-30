@@ -859,7 +859,7 @@ function waProspectCard(p){
   h+='<button class="btn btn-both btn-full" onclick="openWa('+p.id+')">Open WhatsApp</button>';
   h+='<button class="btn btn-note" onclick="editWaReply('+p.id+')">Edit Reply</button>';
   h+='<button class="btn btn-adv btn-full" onclick="updateWaStatus('+p.id+')">Update Next Status</button>';
-  h+='<button class="btn btn-snooze" onclick="parkAct('+p.id+')">Park</button>';
+  h+='<button class="btn btn-snooze" onclick="prospectSnooze('+p.id+')">Snooze</button>';
   h+='</div></div>';
   return h;
 }
@@ -912,6 +912,7 @@ function updateWaStatus(id){
   if(adj.indexOf(sel)<0){if(!window.confirm('Move directly from '+(STAGE_LABEL[cur]||cur)+' to '+(STAGE_LABEL[sel]||sel)+'?'))return;}
   advP(id,act);
   try{localStorage.removeItem('wa_cls_'+id);}catch(e){}
+  try{var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);acted=acted.filter(function(x){return x!==Number(id);});localStorage.setItem('advisiq_acted',JSON.stringify(acted));}catch(e){}
 }
 function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
   var init=initials(name);
@@ -954,7 +955,12 @@ function renderPipeline(data){
       var roleStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' · Score '+(p.score||2)+'</div>';
       var openBtn=(p.prospectType==='WHATSAPP')?'':(p.linkedin_url?'<button class="btn btn-open btn-full" data-pid="'+p.id+'" data-pact="open">Open Profile ↗</button>':'');
       var feedBtn='<button class="btn btn-note btn-full" onclick="sendToFeed('+p.id+')">📌 Send To Feed</button>';
-      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+'<div class="actions">'+openBtn+feedBtn+'</div></div>';
+      var snoozeInfo='';
+      if(p.snoozedUntil){
+        var sLabel=p.snoozedUntil>='2099'?'Snoozed indefinitely':'Snoozed until '+new Date(p.snoozedUntil).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+        snoozeInfo='<div style="padding:6px 12px 0;display:flex;align-items:center;justify-content:space-between"><div style="font-family:var(--mono);font-size:10px;color:var(--am)">'+sLabel+'</div><button class="btn btn-snooze" style="font-size:11px;padding:4px 10px;min-height:28px" onclick="unsnoozeProspect('+p.id+')">Clear Snooze</button></div>';
+      }
+      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+snoozeInfo+'<div class="actions">'+openBtn+feedBtn+'</div></div>';
     });
   });
   el.innerHTML=html;
@@ -1035,27 +1041,50 @@ function addP(){
 }
 
 // ── ACTION HANDLERS ──
-function parkAct(id){
-  // WA prospects: set force_feed=1 so they appear in Feed MANUAL after park
-  if(window._waProspects&&window._waProspects[id]){
-    fx('/api/v1/ops/prospects/'+id+'/park-to-feed',{method:'POST'}).catch(function(){});
-  }
-  swipeOut(id,'l');
-  try{
-    // Remove from acted (leaves Queue)
-    var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
-    var _pid=parseInt(id);acted=acted.filter(function(x){return parseInt(x)!==_pid;});
-    localStorage.setItem('advisiq_acted',JSON.stringify(acted));
-    // Add to parked (suppressed in Feed until session reset)
-    var parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]');
-    if(parked.indexOf(id)<0)parked.push(id);
-    localStorage.setItem('advisiq_parked',JSON.stringify(parked));
-  }catch(e){}
-  toast('Parked — returns to Feed next session');
-  setTimeout(function(){go('feed');loadFeed();loadQueue();},200);
-}
 
 function doneAct(id){swipeOut(id,'r');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(()=>{loadFeed();loadQueue();loadPipeline();},400);});}
+function prospectSnooze(id){
+  var opts=[{label:'3 Days',dur:'3d'},{label:'1 Week',dur:'7d'},{label:'1 Month',dur:'30d'},{label:'Forever',dur:'forever'}];
+  var sheet=document.createElement('div');
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box';
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px;text-align:center">Snooze this prospect</div>';
+  opts.forEach(function(o){
+    var btn=document.createElement('button');
+    btn.className='btn btn-snooze btn-full';
+    btn.style.cssText='margin-bottom:8px;min-height:46px;font-size:14px';
+    btn.textContent=o.label;
+    btn.onclick=function(){
+      document.body.removeChild(sheet);
+      fx('/api/v1/ops/prospects/'+id+'/snooze',{method:'POST',body:JSON.stringify({duration:o.dur})}).then(function(d){
+        if(d.status==='OK'){
+          var lbl=o.dur==='forever'?'Snoozed indefinitely':'Snoozed until '+new Date(d.snoozed_until).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+          toast(lbl);
+          swipeOut(id,'l');
+          try{var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);acted=acted.filter(function(x){return x!==Number(id);});localStorage.setItem('advisiq_acted',JSON.stringify(acted));}catch(e){}
+          setTimeout(function(){loadQueue();loadFeed();loadPipeline();},300);
+        }else toast('Error: '+(d.error||'unknown'));
+      }).catch(function(){toast('Network error');});
+    };
+    inner.appendChild(btn);
+  });
+  var cancel=document.createElement('button');
+  cancel.className='btn btn-full';
+  cancel.style.cssText='min-height:46px;font-size:14px;color:var(--t3)';
+  cancel.textContent='Cancel';
+  cancel.onclick=function(){document.body.removeChild(sheet);};
+  inner.appendChild(cancel);
+  sheet.appendChild(inner);
+  sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
+  document.body.appendChild(sheet);
+}
+function unsnoozeProspect(id){
+  fx('/api/v1/ops/prospects/'+id+'/unsnooze',{method:'POST'}).then(function(d){
+    if(d.status==='OK'){toast('Snooze cleared');loadPipeline();loadFeed();}
+    else toast('Error: '+(d.error||'unknown'));
+  }).catch(function(){toast('Network error');});
+}
 function snoozeAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'SNOOZE_24H'})}).then(()=>toast('Snoozed 24h'));}
 function dismissAct(id){swipeOut(id,'l');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'DISMISS'})}).then(()=>toast('Dismissed'));}
 function swipeOut(id,dir){
@@ -1070,7 +1099,7 @@ function sendToFeed(id){
     localStorage.setItem('advisiq_acted',JSON.stringify(acted));
   }catch(e){}
   fx('/api/v1/ops/send-to-feed/'+id,{method:'POST'}).then(function(d){
-    if(d.status==='OK'){toast('📌 Added to Feed');loadFeed();}
+    if(d.status==='OK'){toast('📌 Added to Feed');loadFeed();loadPipeline();}
     else toast('Error: '+(d.error||'unknown'));
   }).catch(function(){toast('Network error');});
 }
@@ -1232,7 +1261,7 @@ document.addEventListener('click',function(e){
     if(pa==='snooze'){snoozeAct(pid);return;}
     if(pa==='note'){openNotes(pid);return;}
     if(pa==='close'){closeP(pid);return;}
-    if(pa==='park'){parkAct(pid);return;}
+    // park removed — snooze uses onclick directly
     return;}
 },true);
 // ── INIT ──

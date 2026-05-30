@@ -1513,6 +1513,7 @@ const ERROR_ENUM = Object.freeze({
                 db.run(`ALTER TABLE comm_prospects ADD COLUMN whatsapp_number TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] whatsapp_number:',e.message);else console.log('[schema] whatsapp_number ready');});
                 db.run(`ALTER TABLE comm_prospects ADD COLUMN latest_wa_context TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] latest_wa_context:',e.message);else console.log('[schema] latest_wa_context ready');});
                 db.run(`ALTER TABLE comm_prospects ADD COLUMN wa_reply_override TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] wa_reply_override:',e.message);else console.log('[schema] wa_reply_override ready');});
+                db.run(`ALTER TABLE comm_prospects ADD COLUMN snoozed_until TEXT DEFAULT NULL`,(e)=>{if(e&&!e.message.includes('duplicate'))console.log('[schema] snoozed_until:',e.message);else console.log('[schema] snoozed_until ready');});
 		});
 		const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 		// ===============================
@@ -10746,8 +10747,8 @@ function opsAuth(req,res,next){
 }
 app.get("/api/v1/ops/brief",opsAuth,(req,res)=>{
   const now=Date.now();
-  const yd=new Date(now-86400000).toISOString().slice(0,10);
-  db.get("SELECT COUNT(*) as c FROM comm_actions WHERE status=? AND due_at IS NOT NULL AND due_at<?",["PENDING",now],(e1,r1)=>{
+  const yd=new Date(now).toISOString().slice(0,10);
+  db.get("SELECT COUNT(*) as c FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at IS NOT NULL AND a.due_at<? AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now'))",["PENDING",now],(e1,r1)=>{
     db.get("SELECT COUNT(*) as c FROM comm_ops_events WHERE delivered=0",[],(e2,r2)=>{
       db.get("SELECT COUNT(DISTINCT COALESCE(visitor_id,ip_hash)) as c FROM comm_visits WHERE visit_date=? AND (visitor_type IS NULL OR visitor_type!='FOUNDER')",[yd],(e3,r3)=>{
         const oc=(r1&&r1.c)||0,pe=(r2&&r2.c)||0,yv=(r3&&r3.c)||0;
@@ -10758,13 +10759,13 @@ app.get("/api/v1/ops/brief",opsAuth,(req,res)=>{
 });
 app.get("/api/v1/ops/feed",opsAuth,(req,res)=>{
   const now=Date.now(),t0=new Date().setHours(0,0,0,0),t1=t0+86400000;
-  db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at IS NOT NULL AND a.due_at<? ORDER BY a.due_at ASC LIMIT 10",["PENDING",now],(e1,ov)=>{
+  db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at IS NOT NULL AND a.due_at<? AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) ORDER BY p.score DESC, a.due_at ASC LIMIT 10",["PENDING",now],(e1,ov)=>{
     if(e1)ov=[];
     db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at>=? AND a.due_at<? ORDER BY a.due_at ASC LIMIT 15",["PENDING",t0,t1],(e2,td)=>{
       if(e2)td=[];
       db.all("SELECT * FROM comm_ops_events WHERE delivered=0 ORDER BY triggered_at DESC LIMIT 5",[],( e3,ev)=>{
         if(e3)ev=[];
-        db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.force_feed=1 AND a.due_at>=? ORDER BY a.logged_at DESC LIMIT 10",["PENDING",now],(e4,mf)=>{
+        db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.force_feed=1 AND a.due_at>=? AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) ORDER BY a.logged_at DESC LIMIT 10",["PENDING",now],(e4,mf)=>{
           if(e4)mf=[];
           var ovIds=new Set((ov||[]).map(function(a){return a.prospect_id;}));
           mf=(mf||[]).filter(function(a){return !ovIds.has(a.prospect_id);});
@@ -10797,9 +10798,11 @@ app.post("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
   if(!pid)return res.status(400).json({status:"ERROR",error:"Invalid prospect_id"});
   db.get("SELECT id FROM comm_actions WHERE prospect_id=? AND status='PENDING' ORDER BY due_at ASC LIMIT 1",[pid],(err,row)=>{
     if(err||!row)return res.status(404).json({status:"NOT_FOUND",error:"No pending action for prospect"});
-    db.run("UPDATE comm_actions SET force_feed=1 WHERE id=?",[row.id],(e)=>{
-      if(e)return res.status(500).json({status:"ERROR",error:e.message});
-      res.json({status:"OK",prospect_id:pid,action_id:row.id});
+    db.run("UPDATE comm_prospects SET snoozed_until=NULL WHERE id=?",[pid],function(){
+      db.run("UPDATE comm_actions SET force_feed=1 WHERE id=?",[row.id],(e)=>{
+        if(e)return res.status(500).json({status:"ERROR",error:e.message});
+        res.json({status:"OK",prospect_id:pid,action_id:row.id});
+      });
     });
   });
 });
@@ -10821,19 +10824,40 @@ app.delete("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
     res.json({status:"OK",prospect_id:pid});
   });
 });
+app.post("/api/v1/ops/prospects/:prospect_id/snooze",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.prospect_id),dur=(req.body&&req.body.duration)||"7d",now=new Date();
+  var until;
+  if(dur==="forever")until="2099-12-31T23:59:59Z";
+  else{
+    var days=dur==="3d"?3:dur==="7d"?7:30;
+    var d=new Date(now.getTime()+days*86400000);
+    until=d.toISOString();
+  }
+  db.run("UPDATE comm_prospects SET snoozed_until=? WHERE id=?",[until,pid],(e)=>{
+    if(e)return res.status(500).json({status:"ERROR",error:e.message});
+    res.json({status:"OK",prospect_id:pid,snoozed_until:until});
+  });
+});
+app.post("/api/v1/ops/prospects/:prospect_id/unsnooze",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.prospect_id);
+  db.run("UPDATE comm_prospects SET snoozed_until=NULL WHERE id=?",[pid],(e)=>{
+    if(e)return res.status(500).json({status:"ERROR",error:e.message});
+    res.json({status:"OK",prospect_id:pid});
+  });
+});
 app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{
   const now=Date.now();
   db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 100",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null};});
+    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null};});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
 app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
   const now=Date.now();
-  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed, p.prospect_type, p.whatsapp_number, p.latest_wa_context, p.wa_reply_override FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
+  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed, p.prospect_type, p.whatsapp_number, p.latest_wa_context, p.wa_reply_override FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null};});var DAY=86400000;var WA_STATUSES=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED"];var q=all.filter(function(p){return p.forceFeed===1||(p.prospectType==="WHATSAPP"&&WA_STATUSES.indexOf(p.status)>=0)||!p.nextDue||p.nextDue<=(now+DAY);});
+    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null};});var DAY=86400000;var WA_STATUSES=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED"];var q=all.filter(function(p){return p.forceFeed===1||(p.prospectType==="WHATSAPP"&&WA_STATUSES.indexOf(p.status)>=0)||!p.nextDue||p.nextDue<=(now+DAY);});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
@@ -10859,7 +10883,7 @@ app.post("/api/v1/ops/prospects",opsAuth,(req,res)=>{
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
     if(this.changes===0)return res.json({status:"DUPLICATE"});
     const lid=this.lastID;
-    db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[lid,initAction,"PENDING",isWA?now-1000:now,now],function(){});
+    db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[lid,initAction,"PENDING",isWA?now-86400000:now,now],function(){});
     res.json({status:"OK",timestamp:now,data:{id:lid,name:b.name}});
   });
 });
