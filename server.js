@@ -7282,6 +7282,16 @@ setTimeout(() => {
     try {
       const _brainRegime = regimeEngine.read();
       if (!_brainRegime || _brainRegime.compositeScore === null) return;
+      // D27.1 RELOCATED: cyclesSinceChange increment (was orphaned in /brain-auto)
+      // Canonical authority: MEMORY.lastSnapshot?.regime (ownership verified 2026-05-30)
+      if (MEMORY.lastSnapshot && _brainRegime.regime !== MEMORY.lastSnapshot.regime) {
+        MEMORY.lastRegimeChangeTs = Date.now();
+        MEMORY.cyclesSinceChange = 0;
+      } else if (MEMORY.lastSnapshot) {
+        MEMORY.cyclesSinceChange = (MEMORY.cyclesSinceChange || 0) + 1;
+      }
+      saveMemory(MEMORY);
+      // END D27.1 RELOCATED
       const _brainPayload = {
         compositeScore:    _brainRegime.compositeScore,
         regime:            _brainRegime.regime,
@@ -10189,8 +10199,8 @@ app.get("/health", (req, res) => {
 		const marketQuality = confidence >= 70 ? "STRONG" : confidence >= 50 ? "MODERATE" : "WEAK";
 		const sectorAllocation = getDynamicSectorAllocation(regime, signals, intelligence);
 		// ── END SESSION 20C P2 ──
-		// D27.1 regime tracking
-		if (regime !== MEMORY.lastSnapshot?.regime) { MEMORY.lastRegimeChangeTs = Date.now(); MEMORY.cyclesSinceChange = 0; } else { MEMORY.cyclesSinceChange += 1; }
+                // D27.1 NEUTRALIZED 2026-05-30: increment/reset relocated to runScheduledBrain()
+                // cyclesSinceChange is now owned by the 60s brain scheduler
 		// v9 Sprint 1 fix: compute durability here where cyclesSinceChange is live
 		const _durabilityResult = (() => { try { return computeRegimeDurability(MEMORY, _rd2.moduleScores); } catch(e) { return { durabilityScore: 0.15, durabilityClass: 'EMERGING' }; } })();
 		MEMORY._lastDurability = _durabilityResult;
