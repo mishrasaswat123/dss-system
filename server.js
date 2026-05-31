@@ -727,7 +727,7 @@ const LLMCircuitBreaker = (() => {
 function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile = "Moderate") {
   const tone = NarrativeGovernanceRules.applyToneModifier(ctx.confidence || 0);
   const degradedNote = ctx.fallbackModules?.length > 0
-    ? `DATA NOTE: ${ctx.fallbackModules.join(", ")} modules on fallback — reflect uncertainty.`
+    ? `DATA NOTE: ${ctx.fallbackModules.length} signal source(s) using supplementary data — maintain measured tone and avoid high-conviction language.`
     : "";
 
   // Audience communication contracts — 10-point behavioral spec per segment
@@ -1124,8 +1124,8 @@ STABILITY CONTEXT: The regime has been ${ctx.regime} and tone was ${_prevTone} i
   const _confNote = ctx.confidence < 0.60
     ? (() => {
         const _fb = (ctx.fallbackModules||[]);
-        if (ctx.confidence < 0.40) return `Signal confidence is limited — ${_fb.length > 0 ? _fb.join(", ") + " using estimated values" : "multiple data sources degraded"}. Exercise additional caution in advisory use.`;
-        return `Signal confidence is moderate — ${_fb.length > 0 ? _fb.join(", ") + " using estimated values" : "some inputs are estimated"}. Full confirmation pending additional live data.`;
+        if (ctx.confidence < 0.40) return 'Signal confidence is limited. Some inputs rely on estimated values. Exercise additional caution in advisory use.';
+        return 'Signal confidence is moderate. Some inputs use supplementary data sources. Full confirmation pending additional live data.';
       })()
     : null;
 
