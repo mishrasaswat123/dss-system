@@ -561,6 +561,37 @@ const WA_RECOMMENDED_STATUS={NO_RESPONSE:"CONVERSATION_ACTIVE",WILL_REVIEW:"CONV
 const WA_LIFECYCLE=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED","CLOSED"];
 const WA_ACTION_MAP={CONVERSATION_ACTIVE:"WA_CONVERSATION",DEMO_REQUESTED:"WA_DEMO_REQUESTED",DEMO_SCHEDULED:"DEMO_SET",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
 const WA_ADJACENT={WHATSAPP_NEW:["CONVERSATION_ACTIVE","CLOSED"],CONVERSATION_ACTIVE:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
+const LI_TEMPLATES={
+  NO_RESPONSE:"Hi [CONTACT_NAME] — just following up on my earlier message in case it got buried. Happy to give you more context if useful, or if timing isn't right, no pressure at all.",
+  WILL_REVIEW:"Hi [CONTACT_NAME] — no rush at all. Whenever you get a chance, would value your honest read on whether it addresses a real advisory workflow gap.",
+  WANTS_CLARIFICATION:"Hi [CONTACT_NAME] — happy to clarify. The platform isn't a stock recommendation engine — it structures macro regime context to help advisors form a defensible market posture before client conversations. Worth a quick walkthrough if that's easier than explaining over text?",
+  INTERESTED:"Hi [CONTACT_NAME] — glad it resonates. Would value your practitioner reaction in more depth — worth a 20-minute conversation to walk through how it handles different client risk profiles?",
+  WANTS_WALKTHROUGH:"Hi [CONTACT_NAME] — absolutely. I'll keep it focused — 20 minutes, practitioner-oriented, your honest reactions throughout. What does your schedule look like this week?",
+  FEEDBACK_PROVIDED:"Hi [CONTACT_NAME] — really appreciate that. Practitioner perspective at this stage is exactly what I need. Would it be worth a proper conversation to dig into that further?",
+  NOT_RELEVANT:"Hi [CONTACT_NAME] — completely understood, and appreciate the honest feedback. That's useful context. If anything changes or it becomes relevant down the line, do keep me in mind."
+};
+const LI_LIFECYCLE=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED","CLOSED"];
+const LI_ACTION_MAP={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",DEMO_REQUESTED:"INTERESTED",DEMO_SCHEDULED:"DEMO_SET",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
+const LI_ADJACENT={SOURCED:["CONNECTION_SENT","CLOSED"],CONNECTION_SENT:["ACCEPTED","CLOSED"],ACCEPTED:["MSG1_SENT","CLOSED"],MSG1_SENT:["MSG2_SENT","DEMO_REQUESTED","CLOSED"],MSG2_SENT:["MSG3_SENT","DEMO_REQUESTED","CLOSED"],MSG3_SENT:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
+const LI_RECOMMENDED_STATUS={NO_RESPONSE:null,WILL_REVIEW:null,WANTS_CLARIFICATION:null,FEEDBACK_PROVIDED:null,INTERESTED:"DEMO_REQUESTED",WANTS_WALKTHROUGH:"DEMO_REQUESTED",NOT_RELEVANT:"CLOSED"};
+const CLASSIFICATION_LABELS={NO_RESPONSE:"No Response",WILL_REVIEW:"Will Review",WANTS_CLARIFICATION:"Wants Clarification",INTERESTED:"Interested",WANTS_WALKTHROUGH:"Wants Walkthrough",FEEDBACK_PROVIDED:"Feedback Provided",NOT_RELEVANT:"Not Relevant"};
+function classifyContext(t){if(!t||!t.trim())return"NO_RESPONSE";var s=t.toLowerCase();if(/not for me|retail only|not applicable|no thanks/.test(s))return"NOT_RELEVANT";if(/show me|walk me|next week|happy to|call|meet/.test(s))return"WANTS_WALKTHROUGH";if(/interesting|looks good|makes sense|relevant|useful/.test(s))return"INTERESTED";if(/feels|missing|unrealistic|would use|gap|problem/.test(s))return"FEEDBACK_PROVIDED";if(/how does|what is|explain|differ|understand|not sure/.test(s))return"WANTS_CLARIFICATION";if(/will review|weekend|later|check it out|look at it/.test(s))return"WILL_REVIEW";return"NO_RESPONSE";}
+function getReplyText(p,cls){if(p.replyOverride)return p.replyOverride;
+var name=p.name;
+if(p.prospectType==="WHATSAPP"){var tpl=p.status==="WHATSAPP_NEW"?WA_OPENING_CANONICAL:(WA_TEMPLATES[cls]||WA_TEMPLATES.NO_RESPONSE);return tpl.replace(/\[CONTACT_NAME\]/g,name);}
+// LinkedIn: use stage-specific template when no context
+var hasCtx=p.latestContext&&p.latestContext.trim();
+if(!hasCtx&&p.nextAction){
+  var a=AE[p.nextAction];if(a&&a.cp&&a.msg){var stageMsg=a.msg(p.role||'');if(stageMsg)return stageMsg;}
+}
+var tpl=LI_TEMPLATES[cls]||LI_TEMPLATES.NO_RESPONSE;
+return tpl.replace(/\[CONTACT_NAME\]/g,name);}
+function getClassification(p){try{var s=localStorage.getItem("ctx_cls_"+p.id);if(s)return s;}catch(e){}return classifyContext(p.latestContext||p.latestWaContext);}
+function setClassification(pid,cls){try{localStorage.setItem("ctx_cls_"+pid,cls);}catch(e){}}
+function getRecommendedStatus(p,cls){if(p.prospectType==="WHATSAPP")return WA_RECOMMENDED_STATUS[cls]||"CONVERSATION_ACTIVE";var rec=LI_RECOMMENDED_STATUS[cls];if(rec)return rec;var adj=LI_ADJACENT[p.status]||[];return adj.length?adj[0]:null;}
+function getAdjacent(p){if(p.prospectType==="WHATSAPP")return WA_ADJACENT[p.status]||[];return LI_ADJACENT[p.status]||[];}
+function getActionMap(p){if(p.prospectType==="WHATSAPP")return WA_ACTION_MAP;return LI_ACTION_MAP;}
+function getLifecycle(p){if(p.prospectType==="WHATSAPP")return WA_LIFECYCLE;return LI_LIFECYCLE;}
 function classifyWaContext(t){if(!t||!t.trim())return"NO_RESPONSE";var s=t.toLowerCase();if(/not for me|retail only|not applicable|no thanks/.test(s))return"NOT_RELEVANT";if(/show me|walk me|next week|happy to|call|meet/.test(s))return"WANTS_WALKTHROUGH";if(/interesting|looks good|makes sense|relevant|useful/.test(s))return"INTERESTED";if(/feels|missing|unrealistic|would use|gap|problem/.test(s))return"FEEDBACK_PROVIDED";if(/how does|what is|explain|differ|understand|not sure/.test(s))return"WANTS_CLARIFICATION";if(/will review|weekend|later|check it out|look at it/.test(s))return"WILL_REVIEW";return"NO_RESPONSE";}
 function waReplyText(p,cls){if(p.waReplyOverride)return p.waReplyOverride;var tpl=p.status==="WHATSAPP_NEW"?WA_OPENING_CANONICAL:(WA_TEMPLATES[cls]||WA_TEMPLATES.NO_RESPONSE);return tpl.replace(/\[CONTACT_NAME\]/g,p.name);}
 function getWaClassification(p){try{var s=localStorage.getItem("wa_cls_"+p.id);if(s)return s;}catch(e){}return classifyWaContext(p.latestWaContext);}
@@ -702,10 +733,23 @@ function actOnManual(){
     localStorage.setItem('advisiq_acted',JSON.stringify(acted));
     localStorage.setItem('advisiq_parked',JSON.stringify(parked));
   }catch(e){}
-  // Clear force_feed for manual items
-  ids.forEach(function(pid){
-    fx('/api/v1/ops/send-to-feed/'+pid,{method:'DELETE'}).catch(function(){});
-  });
+  // Keep force_feed=1 so manual items remain visible in Queue
+  loadFeed();
+  go('queue');
+}
+
+function actOnToday(){
+  var ids=(window._feedToday||[]).map(function(i){return i.prospect_id;}).filter(Boolean);
+  if(!ids.length){go('queue');return;}
+  try{
+    var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]');
+    var parked=JSON.parse(localStorage.getItem('advisiq_parked')||'[]');
+    ids.forEach(function(id){
+      var n=Number(id);if(isNaN(n))return;
+      if(acted.indexOf(n)<0)acted.push(n);
+    });
+    localStorage.setItem('advisiq_acted',JSON.stringify(acted));
+  }catch(e){}
   loadFeed();
   go('queue');
 }
@@ -730,19 +774,23 @@ function renderFeed(brief,feed,pipeline){
     var ov=_allOv.filter(function(i){return !i.prospect_id||_acted.indexOf(i.prospect_id)<0;});
   }catch(e){var ov=_allOv;}
   window._feedOverdue=_allOv;
+  window._feedToday=(feed.data&&feed.data.today)||[];
   window._feedManual=(feed.data&&feed.data.manual)||[];
   // Filter Today: hide prospects already shown in Overdue (by id or name)
   var _ovPids=_allOv.map(function(o){return o.prospect_id;}).filter(Boolean);
   var _ovNames=_allOv.map(function(o){return o.prospect;}).filter(Boolean);
+  var _actedTd=[];try{_actedTd=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);}catch(e){}
   var td=(fd.today||[]).filter(function(i){
     if(i.prospect_id&&_ovPids.indexOf(i.prospect_id)>=0)return false;
     if(i.prospect&&_ovNames.indexOf(i.prospect)>=0)return false;
+    if(i.prospect_id&&_actedTd.indexOf(Number(i.prospect_id))>=0)return false;
     return true;
   }); // store full list for actOnOverdue()
   if(ov.length){
     html+='<div class="sec">⚡ Overdue <span class="sec-ct">'+ov.length+'</span></div>';
     html+='<div style="margin:4px 10px 0;background:var(--rdb);border:1px solid #5a1020;border-radius:10px;overflow:hidden">';
-    ov.forEach(function(item){var hrs=Math.floor((item.overdueMs||0)/3600000);html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:2px">'+item.type+' · '+hrs+'h overdue</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--rd)">⚠</div></div>';});
+    ov.forEach(function(item){var hrs=Math.floor((item.overdueMs||0)/3600000);var _aLbl2={CONNECTION_READY:'Send Connection Request',ACCEPTED_CHECK:'Check Acceptance',MSG1_SEND:'Send First DM',MSG2_FOLLOW:'Send Follow-up',MSG3_FINAL:'Send Final Nudge',DEMO_SCHEDULE:'Schedule Demo',BETA_EVALUATE:'Send Beta Invite',WA_OPENING:'Send Opening Message',WA_FOLLOW:'Send Follow-up'};
+html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--rd);margin-top:2px">'+(_aLbl2[item.type]||item.type)+' · '+hrs+'h overdue</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--rd)">⚠</div></div>';});
     html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" data-action="act-overdue" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+ov.length+' Item'+(ov.length!==1?'s':'')+' in Queue</button></div></div>';
   }
   var td_filtered=td.filter(function(i){return !!i.prospect;});
@@ -750,8 +798,9 @@ function renderFeed(brief,feed,pipeline){
     var td=td_filtered;
     html+='<div class="sec">Today <span class="sec-ct">'+td.length+'</span></div>';
     html+='<div style="margin:4px 10px 0;background:var(--s2);border:1px solid var(--b2);border-radius:10px;overflow:hidden">';
-    td.forEach(function(item){if(item.prospect)html+='<div style="padding:9px 14px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+item.prospect+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">'+item.type+'</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--ac)">today</div></div>';});
-    html+='<div style="padding:10px 14px"><button class="btn btn-copy btn-full" onclick="go(&apos;queue&apos;)" style="min-height:46px">→ Execute in Queue</button></div></div>';
+    td.forEach(function(item){if(item.prospect)var _actLabel={CONNECTION_READY:'Send Connection Request',ACCEPTED_CHECK:'Check Acceptance',MSG1_SEND:'Send First DM',MSG2_FOLLOW:'Send Follow-up',MSG3_FINAL:'Send Final Nudge',DEMO_SCHEDULE:'Schedule Demo',BETA_EVALUATE:'Send Beta Invite',WA_OPENING:'Send Opening Message',WA_FOLLOW:'Send Follow-up'};
+html+='<div style="padding:9px 14px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+item.prospect+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">'+(_actLabel[item.type]||item.type)+'</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--ac)">today</div></div>';});
+    html+='<div style="padding:10px 14px"><button class="btn btn-copy btn-full" onclick="actOnToday()" style="min-height:46px">→ Act on Today Items</button></div></div>';
   }
   if(ev.length){html+='<div class="sec">Events <span class="sec-ct">'+ev.length+'</span></div>';ev.forEach(function(e){html+='<div class="card cohort"><div class="card-top"><div class="card-info"><div class="card-name">'+e.title+'</div><div class="card-sub">'+e.body+'</div></div></div></div>';});}
   var _fm=window._feedManual||[];
@@ -759,7 +808,7 @@ function renderFeed(brief,feed,pipeline){
   if(_fm.length){
     html+='<div class="sec">📌 Manual <span class="sec-ct">'+_fm.length+'</span></div>';
     html+='<div style="margin:4px 10px 0;background:var(--amb);border:1px solid #604008;border-radius:10px;overflow:hidden">';
-    _fm.forEach(function(item){html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--am);margin-top:2px">'+item.type+' · founder-prioritized</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--am)">📌</div></div>';
+    _fm.forEach(function(item){html+='<div style="padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.06);display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:13px;font-weight:600;color:var(--tx)">'+(item.prospect||item.type)+'</div><div style="font-family:var(--mono);font-size:10px;color:var(--am);margin-top:2px">'+({CONNECTION_READY:'Send Connection Request',ACCEPTED_CHECK:'Check Acceptance',MSG1_SEND:'Send First DM',MSG2_FOLLOW:'Send Follow-up',MSG3_FINAL:'Send Final Nudge',DEMO_SCHEDULE:'Schedule Demo',BETA_EVALUATE:'Send Beta Invite',WA_OPENING:'Send Opening Message',WA_FOLLOW:'Send Follow-up'}[item.type]||item.type)+' · founder-prioritized</div></div><div style="font-family:var(--mono);font-size:9px;color:var(--am)">📌</div></div>';
     });
     html+='<div style="padding:10px 14px"><button class="btn btn-both btn-full" onclick="actOnManual()" style="min-height:46px;font-size:14px;cursor:pointer">→ Act on '+_fm.length+' Manual Item'+(_fm.length!==1?'s':'')+' in Queue</button></div></div>';
   }
@@ -783,12 +832,12 @@ function loadQueue(){
   fx('/api/v1/ops/prospects/queue').then(function(pq){
     renderQueue(pq,null);
     // Badge = acted items not yet parked
-    try{
-      var _a=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);
-      var _pk=JSON.parse(localStorage.getItem('advisiq_parked')||'[]').map(Number);
-      var _ct=_a.filter(function(x){return _pk.indexOf(x)<0;}).length;
-    }catch(e){var _ct=0;}
-    setBadge('b-queue',_ct);
+    var _qrendered=(pq&&pq.data&&pq.data.queue)||[];
+    var _now2=Date.now();
+    var _acted2=[];
+    try{_acted2=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);}catch(e){}
+    var _qct=_qrendered.filter(function(p){return _acted2.indexOf(Number(p.id))>=0&&(!p.snoozedUntil||new Date(p.snoozedUntil)<=_now2);}).length;
+    setBadge('b-queue',_qct);
   }).catch(function(){document.getElementById('pane-queue').innerHTML='<div class="empty"><div class="empty-ico">→</div><div class="empty-h">Queue empty</div><div class="empty-s">Source prospects via + tab.</div></div>';});
 }
 
@@ -810,13 +859,14 @@ function renderQueue(pq,_unused){
   }
   window._pmap=window._pmap||{};
   window._waProspects={};
-  // Track WA prospect IDs so Feed MANUAL can exclude them
+  window._allProspects={};
   var _waQIds=[];
 
   queue.forEach(function(p){
     var a=p.nextAction?ra(p.nextAction,p.role):null;
     window._pmap[p.id]={msg:a&&a.cp?a.msg:null,name:p.name,liUrl:p.linkedin_url||null,status:p.status,cp:a?a.cp:false,nx:a?a.nx:null};
     if(p.prospectType==='WHATSAPP'){window._waProspects[p.id]=p;_waQIds.push(Number(p.id));}
+    window._allProspects[p.id]=p;
   });
   var grouped={};
   queue.forEach(function(p){
@@ -824,11 +874,101 @@ function renderQueue(pq,_unused){
     var a=p.nextAction?ra(p.nextAction,p.role):null;var g=a?a.d:sl(p.status);if(!grouped[g])grouped[g]=[];grouped[g].push(p);
   });
   var html='';
-  if(grouped['__WA__']&&grouped['__WA__'].length){html+='<div class="sec">WhatsApp <span class="sec-ct">'+grouped['__WA__'].length+'</span></div>';grouped['__WA__'].forEach(function(p){html+=waProspectCard(p);});}
-  Object.keys(grouped).forEach(function(stage){if(stage==='__WA__')return;var ps=grouped[stage];html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';ps.forEach(function(p){html+=prospectCard({id:p.id,name:p.name,stage:p.status,liUrl:p.linkedin_url,note:p.personalisationNote,isOverdue:false,at:p.nextAction,role:p.role});});});
+  if(grouped['__WA__']&&grouped['__WA__'].length){html+='<div class="sec">WhatsApp <span class="sec-ct">'+grouped['__WA__'].length+'</span></div>';grouped['__WA__'].forEach(function(p){html+=unifiedProspectCard(p);});}
+  Object.keys(grouped).forEach(function(stage){if(stage==='__WA__')return;var ps=grouped[stage];html+='<div class="sec">'+stage+' <span class="sec-ct">'+ps.length+'</span></div>';ps.forEach(function(p){html+=unifiedProspectCard(p);});});
   el.innerHTML=html;
 }
 
+function unifiedProspectCard(p){
+  var isWA=p.prospectType==="WHATSAPP";
+  var cls=getClassification(p);
+  var recStatus=getRecommendedStatus(p,cls);
+  var reply=getReplyText(p,cls);
+  var hasOverride=!!p.replyOverride;
+  var adjacent=getAdjacent(p);
+  var ctxVal=(p.latestContext||p.latestWaContext||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+  var rp=reply.length>140?reply.substring(0,140)+"...":reply;
+  var statusOpts=adjacent.map(function(s){return'<option value="'+s+'"'+(s===recStatus?' selected':'')+'>'+(STAGE_LABEL[s]||s)+'</option>';}).join('');
+  if(!statusOpts){var lifecycle=p.prospectType==="WHATSAPP"?WA_LIFECYCLE:LI_LIFECYCLE;statusOpts=lifecycle.map(function(s){return'<option value="'+s+'"'+(s===recStatus?' selected':'')+'>'+(STAGE_LABEL[s]||s)+'</option>';}).join('');}
+  var clsOpts=Object.keys(CLASSIFICATION_LABELS).map(function(k){return'<option value="'+k+'"'+(k===cls?' selected':'')+'>'+CLASSIFICATION_LABELS[k]+'</option>';}).join('');
+  var badge=isWA?'<div style="font-family:var(--mono);font-size:9px;background:#0a2010;color:#18c97a;border:1px solid #0a4020;border-radius:4px;padding:1px 5px">WA</div>':'<div style="font-family:var(--mono);font-size:9px;background:#001030;color:#4a9eff;border:1px solid #002060;border-radius:4px;padding:1px 5px">LI</div>';
+  var execBtn=isWA
+    ?'<button class="btn btn-both btn-full" onclick="openWa('+p.id+')">Open WhatsApp</button>'
+    :'<button class="btn btn-both btn-full" onclick="liCopyOpen('+p.id+')">\u{1F4CB} Copy + Open \u2197</button>';
+  var h='<div class="card" id="qc-'+p.id+'">'
+    +'<div style="padding:10px 12px;display:flex;align-items:center;gap:8px">'
+    +'<div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div>'
+    +'<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px">'
+    +'<div style="font-size:13px;font-weight:600;color:var(--tx);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.name+'</div>'
+    +badge
+    +'<div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div>'
+    +'</div><div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||"Professional")+' · Score '+(p.score||2)+'</div></div></div>'
+    +'<div style="padding:0 12px 8px"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Latest Response</div>'
+    +'<textarea id="uctx-'+p.id+'" style="width:100%;background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--tx);resize:none;min-height:54px;box-sizing:border-box" placeholder="Paste latest response..." onblur="saveContext('+p.id+',this.value)">'+ctxVal+'</textarea></div>'
+    +'<div style="padding:0 12px 8px;display:flex;gap:8px">'
+    +'<div style="flex:1"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px">Classification</div>'
+    +'<select class="ff-sel" style="width:100%;font-size:11px;padding:6px 8px" onchange="onClsChange('+p.id+',this.value)">'+clsOpts+'</select></div>'
+    +'<div style="flex:1"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:3px">Next Status</div>'
+    +'<select class="ff-sel" id="ust-'+p.id+'" style="width:100%;font-size:11px;padding:6px 8px">'+statusOpts+'</select></div></div>'
+    +'<div style="padding:0 12px 8px"><div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px">Suggested Reply'+(hasOverride?' ✎ Edited':'')+'</div>'
+    +'<div id="urp-'+p.id+'" style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--t2);white-space:pre-wrap;word-break:break-word;max-height:80px;overflow:hidden">'+rp+'</div></div>'
+    +'<div class="actions">'
+    +execBtn
+    +'<button class="btn btn-note" onclick="editReply('+p.id+')">Edit Reply</button>'
+    +'<button class="btn btn-adv btn-full" onclick="updateProspectStatus('+p.id+')">Update Next Status</button>'
+    +'<button class="btn btn-snooze" onclick="prospectSnooze('+p.id+')">Snooze</button>'
+    +'</div></div>';
+  return h;
+}
+function saveContext(id,val){
+  fx('/api/v1/ops/prospects/'+id+'/context',{method:'PATCH',body:JSON.stringify({context:val||null})}).catch(function(){});
+  if(!localStorage.getItem('ctx_cls_'+id))updateCardCls(id,classifyContext(val));
+}
+function onClsChange(id,cls){setClassification(id,cls);updateCardCls(id,cls);}
+function updateCardCls(id,cls){
+  var p=window._allProspects&&window._allProspects[id];if(!p)return;
+  var rec=getRecommendedStatus(p,cls);
+  var st=document.getElementById('ust-'+id);if(st&&rec)st.value=rec;
+  var rp=document.getElementById('urp-'+id);
+  if(rp){var reply=getReplyText(p,cls);rp.textContent=reply.length>140?reply.substring(0,140)+'...':reply;}
+}
+function liCopyOpen(id){
+  var p=window._allProspects&&window._allProspects[id];if(!p)return;
+  var msg=getReplyText(p,getClassification(p));
+  if(p.linkedin_url)cp(msg,"Reply copied",p.linkedin_url);
+  else cpOnly(msg,"Reply copied");
+}
+function editReply(id){
+  var p=window._allProspects&&window._allProspects[id];if(!p)return;
+  var cur=getReplyText(p,getClassification(p));
+  var rp=document.getElementById('urp-'+id);if(!rp)return;
+  rp.style.maxHeight='none';
+  var ta=document.createElement('textarea');
+  ta.id='ued-'+id;ta.value=cur;
+  ta.style.cssText='width:100%;background:var(--s3);border:1px solid var(--ac);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--tx);resize:none;min-height:120px;box-sizing:border-box';
+  var br=document.createElement('div');br.style.cssText='display:flex;gap:6px;margin-top:6px';
+  br.innerHTML='<button class="btn btn-adv btn-full" onclick="confirmReply('+id+')">Confirm</button><button class="btn btn-snooze btn-full" onclick="loadQueue()">Cancel</button>';
+  rp.innerHTML='';rp.appendChild(ta);rp.appendChild(br);
+}
+function confirmReply(id){
+  var ta=document.getElementById('ued-'+id);if(!ta)return;
+  var val=ta.value.trim();
+  fx('/api/v1/ops/prospects/'+id+'/reply-override',{method:'PATCH',body:JSON.stringify({reply:val||null})}).then(function(d){
+    if(d.status==='OK'){if(window._allProspects&&window._allProspects[id])window._allProspects[id].replyOverride=val||null;toast('✎ Reply saved');loadQueue();}
+    else toast('Save failed');
+  }).catch(function(){toast('Network error');});
+}
+function updateProspectStatus(id){
+  var st=document.getElementById('ust-'+id);if(!st)return;
+  var sel=st.value;
+  var p=window._allProspects&&window._allProspects[id];if(!p)return;
+  var adj=getAdjacent(p);var amap=getActionMap(p);var act=amap[sel];
+  if(!act){toast("No transition available");return;}
+  if(adj.length&&adj.indexOf(sel)<0){if(!window.confirm("Move directly from "+(STAGE_LABEL[p.status]||p.status)+" to "+(STAGE_LABEL[sel]||sel)+"?"))return;}
+  advP(id,act);
+  try{localStorage.removeItem('ctx_cls_'+id);}catch(e){}
+  try{var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);acted=acted.filter(function(x){return x!==Number(id);});localStorage.setItem('advisiq_acted',JSON.stringify(acted));}catch(e){}
+}
 function waProspectCard(p){
   var cls=getWaClassification(p);
   var recStatus=WA_RECOMMENDED_STATUS[cls]||'CONVERSATION_ACTIVE';
@@ -934,6 +1074,53 @@ function prospectCard({id,name,stage,liUrl,note,isOverdue,at,role}){
 }
 
 function renderPipeline(data){
+  window._pipelineData=data;
+  var now=Date.now();
+  var allP=(data&&data.data&&data.data.queue)||[];
+  var f=window._pf=window._pf||{ch:"ALL",st:"ALL",tm:"ALL",sn:"ALL"};
+  // Counts for labels
+  var liCt=allP.filter(function(p){return (p.prospectType||"LINKEDIN")==="LINKEDIN";}).length;
+  var waCt=allP.filter(function(p){return p.prospectType==="WHATSAPP";}).length;
+  var snCt=allP.filter(function(p){return p.snoozedUntil&&new Date(p.snoozedUntil)>now;}).length;
+  var acCt=allP.length-snCt;
+  var stMap={};var _pSt=f.ch==="ALL"?allP:allP.filter(function(p){return (p.prospectType||"LINKEDIN")===f.ch;});_pSt.forEach(function(p){stMap[p.status]=(stMap[p.status]||0)+1;});
+  var tmCt={OV:0,T3:0,T7:0,T30:0,T30P:0};
+  allP.forEach(function(p){var d=p.nextDue;if(!d||d>now+2592000000)tmCt.T30P++;else if(d<now)tmCt.OV++;else if(d<now+259200000)tmCt.T3++;else if(d<now+604800000)tmCt.T7++;else tmCt.T30++;});
+  // Apply filters
+  var filtered=allP.filter(function(p){
+    if(f.ch!=="ALL"&&(p.prospectType||"LINKEDIN")!==f.ch)return false;
+    if(f.st!=="ALL"&&p.status!==f.st)return false;
+    if(f.sn==="ACTIVE"&&p.snoozedUntil&&new Date(p.snoozedUntil)>now)return false;
+    if(f.sn==="SNOOZED"&&(!p.snoozedUntil||new Date(p.snoozedUntil)<=now))return false;
+    if(f.tm!=="ALL"){var d=p.nextDue;
+      if(f.tm==="OV"&&!(d&&d<now))return false;
+      if(f.tm==="T3"&&!(d&&d>=now&&d<now+259200000))return false;
+      if(f.tm==="T7"&&!(d&&d>=now+259200000&&d<now+604800000))return false;
+      if(f.tm==="T30"&&!(d&&d>=now+604800000&&d<now+2592000000))return false;
+      if(f.tm==="T30P"&&!(!d||d>=now+2592000000))return false;
+    }return true;
+  });
+  var stOpts='<option value="ALL">All Statuses</option>';
+  var soKeys=Object.keys(stMap).sort(function(a,b){return STAGE_ORDER.indexOf(a)-STAGE_ORDER.indexOf(b);});
+  soKeys.forEach(function(s){stOpts+='<option value="'+s+'"'+(f.st===s?' selected':'')+'>'+(STAGE_LABEL[s]||s)+' ('+stMap[s]+')</option>';});
+  var sel=function(k,v,lbl){return '<option value="'+v+'"'+(f[k]===v?' selected':'')+'>'+lbl+'</option>';};
+  var filterBar='<div style="padding:8px 10px 4px;display:flex;gap:5px;flex-wrap:wrap">'
+    +'<select class="ff-sel" style="flex:1;min-width:70px;font-size:11px;padding:5px 6px" onchange="setPF(\'ch\',this.value)">'
+    +sel("ch","ALL","All Channels")+sel("ch","LINKEDIN","LinkedIn ("+liCt+")")+sel("ch","WHATSAPP","WhatsApp ("+waCt+")")
+    +'</select>'
+    +'<select class="ff-sel" style="flex:1;min-width:70px;font-size:11px;padding:5px 6px" onchange="setPF(\'st\',this.value)">'+stOpts+'</select>'
+    +'<select class="ff-sel" style="flex:1;min-width:70px;font-size:11px;padding:5px 6px" onchange="setPF(\'tm\',this.value)">'
+    +sel("tm","ALL","All Timings")+sel("tm","OV","Overdue ("+tmCt.OV+")")+sel("tm","T3","Next 3d ("+tmCt.T3+")")
+    +sel("tm","T7","Next 7d ("+tmCt.T7+")")+sel("tm","T30","Next 30d ("+tmCt.T30+")")+sel("tm","T30P","1m+ ("+tmCt.T30P+")")
+    +'</select>'
+    +'<select class="ff-sel" style="flex:1;min-width:70px;font-size:11px;padding:5px 6px" onchange="setPF(\'sn\',this.value)">'
+    +sel("sn","ALL","All ("+allP.length+")")+sel("sn","ACTIVE","Active ("+acCt+")")+sel("sn","SNOOZED","Snoozed ("+snCt+")")
+    +'</select>'
+    +(f.ch!=="ALL"||f.st!=="ALL"||f.tm!=="ALL"||f.sn!=="ALL"?'<button class="btn btn-snooze" style="font-size:11px;padding:5px 8px;min-height:32px" onclick="clearPF()">✕</button>':'')
+    +'</div>';
+  var data2={data:{queue:filtered}};
+  var _renderPipelineBody=function(data){
+
   var el=document.getElementById('pane-pipeline');
   var q=(data&&data.data&&data.data.queue)||[];
   if(!q.length){el.innerHTML='<div class="empty"><div class="empty-ico">◎</div><div class="empty-h">Pipeline empty</div><div class="empty-s">Add prospects via + tab.</div><div class="empty-action" onclick="go(&apos;add&apos;)">+ Add Prospect</div></div>';return;}
@@ -963,9 +1150,13 @@ function renderPipeline(data){
       html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+snoozeInfo+'<div class="actions">'+openBtn+feedBtn+'</div></div>';
     });
   });
-  el.innerHTML=html;
-}
+  el.innerHTML=filterBar+html;
 
+  };
+  _renderPipelineBody(data2);
+}
+function setPF(k,v){window._pf=window._pf||{ch:"ALL",st:"ALL",tm:"ALL",sn:"ALL"};window._pf[k]=v;if(window._pipelineData)renderPipeline(window._pipelineData);}
+function clearPF(){window._pf={ch:"ALL",st:"ALL",tm:"ALL",sn:"ALL"};if(window._pipelineData)renderPipeline(window._pipelineData);}
 function loadPipeline(){
   fx('/api/v1/ops/prospects/pipeline').then(function(data){
     renderPipeline(data);

@@ -10759,9 +10759,9 @@ app.get("/api/v1/ops/brief",opsAuth,(req,res)=>{
 });
 app.get("/api/v1/ops/feed",opsAuth,(req,res)=>{
   const now=Date.now(),t0=new Date().setHours(0,0,0,0),t1=t0+86400000;
-  db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at IS NOT NULL AND a.due_at<? AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) ORDER BY p.score DESC, a.due_at ASC LIMIT 10",["PENDING",now],(e1,ov)=>{
+  db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at IS NOT NULL AND a.due_at<? AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) AND p.name IS NOT NULL ORDER BY p.score DESC, a.due_at ASC LIMIT 10",["PENDING",now],(e1,ov)=>{
     if(e1)ov=[];
-    db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at>=? AND a.due_at<? ORDER BY a.due_at ASC LIMIT 15",["PENDING",t0,t1],(e2,td)=>{
+    db.all("SELECT a.*,p.name,p.role FROM comm_actions a LEFT JOIN comm_prospects p ON a.prospect_id=p.id WHERE a.status=? AND a.due_at>=? AND a.due_at<? AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) AND p.name IS NOT NULL ORDER BY a.due_at ASC LIMIT 15",["PENDING",t0,t1],(e2,td)=>{
       if(e2)td=[];
       db.all("SELECT * FROM comm_ops_events WHERE delivered=0 ORDER BY triggered_at DESC LIMIT 5",[],( e3,ev)=>{
         if(e3)ev=[];
@@ -10849,15 +10849,15 @@ app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{
   const now=Date.now();
   db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 100",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null};});
+    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null,latestContext:p.latest_context||p.latest_wa_context||null,replyOverride:p.reply_override||p.wa_reply_override||null};});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
 app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
   const now=Date.now();
-  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed, p.prospect_type, p.whatsapp_number, p.latest_wa_context, p.wa_reply_override FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
+  db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed, p.prospect_type, p.whatsapp_number, p.latest_wa_context, p.wa_reply_override, p.latest_context, p.reply_override FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') AND (p.snoozed_until IS NULL OR p.snoozed_until<=datetime('now')) ORDER BY p.score DESC, p.added_at ASC LIMIT 50",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null};});var DAY=86400000;var WA_STATUSES=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED"];var q=all.filter(function(p){return p.forceFeed===1||(p.prospectType==="WHATSAPP"&&WA_STATUSES.indexOf(p.status)>=0)||!p.nextDue||p.nextDue<=(now+DAY);});
+    var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null,latestContext:p.latest_context||p.latest_wa_context||null,replyOverride:p.reply_override||p.wa_reply_override||null};});var DAY=86400000;var WA_STATUSES=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED"];var q=all.filter(function(p){return p.forceFeed===1||(p.prospectType==="WHATSAPP"&&WA_STATUSES.indexOf(p.status)>=0)||!p.nextDue||p.nextDue<=(now+DAY);});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
