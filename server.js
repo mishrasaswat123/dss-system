@@ -5295,7 +5295,7 @@ function aclComputeAdvisoryPosture(marketState, portfolioState, convictionScore,
   let stressAwarenessNote = null;
   const _bearishConfirmed = ['RISK_OFF','STRONG_RISK_OFF'].includes(regime) && ['ESTABLISHED','MATURE'].includes(durabilityClass);
   if (_bearishConfirmed && riskProfile && ACL_STRESS_TABLE[riskProfile]) {
-    stressAwarenessNote = 'Historical analogue (not a projection): ' + ACL_STRESS_TABLE[riskProfile];
+    stressAwarenessNote = 'Historical reference only — not a projection: ' + ACL_STRESS_TABLE[riskProfile];
   }
 
   const _govDowngrades = [];
@@ -5452,7 +5452,7 @@ class RegimeEngine {
                       : compositeScoreFinal >= 30 ? "BEARISH"
                       : "STRONGLY BEARISH";
 
-    const actionBias = compositeScoreFinal >= 55 ? "Overweight equities; reduce cash"
+    const actionBias = compositeScoreFinal >= 55 ? "Increase equity allocation; reduce cash"
                      : compositeScoreFinal >= 45 ? "Balanced; await confirmation"
                      : "Tilt toward debt and gold; reduce equity";
 
