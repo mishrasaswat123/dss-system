@@ -1923,6 +1923,7 @@ let yahooResumeTimer = null;     // C3-STABILITY: auto-resume timer handle
 		if (!Array.isArray(MEMORY.alerts)) MEMORY.alerts = [];
 		if (!MEMORY.lastSnapshot) MEMORY.lastSnapshot = null;
 		if (MEMORY.cyclesSinceChange === undefined) MEMORY.cyclesSinceChange = 0;
+           if (MEMORY.lastScheduledRegime === undefined) MEMORY.lastScheduledRegime = null;
 		if (!MEMORY.lastRegimeChangeTs) MEMORY.lastRegimeChangeTs = null;
 
 		/* =========================
@@ -7289,15 +7290,20 @@ setTimeout(() => {
     try {
       const _brainRegime = regimeEngine.read();
       if (!_brainRegime || _brainRegime.compositeScore === null) return;
-      // D27.1 RELOCATED: cyclesSinceChange increment (was orphaned in /brain-auto)
-      // Canonical authority: MEMORY.lastSnapshot?.regime (ownership verified 2026-05-30)
-      if (MEMORY.lastSnapshot && _brainRegime.regime !== MEMORY.lastSnapshot.regime) {
-        MEMORY.lastRegimeChangeTs = Date.now();
-        MEMORY.cyclesSinceChange = 0;
-      } else if (MEMORY.lastSnapshot) {
-        MEMORY.cyclesSinceChange = (MEMORY.cyclesSinceChange || 0) + 1;
+      // D27.1 CORRECTED: cyclesSinceChange increment using dedicated scheduler-owned reference
+      // Canonical authority: MEMORY.lastScheduledRegime (owned exclusively by runScheduledBrain)
+      // lastSnapshot intentionally NOT used — owned by /brain-auto path
+      if (MEMORY.lastScheduledRegime !== undefined && MEMORY.lastScheduledRegime !== null) {
+        if (_brainRegime.regime !== MEMORY.lastScheduledRegime) {
+          MEMORY.lastRegimeChangeTs = Date.now();
+          MEMORY.cyclesSinceChange = 0;
+        } else {
+          MEMORY.cyclesSinceChange = (MEMORY.cyclesSinceChange || 0) + 1;
+        }
       }
+      MEMORY.lastScheduledRegime = _brainRegime.regime;
       saveMemory(MEMORY);
+      // END D27.1 CORRECTED
       // END D27.1 RELOCATED
       const _brainPayload = {
         compositeScore:    _brainRegime.compositeScore,
