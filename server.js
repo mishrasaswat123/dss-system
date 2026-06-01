@@ -168,6 +168,131 @@ const LLM_CONFIG = Object.freeze({
 });
 
 // Prompt version tracking
+
+// ═══════════════════════════════════════════════════════════════════════
+// ASSET SIGNAL ENGINE (ASE) v1.1
+// Authority: DSS_ASE_DESIGN_v1.1 (FINAL)
+// Phase-1 bridge: Gold derived from macro proxies until score:gold exists
+// ═══════════════════════════════════════════════════════════════════════
+
+const REGIME_ASSET_ALIGNMENT = Object.freeze({
+  STRONG_RISK_ON:  { equity: +1.0, debt: -0.5, gold: -0.3 },
+  RISK_ON:         { equity: +0.7, debt: -0.2, gold:  0.0 },
+  NEUTRAL:         { equity:  0.0, debt: +0.2, gold: +0.2 },
+  RISK_OFF:        { equity: -0.7, debt: +0.5, gold: +0.5 },
+  STRONG_RISK_OFF: { equity: -1.0, debt: +0.8, gold: +0.7 },
+});
+
+const GOLD_WEIGHTS = Object.freeze({ dxy: 0.40, realRate: 0.35, momentum: 0.25 });
+
+const ASE_DXY_TABLE = Object.freeze([
+  { max:  98, score: 80 }, { max: 101, score: 65 }, { max: 103, score: 50 },
+  { max: 106, score: 35 }, { max: Infinity, score: 20 },
+]);
+const ASE_REALRATE_TABLE = Object.freeze([
+  { max:  0, score: 80 }, { max:  1, score: 60 }, { max:  2, score: 45 },
+  { max:  3, score: 30 }, { max: Infinity, score: 15 },
+]);
+const ASE_MOMENTUM_TABLE = Object.freeze([
+  { min:  2.0, score: 80 }, { min:  0.5, score: 65 }, { min: -0.5, score: 50 },
+  { min: -2.0, score: 35 }, { min: -Infinity, score: 20 },
+]);
+
+function aseNormalise(moduleScore) {
+  return Math.max(-1.0, Math.min(1.0, ((moduleScore ?? 50) - 50) / 50));
+}
+
+function aseContrib(allocPct, sigNorm, regimeAlign) {
+  const base = (allocPct / 100) * regimeAlign;
+  return base + (base * sigNorm * 0.30);
+}
+
+function deriveEquitySignal(cache) {
+  const s = cache.get("score:equity");
+  if (!s || s.score == null) return { score: 50, confidence: 0.30, sourceOrigin: "fallback", fallbackActive: true, staleReason: "score:equity unavailable" };
+  return { score: s.score, confidence: s.confidence || 0.60, sourceOrigin: s.sourceOrigin || "equity-module", fallbackActive: s.fallbackActive || false, staleReason: s.staleReason || null };
+}
+
+function deriveDebtSignal(cache) {
+  const s = cache.get("score:debt");
+  if (!s || s.score == null) return { score: 50, confidence: 0.30, sourceOrigin: "fallback", fallbackActive: true, staleReason: "score:debt unavailable" };
+  return { score: s.score, confidence: s.confidence || 0.60, sourceOrigin: s.sourceOrigin || "debt-module", fallbackActive: s.fallbackActive || false, staleReason: s.staleReason || null };
+}
+
+function computeGoldMomentum(current, prior) {
+  if (!current || !prior) return 50;
+  const chg = ((current - prior) / prior) * 100;
+  for (const t of ASE_MOMENTUM_TABLE) { if (chg >= t.min) return t.score; }
+  return 20;
+}
+
+function deriveGoldSignal(cache) {
+  const glob   = cache.get("equity:global") || {};
+  const fred   = cache.get("macro:fred")    || {};
+  const bls    = cache.get("macro:bls")     || {};
+  const debtOv = (cache.get("nse:debt") || {}).overview || {};
+  const prior  = (cache.get("asset:signals") || {}).goldPriceHistory || null;
+  const dxy          = glob.dxy          !== undefined ? glob.dxy          : null;
+  const fedFundsRate = fred.fedFundsRate !== undefined ? fred.fedFundsRate : null;
+  const usCpi        = bls.usCoreCpi     !== undefined ? bls.usCoreCpi     : 3.0;
+  const goldPrice    = debtOv.gold       !== undefined ? debtOv.gold       : null;
+  let dxyScore = 50, dxyAvail = false;
+  if (dxy !== null) { dxyAvail = true; for (const t of ASE_DXY_TABLE) { if (dxy < t.max) { dxyScore = t.score; break; } } }
+  let realRateScore = 50, realRateAvail = false;
+  if (fedFundsRate !== null) { realRateAvail = true; const rr = fedFundsRate - usCpi; for (const t of ASE_REALRATE_TABLE) { if (rr < t.max) { realRateScore = t.score; break; } } }
+  const momentumScore = computeGoldMomentum(goldPrice, prior);
+  const momentumAvail = goldPrice !== null && prior !== null;
+  const goldScore = Math.round((dxyScore * GOLD_WEIGHTS.dxy) + (realRateScore * GOLD_WEIGHTS.realRate) + (momentumScore * GOLD_WEIGHTS.momentum));
+  const avail = [dxyAvail, realRateAvail, momentumAvail].filter(Boolean).length;
+  return {
+    score: Math.max(0, Math.min(100, goldScore)),
+    confidence: avail === 3 ? 0.85 : avail === 2 ? 0.65 : 0.40,
+    asePhase: "v1-bridge",
+    factors: {
+      dxy:      { score: dxyScore,      weight: GOLD_WEIGHTS.dxy,     available: dxyAvail,      input: dxy },
+      realRate: { score: realRateScore, weight: GOLD_WEIGHTS.realRate, available: realRateAvail, input: fedFundsRate !== null ? +(fedFundsRate - usCpi).toFixed(2) : null, phaseNote: "Phase-1: Fed Funds-CPI" },
+      momentum: { score: momentumScore, weight: GOLD_WEIGHTS.momentum, available: momentumAvail, input: goldPrice },
+    },
+    goldPriceForHistory: goldPrice,
+    sourceOrigin: avail === 3 ? "ase-live" : avail === 2 ? "ase-partial" : "ase-fallback",
+    fallbackActive: avail < 2,
+    staleReason: avail < 2 ? "Gold signal degraded: insufficient factors available" : null,
+    computedAt: Date.now(),
+  };
+}
+
+function refreshAssetSignals() {
+  try {
+    const equity   = deriveEquitySignal(DSSCache);
+    const debt     = deriveDebtSignal(DSSCache);
+    const gold     = deriveGoldSignal(DSSCache);
+    const existing = DSSCache.get("asset:signals") || {};
+    DSSCache.set("asset:signals", {
+      equity:   { ...equity,  refreshedAt: Date.now() },
+      debt:     { ...debt,    refreshedAt: Date.now() },
+      gold:     { ...gold,    refreshedAt: Date.now() },
+      goldPriceHistory: gold.goldPriceForHistory !== undefined ? gold.goldPriceForHistory : (existing.goldPriceHistory || null),
+      aseVersion: "1.1",
+      computedAt: Date.now(),
+    });
+    logger.info({ job: "ase:refresh", eScore: equity.score, dScore: debt.score, gScore: gold.score, gPhase: gold.asePhase }, "ASE refresh complete");
+  } catch(err) {
+    logger.warn({ job: "ase:refresh", err: err.message }, "ASE refresh failed");
+  }
+}
+
+function getAssetSignals(cache) {
+  const ase = cache.get("asset:signals");
+  if (!ase) return { equity: 50, debt: 50, gold: 50 };
+  const ageMs = Date.now() - (ase.computedAt || 0);
+  if (ageMs > 30 * 60 * 1000) {
+    logger.warn({ job: "pci:ase", ageMin: Math.round(ageMs / 60000) }, "asset:signals stale >30min — using neutral 50");
+    return { equity: 50, debt: 50, gold: 50 };
+  }
+  return { equity: ase.equity && ase.equity.score != null ? ase.equity.score : 50, debt: ase.debt && ase.debt.score != null ? ase.debt.score : 50, gold: ase.gold && ase.gold.score != null ? ase.gold.score : 50 };
+}
+// ── END ASE v1.1 ──
+
 const PROMPT_VERSION = "v1.0.0";
 
 // ══════════════════════════════════════════════════════════════════
@@ -7349,6 +7474,7 @@ setTimeout(() => {
         } catch(e) { return { convictionScore: null, convictionClass: null, convictionComponents: null, convictionTrajectory: null }; } })(),
       };
       DSSCache.set('brain:latest', _brainPayload);
+      refreshAssetSignals(); // ASE v1.1
       DSSCache.set('brain:ts', Date.now());
       logger.info({ job: 'brain-scheduled', score: _brainPayload.compositeScore, regime: _brainPayload.regime }, 'brain:latest updated');
     } catch(e) {
