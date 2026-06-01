@@ -161,9 +161,9 @@ const LLM_CONFIG = Object.freeze({
   groqKey:     process.env.GROQ_API_KEY  || "",
   groqUrl:     "https://api.groq.com/openai/v1/chat/completions",
   maxTokens:   400,
-  timeoutMs:   5000,
+  timeoutMs:   12000,
   maxRetries:  1,
-  maxRespChars:1200,
+  maxRespChars:2000,
   promptVersion: "v1.0.0",
 });
 
@@ -690,7 +690,7 @@ function validateMacroSynthesis(fredData, blsData) {
 // LLM circuit breaker
 const LLMCircuitBreaker = (() => {
   let failures = 0, lastFailure = null, open = false;
-  const THRESHOLD = 3, COOLDOWN_MS = 300000;
+  const THRESHOLD = 8, COOLDOWN_MS = 300000;
   return {
     recordFailure() {
       failures++; lastFailure = Date.now();
