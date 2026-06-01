@@ -710,6 +710,7 @@ const LLMCircuitBreaker = (() => {
     recordSuccess() { failures = 0; open = false; persistCBState(0, false); }, // A2
     isOpen() { return open; },
     getState() { return { open, failures, lastFailure }; },
+    reset() { open = false; failures = 0; lastFailure = null; persistCBState(0, false); logger.info("LLM CB manually reset"); },
     async restoreFromDB() { // A2: called on startup
       try {
         const s = await loadCBState();
@@ -753,14 +754,14 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
       tone: "Encouraging, honest, calm. Never alarmist. Never condescending.",
     },
     "HNI Investor": {
-      who: "High Net Worth Individual with financial literacy, managing significant personal wealth",
-      objective: "Regime-aware positioning advice with tax and concentration awareness",
-      language: "Semi-professional. Can use allocation terms (equity/debt/gold). Avoid deep quant jargon.",
-      forbidden: "Raw technical indicator values, quant terminology, derivative Greeks",
-      translate: "Selling pressure building not MACD bearish. Elevated nervousness not VIX 17.9.",
-      keyDrivers: "3 market dynamics relevant to portfolio allocation decisions.",
-      tacticalView: "Portfolio posture — equity tilt, cash level, defensive allocation. Wealth-aware language.",
-      tone: "Confident, sophisticated but accessible. Peer-to-peer advisory feel.",
+      who: "High Net Worth Individual managing significant personal wealth across multiple asset classes",
+      objective: "Wealth stewardship guidance — capital preservation, multi-year perspective, allocation discipline",
+      language: "Sophisticated but not institutional. Wealth management vocabulary. Multi-year horizon framing. Materially more sophisticated than retail.",
+      forbidden: "Retail simplifications, raw technical values, quant jargon, short-term trading language",
+      translate: "Cautious market conditions not RISK_OFF. Constructive conditions not RISK_ON. Changing market environment not regime transition. Portfolio concentration risk not mismatch.",
+      keyDrivers: "3 dynamics framed through a wealth preservation and opportunity cost lens. What does this mean for capital over 3-5 years?",
+      tacticalView: "Allocation stewardship posture — equity exposure calibration, defensive positioning, capital deployment discipline. Opportunity cost awareness.",
+      tone: "Measured, sophisticated, wealth-stewardship oriented. Conveys long-term perspective and allocation discipline.",
     },
     "Family Office Risk Brief": {
       who: "Family Office CIO or investment committee reviewing portfolio risk",
@@ -773,14 +774,14 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
       tone: "Sober, measured, accountable. Every sentence defensible in a committee meeting.",
     },
     "Private Banker Advisory": {
-      who: "Private Banker serving UHNW clients with multi-asset portfolios",
-      objective: "Institutional-grade narrative suitable for client advisory conversations",
-      language: "Goldman Sachs weekly note style. Precise, authoritative, narrative-grade.",
-      forbidden: "Retail framing, raw technical values, generic phrases like await confirmation",
-      translate: "Short-term trend has reversed not MACD sell. Elevated market risk premium not VIX 17.9. Monetary tightening cycle constraining multiples not Fed restrictive.",
-      keyDrivers: "3 macro and market dynamics at institutional communication level. Name the mechanism not just the indicator.",
-      tacticalView: "Risk-adjusted positioning with nuance. Opportunity vs risk framing. Sophisticated.",
-      tone: "Authoritative, measured, institutional. Conveys expertise and judgment.",
+      who: "Private Banker advising UHNW clients on multi-asset wealth portfolios",
+      objective: "Relationship-led advisory narrative — support the private banker in a client conversation about wealth stewardship",
+      language: "Wealth stewardship vocabulary. Relationship-aware. Preservation of long-term objectives. Client communication support quality.",
+      forbidden: "Retail framing, raw technical values, institutional jargon (risk-off, risk-on, regime transition), generic phrases",
+      translate: "Cautious market environment not RISK_OFF or defensive regime. Constructive conditions not RISK_ON. Changing market dynamics not regime transition.",
+      keyDrivers: "3 macro and market dynamics framed as client wealth implications. How does this affect their long-term objectives?",
+      tacticalView: "Wealth stewardship posture — capital protection rationale, measured deployment, long-term objective preservation. Client-conversation ready.",
+      tone: "Relationship-led, authoritative, measured. Appropriate for UHNW client advisory conversations. Conveys stewardship and expertise.",
     },
     "Advanced Investor Dashboard": {
       who: "Sophisticated self-directed investor who reads raw signals directly",
@@ -791,6 +792,16 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
       keyDrivers: "3 specific signal readings with values and directional implications. Name the tension if signals conflict.",
       tacticalView: "Tactical entry/exit posture based on regime + technical confluence. Specific.",
       tone: "Terse, precise, signal-first. Respect the reader's expertise.",
+    },
+    "Wealth Manager Synthesis": {
+      who: "Independent or private wealth manager preparing an advisor-ready market synthesis for client review",
+      objective: "Deliver an executive-summary-style briefing the wealth manager can act on and relay to clients",
+      language: "Advisor-ready synthesis. Clear portfolio implications. Actionable interpretation. Executive summary style.",
+      forbidden: "Raw technical values, institutional jargon (risk-off, risk-on, regime), retail simplifications",
+      translate: "Cautious market conditions not RISK_OFF or defensive regime. Constructive environment not RISK_ON. Changing conditions not regime transition.",
+      keyDrivers: "3 portfolio-relevant market dynamics. Frame as: what this means for client allocations.",
+      tacticalView: "Advisor action framing — what to review with clients, what to adjust, what to monitor. Portfolio implication forward.",
+      tone: "Briefing quality. Actionable, clear, advisor-professional. A document the WM can walk into a client meeting with.",
     },
     "Institutional Strategy Desk": {
       who: "Buy-side or sell-side strategist building market views for internal distribution",
@@ -836,19 +847,19 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
   // 15-combination audience x risk profile behavioral matrix
   const RISK_PROFILE_BY_AUDIENCE = {
     "IFA Advisory Pitch": {
-      Conservative: "Client is risk-averse. IFA must reassure — emphasise stability, SIP continuity, avoid any language suggesting volatility or loss. No aggressive deployment.",
-      Moderate:     "Client wants steady growth. IFA recommends staggered deployment, balanced equity-debt mix. Avoid extremes in either direction.",
-      Aggressive:   "Client wants growth. IFA can recommend overweight equity, tactical deployment on dips. Upside language appropriate if regime supports.",
+      Conservative: "Client is risk-averse. IFA must emphasise capital stability, SIP continuity, gradual adjustment only. Frame any reduction as protective, not reactive. No opportunity-seeking language. No tactical entry framing.",
+      Moderate:     "Client wants steady balanced growth. IFA recommends measured participation, phased adjustment, portfolio resilience. Avoid both excessive caution and excessive opportunity framing. Balance is the message.",
+      Aggressive:   "Client wants growth and is comfortable with risk. IFA can emphasise opportunity readiness, tactical positioning, watchlist preparation. Forward-looking deployment language where regime supports.",
     },
     "Retail Investor": {
-      Conservative: "Investor is nervous about losing money. Keep it simple and reassuring. SIP is safe. No dramatic language.",
-      Moderate:     "Investor wants their money to grow steadily. Stay invested message. Calm, encouraging.",
-      Aggressive:   "Investor wants maximum growth. Can discuss adding to equity, buying on dips. Enthusiastic but honest about risk.",
+      Conservative: "Investor is nervous about losses. Keep it simple, calm and reassuring. SIP continuity is safe. Emphasise stability and gradual adjustment only. No opportunity framing. No tactical language.",
+      Moderate:     "Investor wants steady growth. Stay invested, measured approach message. Balanced, calm, encouraging. Neither alarming nor overly optimistic.",
+      Aggressive:   "Investor wants growth and is willing to add. Can discuss accumulating on dips, increasing equity exposure where regime supports. Enthusiastic but honest about near-term conditions.",
     },
     "HNI Investor": {
-      Conservative: "HNI prioritises capital protection over returns. Recommend quality large-caps, sovereign bonds, gold allocation. Avoid concentrated bets.",
-      Moderate:     "HNI wants growth with protection. Balanced tilt — quality equity, some debt, tactical gold. Staggered deployment.",
-      Aggressive:   "HNI is comfortable with concentration and risk. Can discuss tactical themes, mid-cap exposure, sector tilts where regime supports.",
+      Conservative: "HNI is in capital preservation mode. Emphasise drawdown awareness, portfolio stability, wealth protection over returns. Long-term stewardship language. Avoid any opportunity-seeking or tactical entry framing.",
+      Moderate:     "HNI wants growth with discipline. Multi-year allocation perspective. Measured participation. Phased adjustment with allocation discipline. Balance preservation and participation.",
+      Aggressive:   "HNI is seeking deployment opportunities. Tactical flexibility, concentration awareness, opportunity cost of inaction. Forward-looking positioning with wealth stewardship anchor.",
     },
     "Family Office Risk Brief": {
       Conservative: "Committee is in capital preservation mode. Every recommendation must have downside protection rationale. Risk budget is tight.",
@@ -856,9 +867,9 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
       Aggressive:   "Committee is in growth deployment mode. Can discuss equity overweight, thematic exposure, tactical leverage where regime supports.",
     },
     "Private Banker Advisory": {
-      Conservative: "UHNW client wants wealth protection. Emphasise downside risk management, alternatives, capital preservation structures. Measured language.",
-      Moderate:     "UHNW client wants risk-adjusted growth. Balanced multi-asset approach. Institutional quality language throughout.",
-      Aggressive:   "UHNW client is seeking alpha. Can discuss concentrated equity, thematic bets, tactical deployment. Sophisticated upside framing.",
+      Conservative: "UHNW client is in wealth protection mode. Every statement must reinforce capital preservation, downside management, and long-term objective safety. Measured, relationship-led. Avoid any language that could alarm or suggest urgency.",
+      Moderate:     "UHNW client wants measured risk-adjusted growth. Balance stewardship with measured participation. Phased approach. Multi-asset resilience. Client-conversation appropriate throughout.",
+      Aggressive:   "UHNW client is seeking strategic deployment. Sophisticated opportunity framing with wealth stewardship anchor. Tactical positioning within long-term objective framework.",
     },
     "Advanced Investor Dashboard": {
       Conservative: "Sophisticated investor is in risk-off mode personally. Show signal conflicts. Flag downside risks explicitly. Technical precision.",
@@ -876,14 +887,14 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
       Aggressive:   "Retiree willing to take some risk for better returns. Can suggest modest equity tilt but always with capital safety as anchor.",
     },
     "Aggressive Growth Investor": {
-      Conservative: "Growth investor is temporarily cautious. Acknowledge the pullback, identify re-entry signals, maintain growth thesis but protect capital short-term.",
-      Moderate:     "Growth investor wants selective deployment. Quality growth names, staggered entry, watch for momentum confirmation.",
-      Aggressive:   "Growth investor is fully risk-on. Maximum equity deployment where regime supports. Name the opportunity directly. Conviction language.",
+      Conservative: "Growth investor is temporarily protecting capital. Acknowledge conditions, identify what to watch for re-entry, maintain growth thesis with short-term caution. Watchlist preparation language. Opportunity cost of over-protection.",
+      Moderate:     "Growth investor wants selective deployment. Tactical flexibility, phased entry, monitoring for momentum confirmation. Forward-looking positioning without excessive caution.",
+      Aggressive:   "Growth investor is fully in deployment mode. Opportunity readiness, conviction-driven positioning, tactical flexibility. Name what the regime supports directly. Energetic and forward-looking.",
     },
     "Wealth Manager Synthesis": {
-      Conservative: "Wealth manager's book is in defensive mode. Cross-asset tilt toward debt and gold. Equity underweight with quality bias.",
-      Moderate:     "Wealth manager running balanced book. Equity-debt-gold allocation with regime-aware tilts. Staggered rebalancing.",
-      Aggressive:   "Wealth manager is deploying aggressively. Equity overweight, reduce debt, tactical gold. Cross-asset momentum framing.",
+      Conservative: "Wealth manager's book is in defensive posture. Synthesis must support a capital protection conversation with clients. Emphasise stability, gradual adjustment, drawdown awareness. No opportunity framing.",
+      Moderate:     "Wealth manager running a balanced book. Synthesis supports measured rebalancing conversation. Portfolio resilience, phased adjustment, multi-asset balance. Neither defensive nor aggressive.",
+      Aggressive:   "Wealth manager is in deployment mode. Synthesis supports an opportunity conversation with clients. Forward positioning, tactical readiness, measured upside framing.",
     },
   };
   const _audienceRiskMap = RISK_PROFILE_BY_AUDIENCE[audience] || RISK_PROFILE_BY_AUDIENCE["IFA Advisory Pitch"];
@@ -894,6 +905,7 @@ function buildNarrativePrompt(ctx, audience = "IFA Advisory Pitch", riskProfile 
 MARKET STATE:
 - Score: ${ctx.compositeScore}/100 | Regime: ${ctx.regime} (${ctx.regimeLabel||ctx.regime}) | Confidence: ${Math.round((ctx.confidence||0)*100)}%
 - Action Bias: ${ctx.actionBias||"Balanced"} | Volatility: ${ctx.volatilityState||"unknown"}
+- POSTURE EXPLANATION REQUIREMENT: Do not just state the posture. Explain WHY it exists in audience-appropriate language. "Maintain" should become an explanation of why current positioning remains appropriate. "Prioritise Reduction" should explain why concentration relative to conditions warrants a phased reduction approach.
 - Signal Basis: ${ctx.reasoningChain||"insufficient data"}
 - Risk Flags: ${(ctx.riskFlags||[]).join(", ")||"none"}
 - Macro: ${[ctx.macroState?.repoRate!=null?"Repo "+ctx.macroState.repoRate+"%":null, ctx.macroState?.us10Y!=null?"US 10Y "+ctx.macroState.us10Y+"%":null, ctx.macroState?.dxy!=null?"DXY "+ctx.macroState.dxy:null, ctx.macroState?.crudeBrent!=null?"Brent $"+ctx.macroState.crudeBrent:null, ctx.macroState?.fedStance?"Fed "+ctx.macroState.fedStance:null, ctx.macroState?.yieldCurve?"Yield Curve "+ctx.macroState.yieldCurve:null].filter(Boolean).join(" | ")||"Macro data limited"}
@@ -917,6 +929,7 @@ GOVERNANCE (non-negotiable):
 - Do NOT infer data not provided above
 - Do NOT recommend specific stocks
 - Do NOT use forbidden language for this audience
+- JARGON RULE: Unless audience is Institutional Strategy Desk or Advanced Investor Dashboard, NEVER use: risk-off, risk-on, defensive regime, regime transition, RISK_OFF, RISK_ON. Use plain equivalents: cautious market conditions, constructive conditions, changing market conditions.
 
 Respond ONLY with valid JSON — no markdown, no preamble:
 {
@@ -10744,6 +10757,10 @@ app.post("/api/v1/admin/narrative/simulate-degradation", (req, res) =>
 
 
 app.get("/founder-ops",(req,res)=>res.sendFile(require("path").join(__dirname,"public","ops.html")));
+app.post("/api/v1/admin/llm/reset-cb",opsAuth,(req,res)=>{
+  LLMCircuitBreaker.reset();
+  res.json({ok:true,message:"LLM circuit breaker manually reset",state:LLMCircuitBreaker.getState()});
+});
 // PHASE-A: OPS ROUTES
 const OPS_PWD = process.env.OPS_PASSWORD || "advisiq-ops-2026";
 function opsAuth(req,res,next){
