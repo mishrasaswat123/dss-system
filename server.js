@@ -11502,7 +11502,7 @@ app.delete("/api/v1/ops/send-to-feed/:prospect_id",opsAuth,(req,res)=>{
   });
 });
 app.post("/api/v1/ops/prospects/:prospect_id/snooze",opsAuth,(req,res)=>{
-  const pid=parseInt(req.params.prospect_id),dur=(req.body&&req.body.duration)||"7d",now=new Date();
+  const pid=parseInt(req.params.prospect_id),dur=(req.body&&req.body.duration)||"7d",reason=(req.body&&req.body.reason)||null,now=new Date(),nowMs=Date.now();
   var until;
   if(dur==="forever")until="2099-12-31T23:59:59Z";
   else{
@@ -11510,23 +11510,36 @@ app.post("/api/v1/ops/prospects/:prospect_id/snooze",opsAuth,(req,res)=>{
     var d=new Date(now.getTime()+days*86400000);
     until=d.toISOString();
   }
-  db.run("UPDATE comm_prospects SET snoozed_until=? WHERE id=?",[until,pid],(e)=>{
+  db.run("UPDATE comm_prospects SET snoozed_until=?,snoozed_at=?,snooze_reason=? WHERE id=?",[until,nowMs,reason,pid],(e)=>{
     if(e)return res.status(500).json({status:"ERROR",error:e.message});
-    res.json({status:"OK",prospect_id:pid,snoozed_until:until});
+    db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,event_note,logged_at) VALUES (?,?,?,?,?)",[pid,"SNOOZED","Snoozed",reason,nowMs],function(){});
+    res.json({status:"OK",prospect_id:pid,snoozed_until:until,snooze_reason:reason});
   });
 });
 app.post("/api/v1/ops/prospects/:prospect_id/unsnooze",opsAuth,(req,res)=>{
-  const pid=parseInt(req.params.prospect_id);
-  db.run("UPDATE comm_prospects SET snoozed_until=NULL WHERE id=?",[pid],(e)=>{
+  const pid=parseInt(req.params.prospect_id),nowMs=Date.now();
+  db.run("UPDATE comm_prospects SET snoozed_until=NULL,snoozed_at=NULL,snooze_reason=NULL WHERE id=?",[pid],(e)=>{
     if(e)return res.status(500).json({status:"ERROR",error:e.message});
+    db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,logged_at) VALUES (?,?,?,?)",[pid,"UNSNOOZED","Snooze Cleared",nowMs],function(){});
     res.json({status:"OK",prospect_id:pid});
   });
-});
+})
 app.get("/api/v1/ops/prospects/pipeline",opsAuth,(req,res)=>{
   const now=Date.now();
   db.all("SELECT p.*, a.action_type as nextAction, a.due_at as nextDue, a.force_feed as forceFeed FROM comm_prospects p LEFT JOIN comm_actions a ON a.id=(SELECT id FROM comm_actions WHERE prospect_id=p.id AND status='PENDING' ORDER BY due_at ASC LIMIT 1) WHERE p.status NOT IN ('CLOSED') ORDER BY p.score DESC, p.added_at ASC LIMIT 100",[],function(err,rows){
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
-    var q=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null,latestContext:p.latest_context||p.latest_wa_context||null,replyOverride:p.reply_override||p.wa_reply_override||null};});
+    var q=(rows||[]).map(function(p){
+  var snUntil=p.snoozed_until||null;
+  var lastEvAt=p.last_interaction_at||p.added_at||null;
+  var daysSince=lastEvAt?(Date.now()-lastEvAt)/86400000:999;
+  var isPostDemo=["DEMO_DONE","FEEDBACK_PENDING","FEEDBACK_RECEIVED","FEEDBACK_REVIEWED"].indexOf(p.status)>=0;
+  var health;
+  if(snUntil&&new Date(snUntil)>now)health="SNOOZED";
+  else if(isPostDemo&&daysSince>7)health="AT_RISK";
+  else if(daysSince>14)health="STALE";
+  else health="ACTIVE";
+  return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:snUntil,snoozedAt:p.snoozed_at||null,snoozeReason:p.snooze_reason||null,latestContext:p.latest_context||p.latest_wa_context||null,replyOverride:p.reply_override||p.wa_reply_override||null,health:health,lastEventAt:lastEvAt,lastEventType:null,addedAt:p.added_at||null,updatedAt:p.updated_at||null};
+});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
   });
 });
@@ -11580,15 +11593,21 @@ app.patch("/api/v1/ops/prospects/:id/reply-override",opsAuth,(req,res)=>{
 });
 app.post("/api/v1/ops/prospects/:id/action",opsAuth,(req,res)=>{
   const pid=parseInt(req.params.id),tr2=(req.body&&req.body.action)||null,now=Date.now();
-  const VALID=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","INTERESTED","NOT_INTERESTED","DEMO_SET","DEMO_DONE","BETA_INVITED","CLOSED","WA_CONVERSATION","WA_DEMO_REQUESTED"];
+  const VALID=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","INTERESTED","NOT_INTERESTED","DEMO_SET","DEMO_DONE","FEEDBACK_PENDING","FEEDBACK_RECEIVED","FEEDBACK_REVIEWED","BETA_INVITED","CLOSED","WA_CONVERSATION","WA_DEMO_REQUESTED"];
   if(VALID.indexOf(tr2)===-1)return res.status(400).json({status:"ERROR",error:"Invalid action"});
-  var sm2={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",INTERESTED:"DEMO_REQUESTED",WA_CONVERSATION:"CONVERSATION_ACTIVE",WA_DEMO_REQUESTED:"DEMO_REQUESTED",NOT_INTERESTED:"CLOSED",DEMO_SET:"DEMO_SCHEDULED",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
+  var sm2={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",INTERESTED:"DEMO_REQUESTED",WA_CONVERSATION:"CONVERSATION_ACTIVE",WA_DEMO_REQUESTED:"DEMO_REQUESTED",NOT_INTERESTED:"CLOSED",DEMO_SET:"DEMO_SCHEDULED",DEMO_DONE:"DEMO_DONE",FEEDBACK_PENDING:"FEEDBACK_PENDING",FEEDBACK_RECEIVED:"FEEDBACK_RECEIVED",FEEDBACK_REVIEWED:"FEEDBACK_REVIEWED",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
   db.run("UPDATE comm_prospects SET status=?,updated_at=? WHERE id=?",[sm2[tr2],now,pid],(err)=>{
-    db.run("UPDATE comm_prospects SET wa_reply_override=NULL WHERE id=?",[pid]);
+    db.run("UPDATE comm_prospects SET wa_reply_override=NULL,reply_override=NULL WHERE id=?",[pid]);
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
-    var as2={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},ACCEPTED:{t:"MSG1_SEND",d:0},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000},INTERESTED:{t:"DEMO_SCHEDULE",d:0},WA_CONVERSATION:{t:"WA_FOLLOW",d:259200000},WA_DEMO_REQUESTED:{t:"DEMO_SCHEDULE",d:0},DEMO_DONE:{t:"BETA_EVALUATE",d:7200000}};
+    var newSt=sm2[tr2];
+    db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,to_status,logged_at) VALUES (?,?,?,?,?)",[pid,"STATUS_CHANGED","Status → "+newSt,newSt,now],function(){});
+    if(tr2==="DEMO_DONE"){
+      db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,logged_at) VALUES (?,?,?,?)",[pid,"DEMO_COMPLETED","Demo Completed",now],function(){});
+      db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,logged_at) VALUES (?,?,?,?)",[pid,"FEEDBACK_REQUESTED","Feedback Requested",now+1000],function(){});
+    }
+    var as2={CONNECTION_SENT:{t:"ACCEPTED_CHECK",d:259200000},ACCEPTED:{t:"MSG1_SEND",d:0},MSG1_SENT:{t:"MSG2_FOLLOW",d:604800000},MSG2_SENT:{t:"MSG3_FINAL",d:604800000},INTERESTED:{t:"DEMO_SCHEDULE",d:0},WA_CONVERSATION:{t:"WA_FOLLOW",d:259200000},WA_DEMO_REQUESTED:{t:"DEMO_SCHEDULE",d:0},DEMO_DONE:{t:"FEEDBACK_REQUEST",d:0},FEEDBACK_PENDING:{t:"FEEDBACK_COLLECT",d:0}};
     db.run("UPDATE comm_actions SET status='COMPLETED',completed_at=? WHERE prospect_id=? AND status='PENDING' AND due_at<=?",[now,pid,now],function(){});var nx=as2[tr2];if(nx)db.run("INSERT INTO comm_actions (prospect_id,action_type,status,due_at,logged_at) VALUES (?,?,?,?,?)",[pid,nx.t,"PENDING",now+nx.d,now],function(){});
-    res.json({status:"OK",timestamp:now,newStatus:sm2[tr2],nextScheduled:nx?nx.t:null});
+    res.json({status:"OK",timestamp:now,newStatus:newSt,nextScheduled:nx?nx.t:null});
   });
 });
 app.get("/api/v1/ops/events/pending",opsAuth,(req,res)=>{
@@ -11604,6 +11623,104 @@ app.post("/api/v1/ops/events",opsAuth,(req,res)=>{
   db.run("INSERT INTO comm_ops_events (event_type,priority,title,body,prospect_ref,triggered_at) VALUES (?,?,?,?,?,?)",[b.event_type,b.priority||"MORNING",b.title,b.body,b.prospect_ref||null,now],function(err){
     if(err)return res.status(500).json({status:"ERROR",error:err.message});
     res.json({status:"OK",timestamp:now,data:{id:this.lastID}});
+  });
+});
+
+// ── COMM_EVENTS: Timeline ──
+app.get("/api/v1/ops/prospects/:id/timeline",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id);
+  db.all("SELECT * FROM comm_events WHERE prospect_id=? ORDER BY logged_at DESC LIMIT 50",[pid],(err,rows)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",timestamp:Date.now(),data:{events:rows||[],count:(rows||[]).length}});
+  });
+});
+app.post("/api/v1/ops/prospects/:id/note",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id),note=(req.body&&req.body.note)||null,nowMs=Date.now();
+  if(!note)return res.status(400).json({status:"ERROR",error:"note required"});
+  db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,event_note,logged_at) VALUES (?,?,?,?,?)",[pid,"NOTE_ADDED","Note Added",note,nowMs],function(err){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",timestamp:nowMs,event_id:this.lastID});
+  });
+});
+app.post("/api/v1/ops/prospects/:id/meeting",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id),b=req.body||{},nowMs=Date.now();
+  const MTYPES=["DEMO_SCHEDULED","FOLLOWUP_MEETING","TECHNICAL_WALKTHROUGH","PRODUCT_DISCUSSION","PRACTITIONER_FEEDBACK_SESSION"];
+  const PLATFORMS=["ZOOM","GOOGLE_MEET","TEAMS"];
+  if(!b.meeting_type||MTYPES.indexOf(b.meeting_type)<0)return res.status(400).json({status:"ERROR",error:"Valid meeting_type required"});
+  if(!b.meeting_at)return res.status(400).json({status:"ERROR",error:"meeting_at required"});
+  var platform=(b.platform||"ZOOM").toUpperCase();
+  if(PLATFORMS.indexOf(platform)<0)platform="ZOOM";
+  var labelMap={DEMO_SCHEDULED:"Demo Scheduled",FOLLOWUP_MEETING:"Follow-up Meeting",TECHNICAL_WALKTHROUGH:"Technical Walkthrough",PRODUCT_DISCUSSION:"Product Discussion",PRACTITIONER_FEEDBACK_SESSION:"Practitioner Feedback Session"};
+  db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,meeting_at,meeting_platform,meeting_link,meeting_duration_min,meeting_type,logged_at) VALUES (?,?,?,?,?,?,?,?,?)",[pid,b.meeting_type,labelMap[b.meeting_type]||b.meeting_type,parseInt(b.meeting_at),platform,b.meeting_link||null,parseInt(b.duration_min)||30,b.meeting_type,nowMs],function(err){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    if(b.meeting_type==="DEMO_SCHEDULED"){db.run("UPDATE comm_prospects SET status='DEMO_SCHEDULED',updated_at=? WHERE id=?",[nowMs,pid],function(){});}
+    res.json({status:"OK",timestamp:nowMs,event_id:this.lastID,meeting_at:b.meeting_at,platform:platform});
+  });
+});
+app.post("/api/v1/ops/prospects/:id/feedback",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id),b=req.body||{},nowMs=Date.now();
+  const TYPES=["LIKE","ORNAMENTAL","MISSING"];
+  var items=Array.isArray(b.items)?b.items:(b.feedback_type&&b.feedback_text?[{feedback_type:b.feedback_type,feedback_text:b.feedback_text}]:[]);
+  if(!items.length)return res.status(400).json({status:"ERROR",error:"items array required"});
+  var invalid=items.filter(function(i){return TYPES.indexOf(i.feedback_type)<0||!i.feedback_text;});
+  if(invalid.length)return res.status(400).json({status:"ERROR",error:"Each item needs feedback_type (LIKE|ORNAMENTAL|MISSING) and feedback_text"});
+  var ids=[],done=0;
+  items.forEach(function(item){
+    db.run("INSERT INTO product_feedback (prospect_id,feedback_type,feedback_text,status,created_at) VALUES (?,?,?,?,?)",[pid,item.feedback_type,item.feedback_text.trim(),"NEW",nowMs],function(err){
+      if(!err)ids.push(this.lastID);
+      done++;
+      if(done===items.length){
+        db.run("INSERT INTO comm_events (prospect_id,event_type,event_label,event_note,logged_at) VALUES (?,?,?,?,?)",[pid,"FEEDBACK_RECEIVED","Feedback Received",items.length+" items",nowMs],function(){});
+        db.run("UPDATE comm_prospects SET status='FEEDBACK_RECEIVED',updated_at=? WHERE id=? AND status IN ('DEMO_DONE','FEEDBACK_PENDING')",[nowMs,pid],function(){});
+        res.json({status:"OK",timestamp:nowMs,ids:ids,count:ids.length});
+      }
+    });
+  });
+});
+app.get("/api/v1/ops/prospects/:id/feedback",opsAuth,(req,res)=>{
+  const pid=parseInt(req.params.id);
+  db.all("SELECT * FROM product_feedback WHERE prospect_id=? ORDER BY created_at DESC",[pid],(err,rows)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",timestamp:Date.now(),data:{feedback:rows||[],count:(rows||[]).length}});
+  });
+});
+app.get("/api/v1/ops/feedback/intelligence",opsAuth,(req,res)=>{
+  db.all("SELECT feedback_type,feedback_text,COUNT(*) as mention_count FROM product_feedback GROUP BY feedback_type,feedback_text ORDER BY feedback_type,mention_count DESC",[],function(err,rows){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    var byType={LIKE:[],ORNAMENTAL:[],MISSING:[]};
+    (rows||[]).forEach(function(r){if(byType[r.feedback_type])byType[r.feedback_type].push({text:r.feedback_text,count:r.mention_count});});
+    db.all("SELECT * FROM feature_candidates ORDER BY source_feedback_count DESC,created_at DESC LIMIT 20",[],function(e2,fc){
+      res.json({status:"OK",timestamp:Date.now(),data:{appreciated:byType.LIKE.slice(0,10),criticized:byType.ORNAMENTAL.slice(0,10),requested:byType.MISSING.slice(0,10),featureCandidates:(fc||[])}});
+    });
+  });
+});
+app.post("/api/v1/ops/feature-candidates",opsAuth,(req,res)=>{
+  const b=req.body||{},nowMs=Date.now();
+  if(!b.title)return res.status(400).json({status:"ERROR",error:"title required"});
+  db.run("INSERT INTO feature_candidates (title,source_feedback_count,originating_feedback_ids,status,created_at) VALUES (?,?,?,?,?)",[b.title,b.source_feedback_count||1,b.originating_feedback_ids?JSON.stringify(b.originating_feedback_ids):null,"NEW",nowMs],function(err){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",timestamp:nowMs,id:this.lastID});
+  });
+});
+app.patch("/api/v1/ops/feature-candidates/:id",opsAuth,(req,res)=>{
+  const id=parseInt(req.params.id),b=req.body||{};
+  const VALID_ST=["NEW","UNDER_REVIEW","APPROVED_FOR_FSD","REJECTED","IMPLEMENTED"];
+  if(!b.status||VALID_ST.indexOf(b.status)<0)return res.status(400).json({status:"ERROR",error:"Valid status required"});
+  db.run("UPDATE feature_candidates SET status=? WHERE id=?",[b.status,id],(err)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    res.json({status:"OK",id:id,status:b.status});
+  });
+});
+app.get("/api/v1/ops/activities/upcoming",opsAuth,(req,res)=>{
+  const now=Date.now();
+  db.all("SELECT e.*,p.name as prospect_name,p.status as prospect_status FROM comm_events e LEFT JOIN comm_prospects p ON p.id=e.prospect_id WHERE e.meeting_at IS NOT NULL AND e.meeting_at>=? ORDER BY e.meeting_at ASC LIMIT 20",[now],(err,rows)=>{
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    db.all("SELECT id,name,status,snoozed_until,snooze_reason FROM comm_prospects WHERE snoozed_until IS NOT NULL AND snoozed_until<=datetime('now','+7 days') AND snoozed_until>=datetime('now') ORDER BY snoozed_until ASC LIMIT 10",[],function(e2,sr){
+      var meetings=(rows||[]).map(function(r){return{type:"MEETING",event_type:r.event_type,prospect_id:r.prospect_id,prospect_name:r.prospect_name,meeting_at:r.meeting_at,meeting_platform:r.meeting_platform,meeting_link:r.meeting_link,meeting_duration_min:r.meeting_duration_min,days_until:Math.ceil((r.meeting_at-now)/86400000)};});
+      var snoozeReviews=(sr||[]).map(function(r){return{type:"SNOOZE_REVIEW",prospect_id:r.id,prospect_name:r.name,status:r.status,snoozed_until:r.snoozed_until,snooze_reason:r.snooze_reason,days_until:Math.ceil((new Date(r.snoozed_until)-now)/86400000)};});
+      var all=meetings.concat(snoozeReviews).sort(function(a,b){return (a.days_until||0)-(b.days_until||0);});
+      res.json({status:"OK",timestamp:now,data:{activities:all,count:all.length}});
+    });
   });
 });
 (function(){function purge(){db.run("DELETE FROM comm_visits WHERE logged_at<?",[Date.now()-7776000000],function(e){if(!e&&this.changes>0)logger.info({job:"comm-telemetry-purge",deleted:this.changes},"Telemetry purge complete");});}setTimeout(purge,30000);setInterval(purge,86400000);})();

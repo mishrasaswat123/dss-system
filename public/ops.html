@@ -560,7 +560,7 @@ const WA_CLASSIFICATION_LABELS={NO_RESPONSE:"No Response",WILL_REVIEW:"Will Revi
 const WA_RECOMMENDED_STATUS={NO_RESPONSE:"CONVERSATION_ACTIVE",WILL_REVIEW:"CONVERSATION_ACTIVE",WANTS_CLARIFICATION:"CONVERSATION_ACTIVE",INTERESTED:"DEMO_REQUESTED",WANTS_WALKTHROUGH:"DEMO_REQUESTED",FEEDBACK_PROVIDED:"CONVERSATION_ACTIVE",NOT_RELEVANT:"CLOSED"};
 const WA_LIFECYCLE=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED","CLOSED"];
 const WA_ACTION_MAP={CONVERSATION_ACTIVE:"WA_CONVERSATION",DEMO_REQUESTED:"WA_DEMO_REQUESTED",DEMO_SCHEDULED:"DEMO_SET",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
-const WA_ADJACENT={WHATSAPP_NEW:["CONVERSATION_ACTIVE","CLOSED"],CONVERSATION_ACTIVE:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
+const WA_ADJACENT={WHATSAPP_NEW:["CONVERSATION_ACTIVE","CLOSED"],CONVERSATION_ACTIVE:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["FEEDBACK_PENDING","BETA_INVITED","CLOSED"],FEEDBACK_PENDING:["FEEDBACK_RECEIVED","CLOSED"],FEEDBACK_RECEIVED:["FEEDBACK_REVIEWED","CLOSED"],FEEDBACK_REVIEWED:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
 const LI_TEMPLATES={
   NO_RESPONSE:"Hi [CONTACT_NAME] — just following up on my earlier message in case it got buried. Happy to give you more context if useful, or if timing isn't right, no pressure at all.",
   WILL_REVIEW:"Hi [CONTACT_NAME] — no rush at all. Whenever you get a chance, would value your honest read on whether it addresses a real advisory workflow gap.",
@@ -572,7 +572,7 @@ const LI_TEMPLATES={
 };
 const LI_LIFECYCLE=["CONNECTION_SENT","ACCEPTED","MSG1_SENT","MSG2_SENT","MSG3_SENT","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED","CLOSED"];
 const LI_ACTION_MAP={CONNECTION_SENT:"CONNECTION_SENT",ACCEPTED:"ACCEPTED",MSG1_SENT:"MSG1_SENT",MSG2_SENT:"MSG2_SENT",MSG3_SENT:"MSG3_SENT",DEMO_REQUESTED:"INTERESTED",DEMO_SCHEDULED:"DEMO_SET",DEMO_DONE:"DEMO_DONE",BETA_INVITED:"BETA_INVITED",CLOSED:"CLOSED"};
-const LI_ADJACENT={SOURCED:["CONNECTION_SENT","CLOSED"],CONNECTION_SENT:["ACCEPTED","CLOSED"],ACCEPTED:["MSG1_SENT","CLOSED"],MSG1_SENT:["MSG2_SENT","DEMO_REQUESTED","CLOSED"],MSG2_SENT:["MSG3_SENT","DEMO_REQUESTED","CLOSED"],MSG3_SENT:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
+const LI_ADJACENT={SOURCED:["CONNECTION_SENT","CLOSED"],CONNECTION_SENT:["ACCEPTED","CLOSED"],ACCEPTED:["MSG1_SENT","CLOSED"],MSG1_SENT:["MSG2_SENT","DEMO_REQUESTED","CLOSED"],MSG2_SENT:["MSG3_SENT","DEMO_REQUESTED","CLOSED"],MSG3_SENT:["DEMO_REQUESTED","CLOSED"],DEMO_REQUESTED:["DEMO_SCHEDULED","CLOSED"],DEMO_SCHEDULED:["DEMO_DONE","CLOSED"],DEMO_DONE:["FEEDBACK_PENDING","BETA_INVITED","CLOSED"],FEEDBACK_PENDING:["FEEDBACK_RECEIVED","CLOSED"],FEEDBACK_RECEIVED:["FEEDBACK_REVIEWED","CLOSED"],FEEDBACK_REVIEWED:["BETA_INVITED","CLOSED"],BETA_INVITED:["CLOSED"]};
 const LI_RECOMMENDED_STATUS={NO_RESPONSE:null,WILL_REVIEW:null,WANTS_CLARIFICATION:null,FEEDBACK_PROVIDED:null,INTERESTED:"DEMO_REQUESTED",WANTS_WALKTHROUGH:"DEMO_REQUESTED",NOT_RELEVANT:"CLOSED"};
 const CLASSIFICATION_LABELS={NO_RESPONSE:"No Response",WILL_REVIEW:"Will Review",WANTS_CLARIFICATION:"Wants Clarification",INTERESTED:"Interested",WANTS_WALKTHROUGH:"Wants Walkthrough",FEEDBACK_PROVIDED:"Feedback Provided",NOT_RELEVANT:"Not Relevant"};
 function classifyContext(t){if(!t||!t.trim())return"NO_RESPONSE";var s=t.toLowerCase();if(/not for me|retail only|not applicable|no thanks/.test(s))return"NOT_RELEVANT";if(/show me|walk me|next week|happy to|call|meet/.test(s))return"WANTS_WALKTHROUGH";if(/interesting|looks good|makes sense|relevant|useful/.test(s))return"INTERESTED";if(/feels|missing|unrealistic|would use|gap|problem/.test(s))return"FEEDBACK_PROVIDED";if(/how does|what is|explain|differ|understand|not sure/.test(s))return"WANTS_CLARIFICATION";if(/will review|weekend|later|check it out|look at it/.test(s))return"WILL_REVIEW";return"NO_RESPONSE";}
@@ -1142,12 +1142,25 @@ function renderPipeline(data){
       var roleStr='<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:1px">'+(p.role||'Professional')+' · Score '+(p.score||2)+'</div>';
       var openBtn=(p.prospectType==='WHATSAPP')?'':(p.linkedin_url?'<button class="btn btn-open btn-full" data-pid="'+p.id+'" data-pact="open">Open Profile ↗</button>':'');
       var feedBtn='<button class="btn btn-note btn-full" onclick="sendToFeed('+p.id+')">📌 Send To Feed</button>';
+      if(['DEMO_DONE','FEEDBACK_PENDING','DEMO_SCHEDULED'].indexOf(p.status)>=0){
+        feedBtn+='<button class="btn btn-adv btn-full" style="margin-top:6px" onclick="captureDemoFeedbackModal('+p.id+','+JSON.stringify(p.name)+')">🔬 Capture Feedback</button>';
+      }
+      var noteBtn='<button class="btn btn-snooze" onclick="addNoteModal('+p.id+')" style="font-size:11px;padding:4px 10px;min-height:28px">+ Note</button>';
+      var meetBtn='<button class="btn btn-copy" onclick="scheduleMeetingModal('+p.id+','+JSON.stringify(p.name)+')">📅 Schedule</button>';
+      var timelineBtn='<button class="btn" onclick="showTimeline('+p.id+')" style="font-size:11px;padding:4px 8px;min-height:28px;color:var(--t3)">▼ Timeline</button>';
+      // Health badge
+      var healthColor={ACTIVE:'#18c97a',STALE:'#f0a500',AT_RISK:'#e53e3e',SNOOZED:'#666'}[p.health||'ACTIVE']||'#18c97a';
+      var healthBadge='<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+healthColor+';margin-right:5px"></span><span style="font-family:var(--mono);font-size:9px;color:'+healthColor+'">'+( p.health||'ACTIVE')+'</span>';
+      // Last activity
+      var lastActStr='';
+      if(p.lastEventAt){var dAgo=Math.floor((now2-p.lastEventAt)/86400000);lastActStr='<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px">Last: '+(p.lastEventType||'activity')+' · '+(dAgo===0?'today':dAgo+'d ago')+'</div>';}
       var snoozeInfo='';
       if(p.snoozedUntil){
         var sLabel=p.snoozedUntil>='2099'?'Snoozed indefinitely':'Snoozed until '+new Date(p.snoozedUntil).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-        snoozeInfo='<div style="padding:6px 12px 0;display:flex;align-items:center;justify-content:space-between"><div style="font-family:var(--mono);font-size:10px;color:var(--am)">'+sLabel+'</div><button class="btn btn-snooze" style="font-size:11px;padding:4px 10px;min-height:28px" onclick="unsnoozeProspect('+p.id+')">Clear Snooze</button></div>';
+        var reasonStr=p.snoozeReason?'<div style="font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px">"'+p.snoozeReason+'"</div>':'';
+        snoozeInfo='<div style="padding:6px 12px 0;display:flex;align-items:center;justify-content:space-between"><div><div style="font-family:var(--mono);font-size:10px;color:var(--am)">'+sLabel+'</div>'+reasonStr+'</div><button class="btn btn-snooze" style="font-size:11px;padding:4px 10px;min-height:28px" onclick="unsnoozeProspect('+p.id+')">Clear Snooze</button></div>';
       }
-      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+roleStr+nextStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+snoozeInfo+'<div class="actions">'+openBtn+feedBtn+'</div></div>';
+      html+='<div class="card" style="'+(isOv?'border-color:#5a1020;background:var(--rdb);':'')+'">'+'<div style="padding:9px 12px;display:flex;align-items:center;gap:8px"><div class="card-av" style="width:28px;height:28px;font-size:11px">'+initials(p.name)+'</div><div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:6px"><div style="font-size:13px;font-weight:600;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">'+p.name+'</div><div class="card-stage '+stageCls(p.status)+'">'+sl(p.status)+'</div></div>'+'<div style="display:flex;align-items:center;gap:6px;margin-top:2px">'+healthBadge+'</div>'+roleStr+nextStr+lastActStr+'</div></div>'+(p.personalisationNote?'<div class="card-note">'+p.personalisationNote+'</div>':'')+snoozeInfo+'<div class="actions">'+openBtn+feedBtn+'</div>'+'<div style="padding:4px 12px 8px;display:flex;gap:6px">'+noteBtn+meetBtn+timelineBtn+'</div></div>';
     });
   });
   el.innerHTML=filterBar+html;
@@ -1234,37 +1247,240 @@ function addP(){
 // ── ACTION HANDLERS ──
 
 function doneAct(id){swipeOut(id,'r');fx('/api/v1/ops/feed/'+id+'/act',{method:'POST',body:JSON.stringify({action:'COMPLETE'})}).then(()=>{toast('✓ Done');setTimeout(()=>{loadFeed();loadQueue();loadPipeline();},400);});}
-function prospectSnooze(id){
-  var opts=[{label:'3 Days',dur:'3d'},{label:'1 Week',dur:'7d'},{label:'1 Month',dur:'30d'},{label:'Forever',dur:'forever'}];
+// ── ADD NOTE MODAL ──
+function addNoteModal(id){
   var sheet=document.createElement('div');
   sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
   var inner=document.createElement('div');
   inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box';
-  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px;text-align:center">Snooze this prospect</div>';
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px">Add Note</div>';
+  var ta=document.createElement('textarea');ta.placeholder='Note...';
+  ta.style.cssText='width:100%;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:10px;font-family:var(--mono);font-size:12px;color:var(--tx);resize:none;min-height:80px;box-sizing:border-box;margin-bottom:10px';
+  inner.appendChild(ta);
+  var row=document.createElement('div');row.style.cssText='display:flex;gap:8px';
+  var save=document.createElement('button');save.className='btn btn-adv btn-full';save.style.minHeight='44px';save.textContent='Save Note';
+  save.onclick=function(){
+    var note=ta.value.trim();if(!note){toast('Note cannot be empty');return;}
+    document.body.removeChild(sheet);
+    fx('/api/v1/ops/prospects/'+id+'/note',{method:'POST',body:JSON.stringify({note:note})}).then(function(d){
+      if(d.status==='OK'){toast('Note saved');loadPipeline();}
+      else toast('Error: '+(d.error||'unknown'));
+    }).catch(function(){toast('Network error');});
+  };
+  var cancel=document.createElement('button');cancel.className='btn btn-snooze';cancel.style.minHeight='44px';cancel.textContent='Cancel';
+  cancel.onclick=function(){document.body.removeChild(sheet);};
+  row.appendChild(save);row.appendChild(cancel);inner.appendChild(row);
+  sheet.appendChild(inner);
+  sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
+  document.body.appendChild(sheet);
+}
+// ── SCHEDULE MEETING MODAL ──
+function scheduleMeetingModal(id,name){
+  var MTYPES=[{v:'DEMO_SCHEDULED',l:'Demo'},{v:'FOLLOWUP_MEETING',l:'Follow-up Demo'},{v:'TECHNICAL_WALKTHROUGH',l:'Technical Walkthrough'},{v:'PRODUCT_DISCUSSION',l:'Product Discussion'},{v:'PRACTITIONER_FEEDBACK_SESSION',l:'Practitioner Feedback Session'}];
+  var PLATFORMS=[{v:'ZOOM',l:'Zoom'},{v:'GOOGLE_MEET',l:'Google Meet'},{v:'TEAMS',l:'Microsoft Teams'}];
+  var sheet=document.createElement('div');
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box;max-height:90vh;overflow-y:auto';
+  function mkSel(opts,defVal){var sel=document.createElement('select');sel.className='ff-sel';sel.style.cssText='width:100%;font-size:12px;padding:8px;margin-bottom:10px;box-sizing:border-box';opts.forEach(function(o){var op=document.createElement('option');op.value=o.v;op.textContent=o.l;if(o.v===defVal)op.selected=true;sel.appendChild(op);});return sel;}
+  function mkInput(type,ph,val){var inp=document.createElement('input');inp.type=type;inp.placeholder=ph||'';if(val)inp.value=val;inp.style.cssText='width:100%;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--tx);box-sizing:border-box;margin-bottom:10px';return inp;}
+  function mkLabel(t){var d=document.createElement('div');d.style.cssText='font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px';d.textContent=t;return d;}
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px;text-align:center">Schedule Meeting</div>';
+  // Get today's date for default
+  var today=new Date();var dd=String(today.getDate()).padStart(2,'0');var mm=String(today.getMonth()+1).padStart(2,'0');var yyyy=today.getFullYear();
+  inner.appendChild(mkLabel('Meeting Type'));var typeEl=mkSel(MTYPES,'DEMO_SCHEDULED');inner.appendChild(typeEl);
+  inner.appendChild(mkLabel('Date'));var dateEl=mkInput('date','',yyyy+'-'+mm+'-'+dd);inner.appendChild(dateEl);
+  inner.appendChild(mkLabel('Time'));var timeEl=mkInput('time','','16:00');inner.appendChild(timeEl);
+  inner.appendChild(mkLabel('Duration'));var durEl=mkSel([{v:'20',l:'20 min'},{v:'30',l:'30 min'},{v:'45',l:'45 min'},{v:'60',l:'60 min'},{v:'90',l:'90 min'}],'30');inner.appendChild(durEl);
+  inner.appendChild(mkLabel('Platform'));var platEl=mkSel(PLATFORMS,'ZOOM');inner.appendChild(platEl);
+  inner.appendChild(mkLabel('Meeting Link'));var linkEl=mkInput('url','Paste Zoom/Meet/Teams link...');inner.appendChild(linkEl);
+  var confirmBtn=document.createElement('button');confirmBtn.className='btn btn-adv btn-full';confirmBtn.style.cssText='min-height:46px;font-size:14px;margin-bottom:8px';confirmBtn.textContent='Confirm Meeting';
+  confirmBtn.onclick=function(){
+    if(!dateEl.value||!timeEl.value){toast('Date and time required');return;}
+    var dtMs=new Date(dateEl.value+'T'+timeEl.value).getTime();
+    var payload={meeting_type:typeEl.value,meeting_at:dtMs,duration_min:parseInt(durEl.value),platform:platEl.value,meeting_link:linkEl.value.trim()||null};
+    document.body.removeChild(sheet);
+    fx('/api/v1/ops/prospects/'+id+'/meeting',{method:'POST',body:JSON.stringify(payload)}).then(function(d){
+      if(d.status==='OK'){
+        toast('Meeting scheduled');
+        loadPipeline();
+        // Show invite generator
+        setTimeout(function(){showInviteModal(id,name,dateEl.value,timeEl.value,durEl.value,platEl.value,linkEl.value.trim());},400);
+      }else toast('Error: '+(d.error||'unknown'));
+    }).catch(function(){toast('Network error');});
+  };
+  inner.appendChild(confirmBtn);
+  var cancel=document.createElement('button');cancel.className='btn btn-full';cancel.style.cssText='min-height:40px;font-size:13px;color:var(--t3)';cancel.textContent='Cancel';
+  cancel.onclick=function(){document.body.removeChild(sheet);};
+  inner.appendChild(cancel);
+  sheet.appendChild(inner);
+  sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
+  document.body.appendChild(sheet);
+}
+// ── INVITE GENERATOR MODAL ──
+function showInviteModal(id,name,date,time,dur,platform,link){
+  var dateStr=new Date(date+'T'+time).toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  var timeStr=new Date(date+'T'+time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  var platLabel={ZOOM:'Zoom',GOOGLE_MEET:'Google Meet',TEAMS:'Microsoft Teams'}[platform]||platform;
+  var waMsg='Hi '+name+',\n\nLooking forward to our ADVISIQ DSS walkthrough on '+dateStr+' at '+timeStr+'.\n\n'+platLabel+' Link:\n'+(link||'[Meeting Link]')+'\n\nSession Duration: '+dur+' minutes\n\nRegards,\nSaswat';
+  var emailMsg='Subject: ADVISIQ DSS Walkthrough — '+dateStr+'\n\nHi '+name+',\n\nLooking forward to our session on '+dateStr+' at '+timeStr+'.\n\n'+platLabel+' Link: '+(link||'[Meeting Link]')+'\nDuration: '+dur+' minutes\n\nBest regards,\nSaswat';
+  var sheet=document.createElement('div');
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box';
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px;text-align:center">Meeting Confirmed ✔</div>';
+  function mkCopyBtn(label,text){
+    var btn=document.createElement('button');btn.className='btn btn-copy btn-full';btn.style.cssText='margin-bottom:8px;min-height:44px';
+    btn.textContent=label;
+    btn.onclick=function(){try{navigator.clipboard.writeText(text).then(function(){toast(label+' copied');}).catch(function(){var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);toast(label+' copied');});}catch(e){toast('Copy failed');}}
+    return btn;
+  }
+  inner.appendChild(mkCopyBtn('Copy WhatsApp Invite',waMsg));
+  inner.appendChild(mkCopyBtn('Copy Email Invite',emailMsg));
+  if(link)inner.appendChild(mkCopyBtn('Copy Meeting Link',link));
+  var done=document.createElement('button');done.className='btn btn-full';done.style.cssText='min-height:40px;font-size:13px;color:var(--t3)';done.textContent='Done';
+  done.onclick=function(){document.body.removeChild(sheet);};
+  inner.appendChild(done);
+  sheet.appendChild(inner);
+  sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
+  document.body.appendChild(sheet);
+}
+// ── TIMELINE MODAL ──
+function showTimeline(id){
+  var sheet=document.createElement('div');
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box;max-height:80vh;overflow-y:auto';
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px">Activity Timeline</div><div id="timeline-body-'+id+'"><div style="color:var(--t3);font-size:12px">Loading...</div></div>';
+  var done=document.createElement('button');done.className='btn btn-full';done.style.cssText='min-height:40px;font-size:13px;color:var(--t3);margin-top:12px';done.textContent='Close';
+  done.onclick=function(){document.body.removeChild(sheet);};
+  inner.appendChild(done);
+  sheet.appendChild(inner);
+  sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
+  document.body.appendChild(sheet);
+  fx('/api/v1/ops/prospects/'+id+'/timeline').then(function(d){
+    var tb=document.getElementById('timeline-body-'+id);if(!tb)return;
+    var events=(d.data&&d.data.events)||[];
+    if(!events.length){tb.innerHTML='<div style="color:var(--t3);font-size:12px">No activity yet</div>';return;}
+    var html='<div style="position:relative;padding-left:20px">';
+    events.forEach(function(ev){
+      var dt=new Date(ev.logged_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+      var note=ev.event_note?'<div style="font-family:var(--mono);font-size:10px;color:var(--t3);margin-top:2px">&ldquo;'+ev.event_note+'&rdquo;</div>':'';
+      var mtg=ev.meeting_at?'<div style="font-family:var(--mono);font-size:10px;color:var(--ac);margin-top:2px">'+(ev.meeting_platform||'')+' · '+new Date(ev.meeting_at).toLocaleDateString('en-IN',{day:'numeric',month:'short'})+' '+new Date(ev.meeting_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+'</div>':'';
+      html+='<div style="margin-bottom:14px;position:relative">';
+      html+='<div style="position:absolute;left:-14px;top:4px;width:8px;height:8px;border-radius:50%;background:var(--ac)"></div>';
+      html+='<div style="font-family:var(--mono);font-size:9px;color:var(--t3)">'+dt+'</div>';
+      html+='<div style="font-size:12px;font-weight:600;color:var(--tx)">'+( ev.event_label||ev.event_type)+'</div>';
+      html+=note+mtg+'</div>';
+    });
+    html+='</div>';
+    tb.innerHTML=html;
+  }).catch(function(){var tb=document.getElementById('timeline-body-'+id);if(tb)tb.innerHTML='<div style="color:var(--rd);font-size:12px">Load failed</div>';});
+}
+// ── FEEDBACK CAPTURE MODAL ──
+function captureDemoFeedbackModal(id,name){
+  var sheet=document.createElement('div');
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box;max-height:90vh;overflow-y:auto';
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:14px">Capture Demo Feedback — '+name+'</div>';
+  var items=[];
+  var TYPES=[{v:'LIKE',l:'What Resonated?',col:'#18c97a'},{v:'ORNAMENTAL',l:'What Looked Ornamental?',col:'#f0a500'},{v:'MISSING',l:'What Was Missing?',col:'#e53e3e'}];
+  TYPES.forEach(function(type){
+    var sec=document.createElement('div');sec.style.marginBottom='12px';
+    var lbl=document.createElement('div');lbl.style.cssText='font-family:var(--mono);font-size:10px;color:'+type.col+';text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px';lbl.textContent=type.l;
+    sec.appendChild(lbl);
+    var itemList=document.createElement('div');itemList.id='fb-list-'+type.v;
+    sec.appendChild(itemList);
+    var addRow=document.createElement('div');addRow.style.cssText='display:flex;gap:6px;margin-top:4px';
+    var inp=document.createElement('input');inp.type='text';inp.placeholder='Add item...';
+    inp.style.cssText='flex:1;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:7px 10px;font-family:var(--mono);font-size:11px;color:var(--tx)';
+    var addBtn=document.createElement('button');addBtn.className='btn btn-adv';addBtn.style.cssText='font-size:12px;padding:6px 12px;min-height:36px';addBtn.textContent='+';
+    addBtn.onclick=function(){
+      var v=inp.value.trim();if(!v)return;
+      items.push({feedback_type:type.v,feedback_text:v});
+      var tag=document.createElement('div');
+      tag.style.cssText='font-family:var(--mono);font-size:11px;color:var(--tx);background:var(--s3);border-radius:6px;padding:4px 8px;margin-bottom:4px';
+      tag.textContent=v;
+      itemList.appendChild(tag);
+      inp.value='';
+    };
+    inp.onkeydown=function(e){if(e.key==='Enter')addBtn.onclick();};
+    addRow.appendChild(inp);addRow.appendChild(addBtn);sec.appendChild(addRow);
+    inner.appendChild(sec);
+  });
+  var saveBtn=document.createElement('button');saveBtn.className='btn btn-adv btn-full';saveBtn.style.cssText='min-height:46px;font-size:14px;margin-bottom:8px;margin-top:8px';saveBtn.textContent='Save Feedback';
+  saveBtn.onclick=function(){
+    if(!items.length){toast('Add at least one feedback item');return;}
+    document.body.removeChild(sheet);
+    fx('/api/v1/ops/prospects/'+id+'/feedback',{method:'POST',body:JSON.stringify({items:items})}).then(function(d){
+      if(d.status==='OK'){toast(d.count+' feedback items saved');loadPipeline();}
+      else toast('Error: '+(d.error||'unknown'));
+    }).catch(function(){toast('Network error');});
+  };
+  inner.appendChild(saveBtn);
+  var skipBtn=document.createElement('button');skipBtn.className='btn btn-full';skipBtn.style.cssText='min-height:40px;font-size:13px;color:var(--t3)';skipBtn.textContent='Skip';
+  skipBtn.onclick=function(){document.body.removeChild(sheet);};
+  inner.appendChild(skipBtn);
+  sheet.appendChild(inner);
+  sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
+  document.body.appendChild(sheet);
+}
+function prospectSnooze(id){
+  var opts=[{label:'3 Days',dur:'3d'},{label:'1 Week',dur:'7d'},{label:'1 Month',dur:'30d'},{label:'Forever',dur:'forever'}];
+  var reasonChips=['Awaiting Response','Budget Cycle','Follow Up Next Month','Not Ready Yet'];
+  var sheet=document.createElement('div');
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center';
+  var inner=document.createElement('div');
+  inner.style.cssText='background:var(--s2);border-radius:16px 16px 0 0;padding:20px 16px 32px;width:100%;max-width:480px;box-sizing:border-box;max-height:90vh;overflow-y:auto';
+  inner.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;text-align:center">Snooze this prospect</div>';
+  var durRow=document.createElement('div');durRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px';
+  var selDur=null;
   opts.forEach(function(o){
     var btn=document.createElement('button');
-    btn.className='btn btn-snooze btn-full';
-    btn.style.cssText='margin-bottom:8px;min-height:46px;font-size:14px';
-    btn.textContent=o.label;
+    btn.className='btn btn-snooze';btn.style.cssText='flex:1;min-width:70px;font-size:13px;min-height:40px';
+    btn.textContent=o.label;btn.dataset.dur=o.dur;
     btn.onclick=function(){
-      document.body.removeChild(sheet);
-      fx('/api/v1/ops/prospects/'+id+'/snooze',{method:'POST',body:JSON.stringify({duration:o.dur})}).then(function(d){
-        if(d.status==='OK'){
-          var lbl=o.dur==='forever'?'Snoozed indefinitely':'Snoozed until '+new Date(d.snoozed_until).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
-          toast(lbl);
-          swipeOut(id,'l');
-          try{var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);acted=acted.filter(function(x){return x!==Number(id);});localStorage.setItem('advisiq_acted',JSON.stringify(acted));}catch(e){}
-          setTimeout(function(){loadQueue();loadFeed();loadPipeline();},300);
-        }else toast('Error: '+(d.error||'unknown'));
-      }).catch(function(){toast('Network error');});
+      durRow.querySelectorAll('button').forEach(function(b){b.style.border='';});
+      btn.style.border='2px solid var(--ac)';selDur=o.dur;
     };
-    inner.appendChild(btn);
+    durRow.appendChild(btn);
   });
-  var cancel=document.createElement('button');
-  cancel.className='btn btn-full';
-  cancel.style.cssText='min-height:46px;font-size:14px;color:var(--t3)';
-  cancel.textContent='Cancel';
-  cancel.onclick=function(){document.body.removeChild(sheet);};
+  inner.appendChild(durRow);
+  var rLabel=document.createElement('div');rLabel.style.cssText='font-family:var(--mono);font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px';rLabel.textContent='Reason (optional)';
+  inner.appendChild(rLabel);
+  var chipRow=document.createElement('div');chipRow.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px';
+  var reasonInput=document.createElement('input');reasonInput.type='text';reasonInput.placeholder='Free text reason...';
+  reasonInput.style.cssText='width:100%;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--tx);box-sizing:border-box;margin-bottom:12px';
+  reasonChips.forEach(function(rc){
+    var chip=document.createElement('button');chip.className='btn btn-snooze';
+    chip.style.cssText='font-size:11px;padding:4px 10px;min-height:30px';
+    chip.textContent=rc;
+    chip.onclick=function(){reasonInput.value=rc;};
+    chipRow.appendChild(chip);
+  });
+  inner.appendChild(chipRow);inner.appendChild(reasonInput);
+  var confirmBtn=document.createElement('button');confirmBtn.className='btn btn-adv btn-full';
+  confirmBtn.style.cssText='min-height:46px;font-size:14px;margin-bottom:8px';
+  confirmBtn.textContent='Confirm Snooze';
+  confirmBtn.onclick=function(){
+    if(!selDur){toast('Select a duration');return;}
+    var reason=reasonInput.value.trim()||null;
+    document.body.removeChild(sheet);
+    fx('/api/v1/ops/prospects/'+id+'/snooze',{method:'POST',body:JSON.stringify({duration:selDur,reason:reason})}).then(function(d){
+      if(d.status==='OK'){
+        var lbl=selDur==='forever'?'Snoozed indefinitely':'Snoozed until '+new Date(d.snoozed_until).toLocaleDateString('en-IN',{day:'numeric',month:'short'});
+        toast(lbl);
+        swipeOut(id,'l');
+        try{var acted=JSON.parse(localStorage.getItem('advisiq_acted')||'[]').map(Number);acted=acted.filter(function(x){return x!==Number(id);});localStorage.setItem('advisiq_acted',JSON.stringify(acted));}catch(e){}
+        setTimeout(function(){loadQueue();loadFeed();loadPipeline();},300);
+      }else toast('Error: '+(d.error||'unknown'));
+    }).catch(function(){toast('Network error');});
+  };
+  inner.appendChild(confirmBtn);
+  var cancel=document.createElement('button');cancel.className='btn btn-full';
+  cancel.style.cssText='min-height:40px;font-size:13px;color:var(--t3)';
+  cancel.textContent='Cancel';cancel.onclick=function(){document.body.removeChild(sheet);};
   inner.appendChild(cancel);
   sheet.appendChild(inner);
   sheet.onclick=function(e){if(e.target===sheet)document.body.removeChild(sheet);};
