@@ -604,6 +604,141 @@ function pciGetFallback(compositeClass, concentratedAsset) {
 }
 // ── END PCI FGS ──
 
+// ═══════════════════════════════════════════════════════════════════════
+// PCI PHASE 2B — AUDIENCE TRANSLATION LAYER
+// Authority: PCI_IMPLEMENTATION_SPEC_v1.1 §6.2 (Model C)
+// Constitutional: Translation modifies vocabulary/tone only — never meaning
+// ═══════════════════════════════════════════════════════════════════════
+
+const PCI_AUDIENCE_TRANSLATION_CONTRACTS = Object.freeze({
+  "IFA Advisory Pitch": {
+    register: "plain English, advisor-to-advisor",
+    vocabulary: "Use: portfolio, allocation, holdings, exposure. Avoid: concentration ratio, diversification coefficient.",
+    complexity: "Short sentences. Direct observation. The IFA needs to relay this to a client.",
+    example: "Most of this portfolio is currently held in a single asset class, which may increase sensitivity to movements in that market.",
+  },
+  "Retail Investor": {
+    register: "simple, reassuring, non-technical",
+    vocabulary: "Use: savings, investments, spread across. Avoid: allocation, concentration, diversification, asset class.",
+    complexity: "Very simple language. One idea per sentence. No technical terms whatsoever.",
+    example: "Most of this investment is currently in one area, which means its performance is closely tied to how that area performs.",
+  },
+  "Conservative Retiree": {
+    register: "careful, protective, income-focused",
+    vocabulary: "Use: savings, capital, stability, income. Avoid: equity exposure, concentration, volatility.",
+    complexity: "Gentle, measured language. Emphasise stability implications. Short sentences.",
+    example: "The current holdings are concentrated in a single investment type, which may mean the portfolio responds closely to conditions in that area.",
+  },
+  "HNI Investor": {
+    register: "sophisticated, direct, wealth-management aware",
+    vocabulary: "Use: allocation concentration, portfolio construction, asset class exposure, diversification characteristics.",
+    complexity: "Moderate technical depth acceptable. Peer-to-peer tone between advisor and informed investor.",
+    example: "Current allocation reflects elevated concentration in equity as the primary portfolio driver, with limited participation across other asset classes.",
+  },
+  "Wealth Manager Synthesis": {
+    register: "professional, book-level, synthesis-oriented",
+    vocabulary: "Use: portfolio construction, concentration characteristics, allocation posture, cross-asset participation.",
+    complexity: "Technical but concise. Suitable for advisor synthesis across a client book.",
+    example: "Portfolio exhibits elevated concentration in equity relative to a diversified allocation framework, with limited cross-asset participation.",
+  },
+  "Family Office Risk Brief": {
+    register: "institutional, risk-framework aware, multi-asset",
+    vocabulary: "Use: concentration risk, allocation framework, multi-asset participation, risk profile alignment.",
+    complexity: "Formal. Risk-framework language acceptable. Family office CIO register.",
+    example: "Current positioning reflects elevated concentration in equity, with limited participation in complementary asset classes relative to a balanced allocation framework.",
+  },
+  "Private Banker Advisory": {
+    register: "discreet, relationship-aware, UHNW-appropriate",
+    vocabulary: "Use: portfolio positioning, allocation characteristics, diversification breadth, risk profile expression.",
+    complexity: "Sophisticated but human. Private banking relationship tone.",
+    example: "The current portfolio positioning reflects elevated equity concentration, with the allocation characteristics showing limited breadth across other asset classes.",
+  },
+  "Advanced Investor Dashboard": {
+    register: "analytical, self-directed investor, data-literate",
+    vocabulary: "Use: concentration metrics, allocation distribution, diversification score, risk alignment.",
+    complexity: "Technical depth welcomed. Self-directed investor who reads their own data.",
+    example: "Portfolio concentration metrics indicate elevated equity weighting. Cross-asset participation is limited, with allocation distribution skewed toward a single asset class.",
+  },
+  "Aggressive Growth Investor": {
+    register: "forward-looking, opportunity-aware, growth-oriented",
+    vocabulary: "Use: growth exposure, portfolio concentration, allocation focus, opportunity positioning.",
+    complexity: "Energetic but factual. Acknowledge concentration without alarming.",
+    example: "Current allocation is heavily focused on equity, reflecting a concentrated growth positioning. Participation across other asset classes is limited at present.",
+  },
+  "Institutional Strategy Desk": {
+    register: "technical, formal, peer-institutional",
+    vocabulary: "Use: equity concentration, allocation distribution, cross-asset participation, risk-adjusted positioning.",
+    complexity: "Full technical vocabulary acceptable. Peer-to-peer institutional register.",
+    example: "Portfolio exhibits elevated equity concentration relative to diversified allocation characteristics. Cross-asset participation is limited, and risk-adjusted positioning reflects single-asset exposure.",
+  },
+});
+
+function buildPCITranslationPrompt(canonicalConclusion, audience, riskProfile, compositeClass, concentratedAsset) {
+  const contract = PCI_AUDIENCE_TRANSLATION_CONTRACTS[audience] || PCI_AUDIENCE_TRANSLATION_CONTRACTS["IFA Advisory Pitch"];
+  return `You are ADVISIQ DSS — a portfolio diagnostic intelligence system.
+
+A canonical diagnostic conclusion has been deterministically computed for this portfolio.
+Your task is to translate it into the vocabulary and register appropriate for the audience.
+
+CANONICAL CONCLUSION (authoritative — do not change meaning):
+"${canonicalConclusion}"
+
+ASSESSMENT CONTEXT:
+- Composite Assessment: ${compositeClass}
+- Concentrated Asset: ${concentratedAsset || 'N/A'}
+
+AUDIENCE: ${audience}
+RISK PROFILE: ${riskProfile}
+
+TRANSLATION CONTRACT:
+- Register: ${contract.register}
+- Vocabulary: ${contract.vocabulary}
+- Complexity: ${contract.complexity}
+- Example style (reference only, do not copy): ${contract.example}
+
+TRANSLATION RULES (non-negotiable):
+1. Preserve meaning exactly. Do not add, remove, or change any assessment finding.
+2. Translate vocabulary and register only.
+3. Permitted verbs: exhibits, reflects, appears, indicates, shows, is characterised by, may increase sensitivity.
+4. NEVER use: should, increase, decrease, rebalance, may benefit from, would benefit from, better positioned, target allocation, recommended allocation, rather than, instead of.
+5. NEVER include specific percentages or numeric values.
+6. Output: one paragraph, 2-3 sentences maximum.
+
+Respond ONLY with valid JSON — no markdown, no preamble:
+{"diagnosticConclusion": "your translated conclusion here"}`;
+}
+
+async function groqAdapterPCI(canonicalConclusion, audience, riskProfile, compositeClass, concentratedAsset) {
+  if (!LLM_CONFIG.groqKey) throw new Error("GROQ_API_KEY not configured");
+  const prompt = buildPCITranslationPrompt(canonicalConclusion, audience, riskProfile, compositeClass, concentratedAsset);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(LLM_CONFIG.groqUrl, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + LLM_CONFIG.groqKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: LLM_CONFIG.model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 200,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error("Groq PCI HTTP " + res.status);
+    const data = await res.json();
+    const raw = data.choices?.[0]?.message?.content || "";
+    if (!raw) throw new Error("Empty Groq PCI response");
+    return JSON.parse(raw);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+// ── END PCI Audience Translation Layer ──
+
+
 
 
 
@@ -10239,32 +10374,50 @@ app.post("/api/v1/advisory/brief", (req, res) =>
     // Generate narrative (existing v8-compatible path)
     const _narrative = await generateNarrative(audience, riskProfile);
 
-    // PCI FGS screening + diagnostic conclusion resolution
+    // PCI FGS screening + audience translation (Phase 2B — Model C complete)
     let _pciAssessment = null;
     if (_pciResult) {
       let _diagConclusion = _pciResult.canonicalConclusion;
       let _pciSource = 'canonical_fallback';
       let _pciFgsStatus = 'FALLBACK';
-      // Attempt LLM-translated conclusion from narrative raw output
-      try {
-        const _rawNarr = DSSCache.get('narrative:llm') || {};
-        if (_rawNarr.diagnosticConclusion) {
-          const _fgs = pciFGSScreen(_rawNarr.diagnosticConclusion);
-          if (_fgs.action === 'PASS') {
-            _diagConclusion = _rawNarr.diagnosticConclusion;
-            _pciSource = 'groq_translated';
-            _pciFgsStatus = 'PASS';
-          } else if (_fgs.action === 'SANITISE') {
-            const _san = sanitisePCIDiagnostic(_rawNarr.diagnosticConclusion);
-            const _recheck = pciFGSScreen(_san);
-            if (_recheck.passed) {
-              _diagConclusion = _san;
-              _pciSource = 'groq_sanitised';
-              _pciFgsStatus = 'SANITISED';
+      let _fgsViolations = [];
+
+      // Attempt LLM audience translation (Phase 2B)
+      if (!LLMCircuitBreaker.isOpen()) {
+        try {
+          const _translated = await groqAdapterPCI(
+            _pciResult.canonicalConclusion, audience, riskProfile,
+            _pciResult.compositeClass, _pciResult.concentratedAsset
+          );
+          if (_translated && _translated.diagnosticConclusion) {
+            const _fgs = pciFGSScreen(_translated.diagnosticConclusion);
+            if (_fgs.action === 'PASS') {
+              _diagConclusion = _translated.diagnosticConclusion;
+              _pciSource = 'groq_translated';
+              _pciFgsStatus = 'PASS';
+            } else if (_fgs.action === 'SANITISE') {
+              const _san = sanitisePCIDiagnostic(_translated.diagnosticConclusion);
+              const _recheck = pciFGSScreen(_san);
+              if (_recheck.passed) {
+                _diagConclusion = _san;
+                _pciSource = 'groq_sanitised';
+                _pciFgsStatus = 'SANITISED';
+              } else {
+                _fgsViolations = _recheck.violations;
+                logger.warn({ job: 'pci-fgs', audience, violations: _recheck.violations }, 'PCI-FGS: sanitise failed — canonical fallback');
+              }
+            } else {
+              _fgsViolations = _fgs.violations;
+              logger.warn({ job: 'pci-fgs', audience, violations: _fgs.violations }, 'PCI-FGS: FALLBACK triggered');
             }
           }
+        } catch(pciLlmErr) {
+          logger.warn({ job: 'pci-translate', audience, err: pciLlmErr.message }, 'PCI translation failed — canonical fallback');
         }
-      } catch(e) { /* canonical fallback remains */ }
+      } else {
+        logger.info({ job: 'pci-translate', audience }, 'LLM CB open — PCI using canonical fallback');
+      }
+
       _pciAssessment = {
         compositeClass:       _pciResult.compositeClass,
         concentrationClass:   _pciResult.concentrationClass,
@@ -10277,9 +10430,10 @@ app.post("/api/v1/advisory/brief", (req, res) =>
         diagnosticConclusion: _diagConclusion,
         pciNarrativeSource:   _pciSource,
         pciFgsStatus:         _pciFgsStatus,
+        pciFgsViolations:     _fgsViolations,
         pciAudit:             _pciResult.pciAudit,
       };
-      logger.info({ job: 'pci', compositeClass: _pciAssessment.compositeClass, fgsStatus: _pciFgsStatus }, 'PCI assessment complete');
+      logger.info({ job: 'pci', compositeClass: _pciAssessment.compositeClass, fgsStatus: _pciFgsStatus, source: _pciSource, audience }, 'PCI assessment complete');
     }
     
     // degradationStatus
