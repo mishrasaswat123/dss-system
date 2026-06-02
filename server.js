@@ -544,6 +544,67 @@ function pciGenerateLLMContext(pciResult, canonicalConclusion) {
 }
 // ── END PCI Diagnostic Layer ──
 
+// ═══════════════════════════════════════════════════════════════════════
+// PCI — SESSION 4: FGS + API INTEGRATION
+// Authority: PCI_IMPLEMENTATION_SPEC_v1.1 §8, §6.3, §2.4
+// Constitutional: PCI-INV-12, PCI-INV-13, PCI-INV-15
+// ═══════════════════════════════════════════════════════════════════════
+
+const PCI_FGS_PATTERNS = Object.freeze([
+  /\bshould\b/i, /\bought\b/i, /\bmust\b/i,
+  /\brebalance\b/i, /\brebalancing\b/i,
+  /\bincrease\s+(equity|debt|gold)\b/i,
+  /\bdecrease\s+(equity|debt|gold)\b/i,
+  /\breduce\s+(equity|debt|gold)\b/i,
+  /\bmay benefit from\b/i, /\bwould benefit from\b/i,
+  /\bbetter positioned\b/i, /\bmore appropriate\b/i,
+  /\btarget allocation\b/i, /\brecommended allocation\b/i,
+  /\brather than\b/i,
+  /\b\d+%\s+(equity|debt|gold)\b/i,
+]);
+
+const PCI_FALLBACK_TEMPLATES = Object.freeze({
+  CONCENTRATION_ALERT_equity: 'Portfolio exhibits elevated concentration in equity. Current positioning may increase sensitivity to equity market conditions.',
+  CONCENTRATION_ALERT_debt:   'Portfolio exhibits elevated concentration in debt. Current positioning reflects limited participation in equity and gold asset classes.',
+  CONCENTRATION_ALERT_gold:   'Portfolio exhibits elevated concentration in gold. Current positioning reflects limited participation in equity and debt asset classes.',
+  ATTENTION_REQUIRED:         'Portfolio allocation characteristics warrant advisor review relative to the declared risk profile and prevailing market conditions.',
+  REVIEW_WARRANTED:           'Portfolio allocation reflects characteristics that may warrant evaluation in the context of the declared risk profile.',
+  WELL_POSITIONED:            'Portfolio reflects participation across asset classes. Current allocation posture appears broadly aligned with the declared risk profile.',
+});
+
+const PCI_SANITISATIONS = Object.freeze([
+  { find: /may benefit from broader diversification/gi, replace: 'reflects limited participation across asset classes' },
+  { find: /would benefit from/gi,                       replace: 'reflects characteristics that' },
+  { find: /better positioned/gi,                        replace: 'positioned' },
+  { find: /consider rebalancing/gi,                     replace: 'consider evaluating' },
+]);
+
+function pciFGSScreen(text) {
+  const violations = [];
+  for (const p of PCI_FGS_PATTERNS) { if (p.test(text)) violations.push(p.toString()); }
+  return {
+    passed: violations.length === 0,
+    violations,
+    action: violations.length === 0 ? 'PASS' : violations.length === 1 ? 'SANITISE' : 'FALLBACK',
+  };
+}
+
+function sanitisePCIDiagnostic(text) {
+  let result = text;
+  for (const { find, replace } of PCI_SANITISATIONS) { result = result.replace(find, replace); }
+  return result;
+}
+
+function pciGetFallback(compositeClass, concentratedAsset) {
+  if (compositeClass === 'CONCENTRATION_ALERT') {
+    const key = 'CONCENTRATION_ALERT_' + (concentratedAsset || 'equity');
+    return PCI_FALLBACK_TEMPLATES[key] || PCI_FALLBACK_TEMPLATES['CONCENTRATION_ALERT_equity'];
+  }
+  return PCI_FALLBACK_TEMPLATES[compositeClass] || PCI_FALLBACK_TEMPLATES['ATTENTION_REQUIRED'];
+}
+// ── END PCI FGS ──
+
+
 
 
 const PROMPT_VERSION = "v1.0.0";
@@ -10159,9 +10220,68 @@ app.post("/api/v1/advisory/brief", (req, res) =>
         convictionComponents: _cv.convictionComponents, convictionDataQuality: _cv.convictionDataQuality };
     } catch(e) { _convFull = null; }
 
+    // PCI Assessment — deterministic scoring (Session 4)
+    let _pciResult = null;
+    if (typeof equityPct === 'number' && typeof debtPct === 'number' && typeof goldPct === 'number') {
+      try {
+        _pciResult = pciComputeAssessment(equityPct, debtPct, goldPct, audience, riskProfile, _regime);
+        _pciResult.canonicalConclusion = pciDiagnosticCore(
+          _pciResult.concentrationClass, _pciResult.concentratedAsset,
+          _pciResult.diversificationClass, _pciResult.riskAlignmentClass, _pciResult.resilienceClass
+        );
+        _pciResult.pciLLMContext = pciGenerateLLMContext(_pciResult, _pciResult.canonicalConclusion);
+      } catch(pciErr) {
+        logger.warn({ job: 'pci', err: pciErr.message }, 'PCI assessment failed — omitting from response');
+        _pciResult = null;
+      }
+    }
+    
     // Generate narrative (existing v8-compatible path)
     const _narrative = await generateNarrative(audience, riskProfile);
 
+    // PCI FGS screening + diagnostic conclusion resolution
+    let _pciAssessment = null;
+    if (_pciResult) {
+      let _diagConclusion = _pciResult.canonicalConclusion;
+      let _pciSource = 'canonical_fallback';
+      let _pciFgsStatus = 'FALLBACK';
+      // Attempt LLM-translated conclusion from narrative raw output
+      try {
+        const _rawNarr = DSSCache.get('narrative:llm') || {};
+        if (_rawNarr.diagnosticConclusion) {
+          const _fgs = pciFGSScreen(_rawNarr.diagnosticConclusion);
+          if (_fgs.action === 'PASS') {
+            _diagConclusion = _rawNarr.diagnosticConclusion;
+            _pciSource = 'groq_translated';
+            _pciFgsStatus = 'PASS';
+          } else if (_fgs.action === 'SANITISE') {
+            const _san = sanitisePCIDiagnostic(_rawNarr.diagnosticConclusion);
+            const _recheck = pciFGSScreen(_san);
+            if (_recheck.passed) {
+              _diagConclusion = _san;
+              _pciSource = 'groq_sanitised';
+              _pciFgsStatus = 'SANITISED';
+            }
+          }
+        }
+      } catch(e) { /* canonical fallback remains */ }
+      _pciAssessment = {
+        compositeClass:       _pciResult.compositeClass,
+        concentrationClass:   _pciResult.concentrationClass,
+        concentratedAsset:    _pciResult.concentratedAsset,
+        diversificationClass: _pciResult.diversificationClass,
+        riskAlignmentClass:   _pciResult.riskAlignmentClass,
+        assetBalanceClass:    _pciResult.assetBalanceClass,
+        resilienceClass:      _pciResult.resilienceClass,
+        canonicalConclusion:  _pciResult.canonicalConclusion,
+        diagnosticConclusion: _diagConclusion,
+        pciNarrativeSource:   _pciSource,
+        pciFgsStatus:         _pciFgsStatus,
+        pciAudit:             _pciResult.pciAudit,
+      };
+      logger.info({ job: 'pci', compositeClass: _pciAssessment.compositeClass, fgsStatus: _pciFgsStatus }, 'PCI assessment complete');
+    }
+    
     // degradationStatus
     const _degradation = {
       marketIntelligence: _bl.compositeScore ? 'OK' : 'FALLBACK',
@@ -10206,6 +10326,7 @@ app.post("/api/v1/advisory/brief", (req, res) =>
         conviction:         _convFull,
         marketContext: { regime: _regime, durabilityClass: _durClass, durabilityScore: _durScore, confidence: _conf },
         degradationStatus:  _degradation,
+        pciAssessment:      _pciAssessment,  // null when portfolio inputs absent
         // Full observability
         narrativeMeta: {
           ..._narrative.narrativeMeta,
