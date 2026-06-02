@@ -293,6 +293,183 @@ function getAssetSignals(cache) {
 }
 // ── END ASE v1.1 ──
 
+// ═══════════════════════════════════════════════════════════════════════
+// PORTFOLIO CONSTRUCTION INTELLIGENCE (PCI) v1.1 — Session 2: Core Engine
+// Authority: PCI_IMPLEMENTATION_SPEC_v1.1 (FINAL)
+// Constitutional: PCI-INV-1 through PCI-INV-15
+// ═══════════════════════════════════════════════════════════════════════
+
+const AUDIENCE_TIER = Object.freeze({
+  'Retail Investor': 1, 'Conservative Retiree': 1,
+  'IFA Advisory Pitch': 2, 'Wealth Manager Synthesis': 2,
+  'Family Office Risk Brief': 2, 'Private Banker Advisory': 2,
+  'HNI Investor': 2, 'Aggressive Growth Investor': 2,
+  'Advanced Investor Dashboard': 3, 'Institutional Strategy Desk': 3,
+});
+
+const PCI_BANDS = Object.freeze({
+  1: {
+    Conservative: { equity:{lower:10,upper:35,midpoint:22.5}, debt:{lower:50,upper:75,midpoint:62.5}, gold:{lower:5,upper:20,midpoint:12.5} },
+    Moderate:     { equity:{lower:25,upper:50,midpoint:37.5}, debt:{lower:35,upper:60,midpoint:47.5}, gold:{lower:5,upper:20,midpoint:12.5} },
+    Aggressive:   { equity:{lower:40,upper:65,midpoint:52.5}, debt:{lower:20,upper:45,midpoint:32.5}, gold:{lower:5,upper:20,midpoint:12.5} },
+  },
+  2: {
+    Conservative: { equity:{lower:15,upper:40,midpoint:27.5}, debt:{lower:45,upper:70,midpoint:57.5}, gold:{lower:5,upper:20,midpoint:12.5} },
+    Moderate:     { equity:{lower:35,upper:60,midpoint:47.5}, debt:{lower:25,upper:50,midpoint:37.5}, gold:{lower:5,upper:20,midpoint:12.5} },
+    Aggressive:   { equity:{lower:55,upper:80,midpoint:67.5}, debt:{lower:10,upper:35,midpoint:22.5}, gold:{lower:5,upper:20,midpoint:12.5} },
+  },
+  3: {
+    Conservative: { equity:{lower:20,upper:45,midpoint:32.5}, debt:{lower:40,upper:65,midpoint:52.5}, gold:{lower:5,upper:25,midpoint:15.0} },
+    Moderate:     { equity:{lower:40,upper:65,midpoint:52.5}, debt:{lower:20,upper:45,midpoint:32.5}, gold:{lower:5,upper:25,midpoint:15.0} },
+    Aggressive:   { equity:{lower:60,upper:85,midpoint:72.5}, debt:{lower:5, upper:30,midpoint:17.5}, gold:{lower:5,upper:25,midpoint:15.0} },
+  },
+});
+
+const PCI_SEVERITY = Object.freeze({
+  concentration:   { SEVERE_CONCENTRATION:100, ELEVATED_CONCENTRATION:70, MODERATE_CONCENTRATION:40, NORMAL_CONCENTRATION:0 },
+  diversification: { UNDIVERSIFIED:100, MINIMALLY_DIVERSIFIED:70, PARTIALLY_DIVERSIFIED:30, FULLY_DIVERSIFIED:0 },
+  riskAlignment:   { SIGNIFICANTLY_ABOVE_PROFILE:100, SIGNIFICANTLY_BELOW_PROFILE:90, ABOVE_PROFILE:60, BELOW_PROFILE:50, WITHIN_PROFILE:0 },
+  assetBalance:    { EXTREME_IMBALANCE:100, SIGNIFICANTLY_IMBALANCED:70, MODERATELY_IMBALANCED:35, WELL_BALANCED:0 },
+  resilience:      { LIMITED_RESILIENCE:100, MODERATE_RESILIENCE:40, HIGH_RESILIENCE:0 },
+});
+
+const PCI_WEIGHTS = Object.freeze({ concentration:0.30, diversification:0.25, riskAlignment:0.20, assetBalance:0.15, resilience:0.10 });
+
+function pciGetContractBand(audience, riskProfile) {
+  const tier = AUDIENCE_TIER[audience] || 2;
+  const band = PCI_BANDS[tier] && PCI_BANDS[tier][riskProfile];
+  return band || PCI_BANDS[2].Moderate;
+}
+
+function pciAssessConcentration(e, d, g) {
+  const maxAlloc = Math.max(e, d, g);
+  const concentratedAsset = maxAlloc === e ? 'equity' : maxAlloc === d ? 'debt' : 'gold';
+  const concentrationClass =
+    maxAlloc >= 90 ? 'SEVERE_CONCENTRATION' :
+    maxAlloc >= 70 ? 'ELEVATED_CONCENTRATION' :
+    maxAlloc >= 50 ? 'MODERATE_CONCENTRATION' : 'NORMAL_CONCENTRATION';
+  return { concentrationClass, concentratedAsset, maxAlloc };
+}
+
+function pciAssessDiversification(e, d, g) {
+  const T = 10;
+  const parts = [e, d, g].filter(function(v){ return v >= T; }).length;
+  const allPresent = e > 0 && d > 0 && g > 0;
+  const diversificationClass =
+    parts === 3 ? 'FULLY_DIVERSIFIED' :
+    parts === 2 ? 'PARTIALLY_DIVERSIFIED' :
+    (parts === 1 && allPresent) ? 'MINIMALLY_DIVERSIFIED' : 'UNDIVERSIFIED';
+  return { diversificationClass, participatingClasses: parts };
+}
+
+function pciAssessRiskAlignment(equityPct, band) {
+  const riskAlignmentClass =
+    equityPct > band.equity.upper + 20 ? 'SIGNIFICANTLY_ABOVE_PROFILE' :
+    equityPct > band.equity.upper       ? 'ABOVE_PROFILE' :
+    equityPct < band.equity.lower - 20  ? 'SIGNIFICANTLY_BELOW_PROFILE' :
+    equityPct < band.equity.lower       ? 'BELOW_PROFILE' : 'WITHIN_PROFILE';
+  return { riskAlignmentClass, equityDeviation: Math.round((equityPct - band.equity.midpoint) * 10) / 10 };
+}
+
+function pciAssessAssetBalance(e, d, g, band) {
+  if (e === 100 || d === 100 || g === 100) return { assetBalanceClass: 'EXTREME_IMBALANCE', outOfBandCount: 3 };
+  const oob = [
+    e < band.equity.lower || e > band.equity.upper,
+    d < band.debt.lower   || d > band.debt.upper,
+    g < band.gold.lower   || g > band.gold.upper,
+  ].filter(Boolean).length;
+  const assetBalanceClass = oob === 0 ? 'WELL_BALANCED' : oob === 1 ? 'MODERATELY_IMBALANCED' : 'SIGNIFICANTLY_IMBALANCED';
+  return { assetBalanceClass, outOfBandCount: oob };
+}
+
+function pciAssessResilience(e, d, g, regime, aseSigs) {
+  const align = REGIME_ASSET_ALIGNMENT[regime] || REGIME_ASSET_ALIGNMENT.NEUTRAL;
+  const eSig = aseNormalise(aseSigs.equity);
+  const dSig = aseNormalise(aseSigs.debt);
+  const gSig = aseNormalise(aseSigs.gold);
+  const eC = aseContrib(e, eSig, align.equity);
+  const dC = aseContrib(d, dSig, align.debt);
+  const gC = aseContrib(g, gSig, align.gold);
+  const raw = eC + dC + gC;
+  const resilienceScore = Math.round(Math.min(100, Math.max(0, (raw + 1.0) * 50)));
+  const resilienceClass = resilienceScore >= 70 ? 'HIGH_RESILIENCE' : resilienceScore >= 40 ? 'MODERATE_RESILIENCE' : 'LIMITED_RESILIENCE';
+  return { resilienceClass, resilienceScore, contributions: { equity: eC, debt: dC, gold: gC }, signals: { equity: eSig, debt: dSig, gold: gSig }, regimeAlignment: align };
+}
+
+function pciComputeComposite(cc, dc, rac, abc, rc) {
+  const score =
+    (PCI_SEVERITY.concentration[cc]   * PCI_WEIGHTS.concentration) +
+    (PCI_SEVERITY.diversification[dc] * PCI_WEIGHTS.diversification) +
+    (PCI_SEVERITY.riskAlignment[rac]  * PCI_WEIGHTS.riskAlignment) +
+    (PCI_SEVERITY.assetBalance[abc]   * PCI_WEIGHTS.assetBalance) +
+    (PCI_SEVERITY.resilience[rc]      * PCI_WEIGHTS.resilience);
+  const overrideTriggered = cc === 'SEVERE_CONCENTRATION' || dc === 'UNDIVERSIFIED';
+  const compositeClass = (overrideTriggered || score >= 70) ? 'CONCENTRATION_ALERT' :
+    score >= 41 ? 'ATTENTION_REQUIRED' :
+    score >= 16 ? 'REVIEW_WARRANTED' : 'WELL_POSITIONED';
+  return {
+    compositeScore: Math.round(score * 10) / 10,
+    compositeClass,
+    overrideApplied: overrideTriggered,
+    overrideReason: overrideTriggered
+      ? (cc === 'SEVERE_CONCENTRATION' ? 'P2:SEVERE_CONCENTRATION' : 'P3:UNDIVERSIFIED')
+      : null,
+  };
+}
+
+function pciComputeAssessment(equityPct, debtPct, goldPct, audience, riskProfile, regime) {
+  const aseSigs  = getAssetSignals(DSSCache);
+  const band     = pciGetContractBand(audience, riskProfile);
+  const conc     = pciAssessConcentration(equityPct, debtPct, goldPct);
+  const div      = pciAssessDiversification(equityPct, debtPct, goldPct);
+  const align    = pciAssessRiskAlignment(equityPct, band);
+  const balance  = pciAssessAssetBalance(equityPct, debtPct, goldPct, band);
+  const resil    = pciAssessResilience(equityPct, debtPct, goldPct, regime, aseSigs);
+  const composite = pciComputeComposite(
+    conc.concentrationClass, div.diversificationClass,
+    align.riskAlignmentClass, balance.assetBalanceClass, resil.resilienceClass
+  );
+  return {
+    compositeClass:       composite.compositeClass,
+    compositeScore:       composite.compositeScore,
+    overrideApplied:      composite.overrideApplied,
+    overrideReason:       composite.overrideReason,
+    concentrationClass:   conc.concentrationClass,
+    concentratedAsset:    conc.concentratedAsset,
+    diversificationClass: div.diversificationClass,
+    riskAlignmentClass:   align.riskAlignmentClass,
+    assetBalanceClass:    balance.assetBalanceClass,
+    resilienceClass:      resil.resilienceClass,
+    pciAudit: {
+      inputs: { equityPct, debtPct, goldPct, riskProfile, audience, tier: AUDIENCE_TIER[audience] || 2, regime },
+      contractRef: band,
+      assessmentScores: {
+        concentrationSeverity:   PCI_SEVERITY.concentration[conc.concentrationClass],
+        diversificationSeverity: PCI_SEVERITY.diversification[div.diversificationClass],
+        riskAlignmentSeverity:   PCI_SEVERITY.riskAlignment[align.riskAlignmentClass],
+        assetBalanceSeverity:    PCI_SEVERITY.assetBalance[balance.assetBalanceClass],
+        resilienceSeverity:      PCI_SEVERITY.resilience[resil.resilienceClass],
+        resilienceScore:         resil.resilienceScore,
+        resilienceContributions: resil.contributions,
+        aseSignals:              resil.signals,
+        regimeAlignment:         resil.regimeAlignment,
+        equityDeviation:         align.equityDeviation,
+        outOfBandCount:          balance.outOfBandCount,
+        participatingClasses:    div.participatingClasses,
+        maxAlloc:                conc.maxAlloc,
+      },
+      compositeComputation: {
+        weightedScore:   composite.compositeScore,
+        overrideApplied: composite.overrideApplied,
+        overrideReason:  composite.overrideReason,
+      },
+      aseAudit: DSSCache.get('asset:signals') || null,
+    },
+  };
+}
+// ── END PCI Core Engine ──
+
+
 const PROMPT_VERSION = "v1.0.0";
 
 // ══════════════════════════════════════════════════════════════════
