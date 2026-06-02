@@ -469,6 +469,82 @@ function pciComputeAssessment(equityPct, debtPct, goldPct, audience, riskProfile
 }
 // ── END PCI Core Engine ──
 
+// ═══════════════════════════════════════════════════════════════════════
+// PCI — SESSION 3: DIAGNOSTIC LAYER (Model C)
+// Authority: PCI_IMPLEMENTATION_SPEC_v1.1 §6
+// Constitutional: PCI-INV-14 — LLM receives named classes + canonical only
+// ═══════════════════════════════════════════════════════════════════════
+
+const CONCENTRATION_DESCRIPTORS = Object.freeze({
+  SEVERE_CONCENTRATION:   'complete concentration',
+  ELEVATED_CONCENTRATION: 'elevated concentration',
+  MODERATE_CONCENTRATION: 'moderate concentration',
+  NORMAL_CONCENTRATION:   'balanced participation',
+});
+
+const DIVERSIFICATION_DESCRIPTORS = Object.freeze({
+  UNDIVERSIFIED:          'Current positioning reflects no participation in other asset classes.',
+  MINIMALLY_DIVERSIFIED:  'Current positioning reflects limited participation across other asset classes.',
+  PARTIALLY_DIVERSIFIED:  'Current positioning reflects partial participation across asset classes.',
+  FULLY_DIVERSIFIED:      'Current positioning reflects meaningful participation across all three asset classes.',
+});
+
+const ALIGNMENT_DESCRIPTORS = Object.freeze({
+  SIGNIFICANTLY_ABOVE_PROFILE: 'appears significantly above',
+  ABOVE_PROFILE:               'appears above',
+  BELOW_PROFILE:               'appears below',
+  SIGNIFICANTLY_BELOW_PROFILE: 'appears significantly below',
+});
+
+const RESILIENCE_DESCRIPTORS = Object.freeze({
+  HIGH_RESILIENCE:     'are well-suited to prevailing conditions.',
+  MODERATE_RESILIENCE: 'reflect moderate alignment with prevailing conditions.',
+  LIMITED_RESILIENCE:  'may increase sensitivity to current market conditions.',
+});
+
+function pciDiagnosticCore(concentrationClass, concentratedAsset, diversificationClass,
+                            riskAlignmentClass, resilienceClass) {
+  const concDesc = CONCENTRATION_DESCRIPTORS[concentrationClass] || 'reflects varied positioning';
+  const divDesc  = DIVERSIFICATION_DESCRIPTORS[diversificationClass] || '';
+  const resDesc  = RESILIENCE_DESCRIPTORS[resilienceClass] || '';
+
+  // Sentence 1: Concentration + Diversification
+  const s1 = concentrationClass === 'NORMAL_CONCENTRATION'
+    ? ('Portfolio reflects ' + concDesc + ' across asset classes. ' + divDesc)
+    : ('Portfolio exhibits ' + concDesc + ' in ' + concentratedAsset + '. ' + divDesc);
+
+  // Sentence 2: Risk Alignment (only when outside profile)
+  const alignDesc = ALIGNMENT_DESCRIPTORS[riskAlignmentClass];
+  const s2 = alignDesc
+    ? (' Allocation posture ' + alignDesc + ' the risk level associated with the declared profile.')
+    : '';
+
+  // Sentence 3: Resilience context
+  const assetLabel = (concentratedAsset && concentratedAsset !== 'none')
+    ? (concentratedAsset.charAt(0).toUpperCase() + concentratedAsset.slice(1))
+    : 'Current';
+  const s3 = ' ' + assetLabel + ' allocation characteristics ' + resDesc;
+
+  return (s1 + s2 + s3).replace(/\s+/g, ' ').trim();
+}
+
+function pciGenerateLLMContext(pciResult, canonicalConclusion) {
+  // PCI-INV-14: LLM receives ONLY named classes and canonical conclusion
+  // NEVER: raw allocation %, band values, numeric scores, weightages, thresholds
+  return {
+    compositeClass:       pciResult.compositeClass,
+    concentrationClass:   pciResult.concentrationClass,
+    concentratedAsset:    pciResult.concentratedAsset,
+    diversificationClass: pciResult.diversificationClass,
+    riskAlignmentClass:   pciResult.riskAlignmentClass,
+    assetBalanceClass:    pciResult.assetBalanceClass,
+    resilienceClass:      pciResult.resilienceClass,
+    canonicalConclusion:  canonicalConclusion,
+  };
+}
+// ── END PCI Diagnostic Layer ──
+
+
 
 const PROMPT_VERSION = "v1.0.0";
 
