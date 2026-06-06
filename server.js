@@ -2088,6 +2088,8 @@ const ERROR_ENUM = Object.freeze({
                 db.run(`CREATE TABLE IF NOT EXISTS comm_visits (id INTEGER PRIMARY KEY AUTOINCREMENT, ip_hash TEXT NOT NULL, visit_date TEXT NOT NULL, visit_hour INTEGER NOT NULL, is_revisit INTEGER DEFAULT 0, source TEXT DEFAULT 'DIRECT', page TEXT DEFAULT 'HOME', ua_class TEXT DEFAULT 'UNKNOWN', logged_at INTEGER NOT NULL)`);
                 db.run('CREATE INDEX IF NOT EXISTS idx_visits_date ON comm_visits(visit_date)');
                 db.run('CREATE INDEX IF NOT EXISTS idx_visits_hash ON comm_visits(ip_hash)');
+                db.run(`CREATE TABLE IF NOT EXISTS visitor_classification (id INTEGER PRIMARY KEY AUTOINCREMENT, visitor_id TEXT, ip_hash TEXT, practice_type TEXT NOT NULL, use_case TEXT NOT NULL, captured_at INTEGER NOT NULL)`);
+                db.run('CREATE INDEX IF NOT EXISTS idx_vc_visitor ON visitor_classification(visitor_id)');
                 db.run(`CREATE TABLE IF NOT EXISTS comm_ops_events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, priority TEXT DEFAULT 'MORNING', title TEXT NOT NULL, body TEXT NOT NULL, prospect_ref TEXT, triggered_at INTEGER NOT NULL, delivered INTEGER DEFAULT 0, dismissed INTEGER DEFAULT 0)`);
                 db.run('CREATE INDEX IF NOT EXISTS idx_ops_events_pri ON comm_ops_events(priority, delivered)');
                 db.run(`CREATE TABLE IF NOT EXISTS comm_prospects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT, organisation TEXT, linkedin_url TEXT UNIQUE, score INTEGER DEFAULT 2, source_string TEXT DEFAULT 'S1', last_post_observed TEXT, personalisation_note TEXT, status TEXT DEFAULT 'SOURCED', interaction_count INTEGER DEFAULT 0, last_interaction_at INTEGER, added_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
@@ -11549,6 +11551,46 @@ app.get("/api/v1/ops/prospects/queue",opsAuth,(req,res)=>{
     if(err)return res.status(500).json({status:'ERROR',error:err.message});
     var all=(rows||[]).map(function(p){return{id:p.id,name:p.name,role:p.role,organisation:p.organisation,linkedin_url:p.linkedin_url,score:p.score,status:p.status,personalisationNote:p.personalisation_note,nextAction:p.nextAction,nextDue:p.nextDue,forceFeed:p.forceFeed||0,isOverdue:p.nextDue&&p.nextDue<now?1:0,prospectType:p.prospect_type||"LINKEDIN",whatsappNumber:p.whatsapp_number||null,latestWaContext:p.latest_wa_context||null,waReplyOverride:p.wa_reply_override||null,snoozedUntil:p.snoozed_until||null,latestContext:p.latest_context||p.latest_wa_context||null,replyOverride:p.reply_override||p.wa_reply_override||null};});var DAY=86400000;var WA_STATUSES=["WHATSAPP_NEW","CONVERSATION_ACTIVE","DEMO_REQUESTED","DEMO_SCHEDULED","DEMO_DONE","BETA_INVITED"];var q=all.filter(function(p){return p.forceFeed===1||(p.prospectType==="WHATSAPP"&&WA_STATUSES.indexOf(p.status)>=0)||!p.nextDue||p.nextDue<=(now+DAY);});
     res.json({status:'OK',timestamp:now,data:{queue:q,count:q.length}});
+  });
+});
+// ── FC-005: Public visitor classification (no auth — public endpoint) ──
+app.post("/api/v1/visitor/classify",(req,res)=>{
+  const b=req.body||{};
+  const PRACTICE=["IFA/MFD","Wealth Manager","RIA","PMS/AIF","Private Banker","Institutional/Research","Other"];
+  const USECASE=["Client conversation preparation","Market view validation","Research/analysis","Peer recommendation","Evaluating tools","Other"];
+  if(!b.practice_type||PRACTICE.indexOf(b.practice_type)<0)return res.status(400).json({status:"ERROR",error:"Valid practice_type required"});
+  if(!b.use_case||USECASE.indexOf(b.use_case)<0)return res.status(400).json({status:"ERROR",error:"Valid use_case required"});
+  const vid=req.headers["x-visitor-id"]||null;
+  const ip=(req.headers["x-forwarded-for"]||"").split(",")[0].trim()||req.socket.remoteAddress||"unknown";
+  const salt2=crypto.createHash("sha256").update(ip+new Date().toISOString().slice(0,10)).digest("hex").slice(0,8);
+  const h=crypto.createHash("sha256").update(ip+salt2).digest("hex").slice(0,32);
+  const nowMs=Date.now();
+  // One classification per visitor — check by visitor_id or ip_hash
+  const dedupeField=vid?"visitor_id":"ip_hash";
+  const dedupeVal=vid||h;
+  db.get("SELECT id FROM visitor_classification WHERE "+dedupeField+"=?",[dedupeVal],(err,row)=>{
+    if(row)return res.json({status:"ALREADY_CLASSIFIED"});
+    db.run("INSERT INTO visitor_classification (visitor_id,ip_hash,practice_type,use_case,captured_at) VALUES (?,?,?,?,?)",[vid,h,b.practice_type,b.use_case,nowMs],function(e){
+      if(e)return res.status(500).json({status:"ERROR",error:e.message});
+      res.json({status:"OK",timestamp:nowMs});
+    });
+  });
+});
+// ── FC-005: OPS Discovery Intelligence ──
+app.get("/api/v1/ops/discovery",opsAuth,(req,res)=>{
+  db.all("SELECT practice_type, use_case, COUNT(*) as cnt FROM visitor_classification GROUP BY practice_type, use_case",[],function(err,rows){
+    if(err)return res.status(500).json({status:"ERROR",error:err.message});
+    var ptMap={},ucMap={},total=0;
+    (rows||[]).forEach(function(r){
+      total+=r.cnt;
+      ptMap[r.practice_type]=(ptMap[r.practice_type]||0)+r.cnt;
+      ucMap[r.use_case]=(ucMap[r.use_case]||0)+r.cnt;
+    });
+    var ptDist=Object.entries(ptMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return{label:e[0],count:e[1],pct:total>0?Math.round(e[1]/total*100):0};});
+    var ucDist=Object.entries(ucMap).sort(function(a,b){return b[1]-a[1];}).map(function(e){return{label:e[0],count:e[1],pct:total>0?Math.round(e[1]/total*100):0};});
+    db.get("SELECT COUNT(*) as c FROM visitor_classification",[],function(e2,r2){
+      res.json({status:"OK",timestamp:Date.now(),data:{total:total,practiceDistribution:ptDist,useCaseDistribution:ucDist}});
+    });
   });
 });
 app.get("/api/v1/ops/traffic",opsAuth,(req,res)=>{

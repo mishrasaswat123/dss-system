@@ -1178,13 +1178,38 @@ function loadPipeline(){
   });
 }
 
+function loadDiscovery(){
+  fx('/api/v1/ops/discovery').then(function(data){renderDiscovery(data);}).catch(function(){
+    var el=document.getElementById('discovery-section');if(el)el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--rd)">Discovery load failed</div>';
+  });
+}
+function renderDiscovery(data){
+  var el=document.getElementById('discovery-section');if(!el)return;
+  var d=data.data||{};var total=d.total||0;
+  if(!total){el.innerHTML='<div style="font-family:var(--mono);font-size:11px;color:var(--t3);padding:8px 0">No classifications yet — prompt is live on advisiq.in</div>';return;}
+  function mkRows(items){
+    return (items||[]).map(function(item){
+      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--b1)">'
+        +'<div style="font-family:var(--mono);font-size:11px;color:var(--tx)">'+item.label+'</div>'
+        +'<div style="font-family:var(--mono);font-size:11px;color:var(--ac);font-weight:700">'+item.pct+'% <span style="color:var(--t3);font-weight:400">('+item.count+')</span></div>'
+        +'</div>';
+    }).join('');
+  }
+  var html='<div style="font-family:var(--mono);font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px">'+total+' classification'+(total===1?'':'s')+' captured</div>';
+  html+='<div style="font-family:var(--mono);font-size:10px;color:var(--ac);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px">Practice Distribution</div>';
+  html+=mkRows(d.practiceDistribution);
+  html+='<div style="font-family:var(--mono);font-size:10px;color:var(--ac);text-transform:uppercase;letter-spacing:.1em;margin:14px 0 8px">Use Case Distribution</div>';
+  html+=mkRows(d.useCaseDistribution);
+  el.innerHTML=html;
+}
 function loadTraffic(){
+  loadDiscovery();
   fx('/api/v1/ops/traffic').then(data=>{renderTraffic(data);}).catch(()=>{document.getElementById('pane-traffic').innerHTML=`<div class="empty"><div class="empty-ico">↗</div><div class="empty-h">Load failed</div></div>`;});
 }
 function renderTraffic(data){
   const el=document.getElementById('pane-traffic');
   const d=data.data||{};const tu=d.totalUnique||0,tr=d.totalRevisits||0,sm=d.sources||{};const tot=Math.max(tu,1);
-  let html=`<div class="sec">Traffic Intelligence <span class="sec-ct">7d</span></div>
+  let html=`<div class="sec">🧬 Discovery Intelligence</div><div style="margin:0 10px 14px"><div id="discovery-section"><div style="font-family:var(--mono);font-size:11px;color:var(--t3)">Loading...</div></div></div><div class="sec">Traffic Intelligence <span class="sec-ct">7d</span></div>
   <div class="t-card">
     <div class="t-grid">
       <div class="t-stat"><div class="t-stat-n">${tu}</div><div class="t-stat-l">Unique</div></div>
